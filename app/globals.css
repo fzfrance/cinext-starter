@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  background: #060505;
+  overscroll-behavior-y: none;
+}
+
+/* Hide scrollbars on the phone-frame scroll containers, matching the
+   prototype's `scrollbarWidth: none` inline style pattern. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Search overlay open/close — a horizontal push/pop instead of an instant
+   swap, driven by the native View Transitions API (see
+   lib/viewTransition.js, which toggles the 'vt-back' class below).
+   Opening (forward, the default here): the current screen collapses out
+   to the left while the search overlay slides in from the right. Closing
+   (back — 'vt-back' on <html>): reversed, the search overlay slides out
+   to the right while the previous screen slides back in from the left,
+   like a curtain opening left-to-right. These override the View
+   Transitions API's own default cross-fade animation on the same
+   pseudo-elements. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 360ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+::view-transition-old(root) {
+  animation-name: cinext-exit-left;
+}
+::view-transition-new(root) {
+  animation-name: cinext-enter-right;
+}
+
+html.vt-back::view-transition-old(root) {
+  animation-name: cinext-exit-right;
+}
+html.vt-back::view-transition-new(root) {
+  animation-name: cinext-enter-left;
+}
+
+@keyframes cinext-exit-left {
+  to { transform: translateX(-100%); }
+}
+@keyframes cinext-enter-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes cinext-exit-right {
+  to { transform: translateX(100%); }
+}
+@keyframes cinext-enter-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+/* DVD case open overlay — the "tap the disc" hint fading in once the
+   case has finished opening (components/DVDOpenOverlay.jsx). */
+@keyframes cinext-fade-in {
+  to { opacity: 1; }
+}
