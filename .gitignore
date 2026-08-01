@@ -10,6 +10,7 @@
 
 # env
 .env*.local
+.env*.save
 
 # misc
 .DS_Store
