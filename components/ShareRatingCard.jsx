@@ -311,12 +311,37 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
 
   const flashToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 1800); };
 
+  // Vercel's image optimizer (/_next/image, which PosterArt/the title logo
+  // route through) is cold-started per unique image — the first request for
+  // a given poster/backdrop can take several real seconds, not the
+  // near-instant response local dev always has. Without this, toPng below
+  // could walk the DOM and capture the artwork's <img> mid-load, baking a
+  // permanently blank/gradient-only card into the exported PNG — the "no
+  // artwork" bug reported from the live domain. Waits for every <img>
+  // inside the card to actually finish decoding (or its own onerror, or an
+  // 8s safety timeout so one stuck image can't hang the export forever)
+  // before capturing.
+  const waitForImages = async (root) => {
+    const imgs = [...root.querySelectorAll("img")];
+    await Promise.all(
+      imgs.map((img) => {
+        if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+        return new Promise((resolve) => {
+          const done = () => { img.removeEventListener("load", done); img.removeEventListener("error", done); resolve(); };
+          img.addEventListener("load", done);
+          img.addEventListener("error", done);
+          setTimeout(done, 8000);
+        });
+      })
+    );
+  };
+
   const renderCardPng = async () => {
     const { toPng } = await import("html-to-image");
-    // Waiting for fonts (and giving image decode a moment) before
-    // capturing — the previous version didn't, which could export a
-    // frame with a system-font fallback or a not-quite-loaded image.
+    // Waiting for fonts before capturing — without this, the export could
+    // grab a frame with a system-font fallback instead of the real one.
     if (document.fonts?.ready) await document.fonts.ready;
+    await waitForImages(cardRef.current);
     return toPng(cardRef.current, { width: EXPORT_W, height: EXPORT_H, pixelRatio: 1, backgroundColor: "#000" });
   };
 
@@ -737,18 +762,13 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
           <span style={{ fontSize: 14, fontWeight: 700, color: "#fff", letterSpacing: "0.01em" }}>Edit</span>
         </button>
 
-        {/* Save Image / Share — auto-width (not flex-1/forced-equal) so
-            "Save Image"'s longer label doesn't cramp either button; a
-            consistent min-height/padding/gap system instead, per
-            explicit "do not force both buttons to the same width if
-            that makes one look cramped." */}
-        <div className="flex items-center justify-center" style={{ gap: 12, marginTop: 20 }}>
-          <button onClick={handleSaveImage} disabled={busy != null} className="flex items-center justify-center rounded-full active:scale-95 transition" style={{ minHeight: 64, paddingInline: 24, gap: 12, whiteSpace: "nowrap", background: "#fff", opacity: busy ? 0.7 : 1 }}>
-            <Icon name="image" size={15} color="#111" />
-            <span style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>{busy === "save" ? "Saving…" : "Save Image"}</span>
-          </button>
-          {/* paddingInline 24 -> 26 (~+8%, within an explicit 5-10% ask) —
-              stretches the pill itself a bit wider, not just its content. */}
+        {/* Share — the only export action now (Save Image removed per
+            explicit request: its direct-download path was the one most
+            exposed to the artwork-not-loaded-yet export bug renderCardPng
+            now guards against, and Share alone covers the same "get this
+            card out of the app" need). Centered, same sizing the pair
+            used to share. */}
+        <div className="flex items-center justify-center" style={{ marginTop: 20 }}>
           <button onClick={handleNativeShare} disabled={busy != null} className="flex items-center justify-center rounded-full active:scale-95 transition" style={{ minHeight: 64, paddingInline: 26, gap: 12, whiteSpace: "nowrap", background: `${accent}14`, border: `1.5px solid ${accent}`, boxShadow: `0 0 20px ${accent}22`, opacity: busy ? 0.7 : 1 }}>
             <Icon name="share" size={15} color={accent} />
             <span style={{ fontSize: 14, fontWeight: 700, color: accent }}>{busy === "native" ? "Sharing…" : "Share"}</span>
@@ -758,7 +778,7 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
         {/* Copy Link removed per explicit request — Back now sits at the
             same distance below the action row that Copy Link used to
             (marginTop 18, was 4 relative to Copy Link), so it doesn't
-            read as cramped directly under Save Image/Share. */}
+            read as cramped directly under Share. */}
         <button onClick={onClose} className="w-full flex items-center justify-center active:scale-95 transition" style={{ marginTop: 18, padding: 8 }}>
           <span style={{ fontSize: 12.5, fontWeight: 500, color: "rgba(255,255,255,0.32)" }}>Back</span>
         </button>

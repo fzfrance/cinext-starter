@@ -51,6 +51,7 @@ export default function LibraryClient() {
   const readableLanguages = useReadableLanguages();
   const [libraryFilter, setLibraryFilter] = useState("all");
   const [library, setLibrary] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [genreMenuOpen, setGenreMenuOpen] = useState(false);
@@ -79,10 +80,11 @@ export default function LibraryClient() {
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
+    setLoading(true);
     (async () => {
       const byShow = await getUserShows(user.id);
       const ids = Object.keys(byShow).map(Number);
-      if (ids.length === 0) { if (!cancelled) setLibrary([]); return; }
+      if (ids.length === 0) { if (!cancelled) { setLibrary([]); setLoading(false); } return; }
 
       const resolvableIds = ids.filter((id) => byShow[id].status !== "paused" && byShow[id].status !== "drop");
       const summary = await getShowWatchSummary(user.id, resolvableIds);
@@ -117,7 +119,8 @@ export default function LibraryClient() {
         // its original-language title, same as Explore's own search does.
         return { id: result.id, title: resolveTitle(result, readableLanguages), englishTitle: result.title, posterPath: result.posterPath, genre: result.genre, ...byShow[id], status: resolvedStatus, lastWatchedAt: summary[id]?.lastWatchedAt ?? null };
       }).filter(Boolean));
-    })().catch(console.error);
+      setLoading(false);
+    })().catch((err) => { console.error(err); if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [user, readableLanguages, libraryRefreshToken]);
 
@@ -251,18 +254,24 @@ export default function LibraryClient() {
         })}
       </div>
 
-      <PosterGrid className="px-6 mt-4" columns={3}>
-        {sortedLibrary.map((s) => (
-          <PosterCard key={s.id} show={s} href={`/show/${s.id}`} width="100%" titlePlacement="overlay" favorite={isFavorite(s.id)} onToggleFavorite={() => toggleFavorite(s.id, "ProfileLibrary:grid")} onLongPress={(show, rect) => setLongPress({ show, rect })} />
-        ))}
-      </PosterGrid>
+      {loading ? (
+        <div style={{ padding: "40px 24px", textAlign: "center", fontSize: 13, color: t.textDim }}>Loading…</div>
+      ) : (
+        <>
+          <PosterGrid className="px-6 mt-4" columns={3}>
+            {sortedLibrary.map((s) => (
+              <PosterCard key={s.id} show={s} href={`/show/${s.id}`} width="100%" titlePlacement="overlay" favorite={isFavorite(s.id)} onToggleFavorite={() => toggleFavorite(s.id, "ProfileLibrary:grid")} onLongPress={(show, rect) => setLongPress({ show, rect })} />
+            ))}
+          </PosterGrid>
 
-      {filteredLibrary.length === 0 && (
-        <div style={{ padding: "40px 24px", textAlign: "center", fontSize: 13, color: t.textDim }}>
-          {trimmedQuery || genreFilter
-            ? "No shows match your search/filter."
-            : libraryFilter === "all" ? "Nothing in your library yet." : "Nothing here yet."}
-        </div>
+          {filteredLibrary.length === 0 && (
+            <div style={{ padding: "40px 24px", textAlign: "center", fontSize: 13, color: t.textDim }}>
+              {trimmedQuery || genreFilter
+                ? "No shows match your search/filter."
+                : libraryFilter === "all" ? "Nothing in your library yet." : "Nothing here yet."}
+            </div>
+          )}
+        </>
       )}
 
       <div style={{ height: 30 }} />

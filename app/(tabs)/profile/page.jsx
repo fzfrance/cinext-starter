@@ -69,9 +69,10 @@ function AtmosBackdrop({ imageUrl }) {
 export default function Page() {
   const router = useRouter();
   const { user, loading } = useAuth();
-  const { isFavorite, toggleFavorite } = useFavorites();
+  const { isFavorite, toggleFavorite, loading: favoritesCtxLoading } = useFavorites();
   const readableLanguages = useReadableLanguages();
   const [library, setLibrary] = useState([]);
+  const [libraryLoading, setLibraryLoading] = useState(true);
   const [longPress, setLongPress] = useState(null);
   const [libraryRefreshToken, setLibraryRefreshToken] = useState(0);
   const [collections, setCollections] = useState([]);
@@ -129,6 +130,7 @@ export default function Page() {
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
+    setLibraryLoading(true);
     (async () => {
       // repairContradictoryStatuses is intentionally NOT called here — see
       // app/(tabs)/home/page.jsx's identical note. Status is already
@@ -137,7 +139,7 @@ export default function Page() {
       // page-load effect must never write to user_shows.
       const byShow = await getUserShows(user.id);
       const ids = Object.keys(byShow).map(Number);
-      if (ids.length === 0) { if (!cancelled) setLibrary([]); return; }
+      if (ids.length === 0) { if (!cancelled) { setLibrary([]); setLibraryLoading(false); } return; }
 
       // Paused/dropped are exempt — resolveShowStatus returns those
       // unconditionally, so there's no need to pay for their progress data.
@@ -172,7 +174,8 @@ export default function Page() {
         // reads `s.status` and must see the resolved value, not the stored one.
         return { id: result.id, title: resolveTitle(result, readableLanguages), posterPath: result.posterPath, genre: result.genre, ...byShow[id], status: resolvedStatus };
       }).filter(Boolean));
-    })().catch(console.error);
+      setLibraryLoading(false);
+    })().catch((err) => { console.error(err); if (!cancelled) setLibraryLoading(false); });
     return () => { cancelled = true; };
   }, [user, libraryRefreshToken]);
 
@@ -237,6 +240,13 @@ export default function Page() {
   // (Explore, Collections, the dedicated Favorites screen) is reflected
   // here immediately without this page needing its own refetch.
   const favorites = library.filter((s) => isFavorite(s.id));
+  // This row depends on TWO independent fetches resolving — this page's
+  // own (heavier, status-resolving) library load and favorites-context's
+  // own separate getUserShows call — so it was the one section that stayed
+  // visibly empty noticeably longer than My Ratings/Collections (each just
+  // their own single fetch) before popping in. A real loading placeholder
+  // instead of silently rendering zero cards while waiting on both.
+  const favoritesRowLoading = libraryLoading || favoritesCtxLoading;
 
   return (
     <>
@@ -315,13 +325,19 @@ export default function Page() {
           <Link href="/profile/favorites"><Icon name="chevronRight" size={18} color={t.textDim} /></Link>
         </div>
         <div className="flex gap-2.5 overflow-x-auto px-6" style={{ scrollbarWidth: "none" }}>
-          {/* Same heart badge as the Library grid below — every card here
-              is already a favorite by definition, so it's always filled,
-              but still shown for consistency and to let it be unfavorited
-              right from this row. */}
-          {favorites.slice(0, 6).map((s) => (
-            <PosterCard key={s.id} show={s} href={`/show/${s.id}`} width={104} titlePlacement="overlay" favorite={isFavorite(s.id)} onToggleFavorite={() => toggleFavorite(s.id, "Profile:favoritesRow")} onLongPress={(show, rect) => setLongPress({ show, rect })} />
-          ))}
+          {favoritesRowLoading ? (
+            [0, 1, 2].map((i) => (
+              <div key={i} className="flex-shrink-0 rounded-xl" style={{ width: 104, aspectRatio: "2 / 3", background: t.cardFill, border: `1px solid ${t.cardBorder}` }} />
+            ))
+          ) : (
+            // Same heart badge as the Library grid below — every card here
+            // is already a favorite by definition, so it's always filled,
+            // but still shown for consistency and to let it be unfavorited
+            // right from this row.
+            favorites.slice(0, 6).map((s) => (
+              <PosterCard key={s.id} show={s} href={`/show/${s.id}`} width={104} titlePlacement="overlay" favorite={isFavorite(s.id)} onToggleFavorite={() => toggleFavorite(s.id, "Profile:favoritesRow")} onLongPress={(show, rect) => setLongPress({ show, rect })} />
+            ))
+          )}
         </div>
       </div>
 
