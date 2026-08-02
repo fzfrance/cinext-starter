@@ -314,10 +314,7 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
   // Vercel's image optimizer (/_next/image, which PosterArt/the title logo
   // route through) is cold-started per unique image — the first request for
   // a given poster/backdrop can take several real seconds, not the
-  // near-instant response local dev always has. Without this, toPng below
-  // could walk the DOM and capture the artwork's <img> mid-load, baking a
-  // permanently blank/gradient-only card into the exported PNG — the "no
-  // artwork" bug reported from the live domain. Waits for every <img>
+  // near-instant response local dev always has. Waits for every <img>
   // inside the card to actually finish decoding (or its own onerror, or an
   // 8s safety timeout so one stuck image can't hang the export forever)
   // before capturing.
@@ -336,13 +333,70 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
     );
   };
 
+  // Waiting for the browser's own <img> to load (above) turned out not to
+  // be enough on its own: next/image renders BOTH `src` and a `srcset`,
+  // and the browser picks whichever srcset candidate it actually needs —
+  // which is very often a DIFFERENT URL than the plain `src` attribute.
+  // html-to-image's own embedder only ever looks at `.src` (see
+  // node_modules/html-to-image/lib/embed-images.js), so it was issuing
+  // its OWN separate fetch for a URL the browser may never have actually
+  // requested — a second cold Vercel image-optimizer hit, independent of
+  // the one waitForImages above already warmed up. Worse, that embedder
+  // swallows any fetch failure and silently substitutes a blank
+  // placeholder (html-to-image/lib/dataurl.js's resourceToDataURL catch
+  // block) — no error, no exception, just an empty image baked into the
+  // export. Pre-resolving each <img>'s actual `currentSrc` (the real,
+  // browser-chosen URL, already warm in cache from waitForImages above)
+  // to a data: URL ourselves and swapping it in sidesteps html-to-image's
+  // embedder entirely: it explicitly skips re-fetching anything whose
+  // `src` is already a data: URL. Restored after capture so the live
+  // on-screen card (and a second Share/Save in the same session) keeps
+  // using the real next/image element, not a frozen snapshot.
+  const inlineImagesAsDataUrls = async (root) => {
+    const imgs = [...root.querySelectorAll("img")];
+    const restores = [];
+    await Promise.all(
+      imgs.map(async (img) => {
+        const effectiveSrc = img.currentSrc || img.src;
+        if (!effectiveSrc || effectiveSrc.startsWith("data:")) return;
+        try {
+          const blob = await fetch(effectiveSrc).then((r) => r.blob());
+          const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = reject;
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+          });
+          restores.push([img, img.getAttribute("src"), img.getAttribute("srcset")]);
+          img.removeAttribute("srcset");
+          img.src = dataUrl;
+        } catch (err) {
+          // Leave this one img alone — toPng will fall through to
+          // html-to-image's own (best-effort) fetch for it.
+          console.error("Couldn't inline image for export:", err);
+        }
+      })
+    );
+    return () => {
+      restores.forEach(([img, src, srcset]) => {
+        if (srcset != null) img.setAttribute("srcset", srcset);
+        if (src != null) img.setAttribute("src", src);
+      });
+    };
+  };
+
   const renderCardPng = async () => {
     const { toPng } = await import("html-to-image");
     // Waiting for fonts before capturing — without this, the export could
     // grab a frame with a system-font fallback instead of the real one.
     if (document.fonts?.ready) await document.fonts.ready;
     await waitForImages(cardRef.current);
-    return toPng(cardRef.current, { width: EXPORT_W, height: EXPORT_H, pixelRatio: 1, backgroundColor: "#000" });
+    const restoreImages = await inlineImagesAsDataUrls(cardRef.current);
+    try {
+      return await toPng(cardRef.current, { width: EXPORT_W, height: EXPORT_H, pixelRatio: 1, backgroundColor: "#000" });
+    } finally {
+      restoreImages();
+    }
   };
 
   const handleNativeShare = async () => {

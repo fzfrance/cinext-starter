@@ -1198,13 +1198,36 @@ export default function Page() {
             // bar above (t.bg is a gradient that hasn't reached true
             // black yet this high up the page).
             <div className="px-6" style={{ marginTop: 8, background: "#000" }}>
-              {loaded && (
+              {loaded ? (
                 <div className="mt-6 flex flex-col items-center text-center rounded-2xl" style={{ padding: "28px 20px", background: t.cardFill, border: `1px solid ${t.cardBorder}` }}>
                   <Icon name="tv" size={24} color={t.textDim} />
                   <div style={{ fontSize: 14, fontWeight: 600, color: "#fff", marginTop: 10 }}>Nothing in progress</div>
                   <div style={{ fontSize: 12.5, color: t.textDim, marginTop: 4 }}>Watch an episode of a show you're watching to see it here.</div>
                 </div>
+              ) : (
+                // Loading skeleton — the fetch chain behind this page
+                // (library rows -> watch summary -> per-show TMDB detail)
+                // is a genuine multi-step waterfall, slower over a real
+                // network (especially a cold PWA open) than it ever is
+                // against localhost. Without this, the entire page below
+                // the header was just blank empty space for however long
+                // that took, reading as stuck/broken rather than loading.
+                <div className="mt-6 rounded-2xl animate-pulse" style={{ height: 320, background: t.cardFill, border: `1px solid ${t.cardBorder}` }} />
               )}
+            </div>
+          )}
+
+          {/* ---------- In Progress (loading skeleton) ---------- */}
+          {!loaded && (
+            <div style={{ position: "relative", zIndex: 3, paddingTop: 15 }}>
+              <div className="px-6">
+                <div className="animate-pulse" style={{ height: 20, width: 118, borderRadius: 6, background: t.cardFill }} />
+              </div>
+              <div className="mt-3 pl-6 flex items-start gap-3">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="flex-shrink-0 rounded-xl animate-pulse" style={{ width: 104, aspectRatio: "2 / 3", background: t.cardFill, border: `1px solid ${t.cardBorder}` }} />
+                ))}
+              </div>
             </div>
           )}
 
