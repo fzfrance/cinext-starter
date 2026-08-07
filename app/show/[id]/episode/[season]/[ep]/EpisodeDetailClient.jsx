@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import EpisodeDetail from "@/components/EpisodeDetail";
 import EpisodeRatingFlow from "@/components/EpisodeRatingFlow";
 import FloatingNav from "@/components/ui/FloatingNav";
 import { useAuth } from "@/lib/auth-context";
 import { getEpisodeWatches, syncEpisodeWatchCount, rateLatestWatch, getLatestWatchDate } from "@/lib/episodeWatches";
+import { reconcileShowStatusAfterWatchChange } from "@/lib/userShows";
 import { formatWatchDateLabel } from "@/lib/watchDate";
 import { themes, tintColorForShow } from "@/lib/theme";
 
@@ -53,9 +54,31 @@ export default function EpisodeDetailClient({ showId, showTitle, seasonNumber, e
     return () => { cancelled = true; };
   }, [user, showId, seasonNumber, episode.n, episode.watched, episode.watchCount]);
 
+  // Chained (not fired independently) for the same reason
+  // ShowDetailClient's own setEpisodeWatchCount is — rapid mark/unmark
+  // taps on this same episode would otherwise race and can leave the DB
+  // one toggle behind the UI. Each write is followed by
+  // reconcileShowStatusAfterWatchChange: unlike Show Detail, this page has
+  // no local status/library state of its own to keep in sync, but the
+  // show's *stored* status/library row still needs to react to a watch
+  // count change made from here (this is the page Highlights' Watch
+  // History calendar opens into) — without this, unmarking the last
+  // watched episode here correctly cleared the watch itself but left the
+  // show stuck showing "Watching" (and in Home's In Progress) forever,
+  // since nothing else was watching for that change.
+  const writeChainRef = useRef(Promise.resolve());
   const setWatchCount = (count) => {
+    const prevCount = episode.watchCount;
     setEpisode((e) => ({ ...e, watched: count > 0, watchCount: count }));
-    if (user) syncEpisodeWatchCount(user.id, showId, seasonNumber, episode.n, count).catch(console.error);
+    if (!user) return;
+    writeChainRef.current = writeChainRef.current
+      .catch(() => {})
+      .then(() => syncEpisodeWatchCount(user.id, showId, seasonNumber, episode.n, count))
+      .then(() => reconcileShowStatusAfterWatchChange(user.id, showId, "EpisodeDetailClient:setWatchCount"))
+      .catch((err) => {
+        console.error(err);
+        setEpisode((e) => ({ ...e, watched: prevCount > 0, watchCount: prevCount }));
+      });
   };
 
   const markWatched = () => {

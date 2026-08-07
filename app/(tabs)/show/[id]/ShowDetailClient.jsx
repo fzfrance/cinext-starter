@@ -249,6 +249,17 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   // mismatch silently rewrite its status. A library write may only happen
   // as the direct result of a user clicking something.
   const [pendingStatusSync, setPendingStatusSync] = useState(false);
+  // Per-"seasonId-episode" in-flight write promise — see
+  // setEpisodeWatchCount below for why same-episode writes chain off this
+  // instead of firing independently.
+  const episodeWriteChainsRef = useRef({});
+  // Same reasoning, for this show's own library row: the pendingStatusSync
+  // effect below fires setShowStatus (create the implicit row) and
+  // removeImplicitLibraryRow (delete it) independently per run, so a rapid
+  // mark→unmark→mark sequence could race a "create" from an earlier run
+  // against a "remove" from a later one and land in the wrong final state
+  // — same failure mode as the episode-level race, just one level up.
+  const libraryWriteChainRef = useRef(Promise.resolve());
 
   const [tab, setTab] = useState("episodes");
   const [seasons, setSeasons] = useState(initialSeasons);
@@ -494,7 +505,10 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
       setInLibrary(false);
       setStatus("watching");
       setStatusExplicit(true);
-      removeImplicitLibraryRow(user.id, showId, "ShowDetailClient:episodeUnmarkedToZero").catch(console.error);
+      libraryWriteChainRef.current = libraryWriteChainRef.current
+        .catch(() => {})
+        .then(() => removeImplicitLibraryRow(user.id, showId, "ShowDetailClient:episodeUnmarkedToZero"))
+        .catch(console.error);
       return;
     }
 
@@ -503,7 +517,10 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
         setStatus(resolvedStatus);
         setInLibrary(true);
         setStatusExplicit(false);
-        setShowStatus(user.id, showId, resolvedStatus, "ShowDetailClient:episodeMarked", { explicit: false }).catch(console.error);
+        libraryWriteChainRef.current = libraryWriteChainRef.current
+          .catch(() => {})
+          .then(() => setShowStatus(user.id, showId, resolvedStatus, "ShowDetailClient:episodeMarked", { explicit: false }))
+          .catch(console.error);
       }
       return;
     }
@@ -512,7 +529,10 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
 
     if (resolvedStatus && resolvedStatus !== status) {
       setStatus(resolvedStatus);
-      setShowStatus(user.id, showId, resolvedStatus, "ShowDetailClient:episodeMarked").catch(console.error);
+      libraryWriteChainRef.current = libraryWriteChainRef.current
+        .catch(() => {})
+        .then(() => setShowStatus(user.id, showId, resolvedStatus, "ShowDetailClient:episodeMarked"))
+        .catch(console.error);
     }
   }, [pendingStatusSync, resolvedStatus, status, user, showId, inLibrary, statusExplicit, watchedReleasedEpisodes]);
 
@@ -541,8 +561,33 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   // Returns false (and redirects to /login) if there's no signed-in user.
   const setEpisodeWatchCount = (seasonId, n, count) => {
     if (!user) { router.push("/login"); return false; }
+    const prevSeason = seasons.find((s) => s.id === seasonId);
+    const prevCount = prevSeason?.episodes.find((e) => e.n === n)?.watchCount || 0;
     setSeasons((ss) => ss.map((s) => s.id !== seasonId ? s : { ...s, episodes: s.episodes.map((e) => e.n === n ? { ...e, watchCount: count, watched: count > 0 } : e) }));
-    syncEpisodeWatchCount(user.id, showId, seasonId, n, count).catch(console.error);
+
+    // Same-episode writes are chained, not fired independently — rapid
+    // mark/unmark/mark taps on the same episode (exactly what testing a
+    // toggle looks like) otherwise race: two overlapping
+    // syncEpisodeWatchCount calls (each its own clear-then-add) can
+    // resolve out of order, so a later "unmark" finishes in the DB
+    // *before* an earlier still-in-flight "mark" — leaving a watched row
+    // behind even though the UI (and the user's actual last action) say
+    // unwatched. Chaining off the same episode's prior promise forces the
+    // writes to land in call order instead of network-response order.
+    const key = `${seasonId}-${n}`;
+    const chain = (episodeWriteChainsRef.current[key] ?? Promise.resolve())
+      .catch(() => {}) // a prior failure must not block this write from attempting
+      .then(() => syncEpisodeWatchCount(user.id, showId, seasonId, n, count));
+    episodeWriteChainsRef.current[key] = chain;
+    chain.catch((err) => {
+      console.error(err);
+      // Only roll back if this is still the latest queued write for this
+      // episode — a newer toggle already superseded it, so reverting now
+      // would stomp intent the user expressed after this one.
+      if (episodeWriteChainsRef.current[key] !== chain) return;
+      setSeasons((ss) => ss.map((s) => s.id !== seasonId ? s : { ...s, episodes: s.episodes.map((e) => e.n === n ? { ...e, watchCount: prevCount, watched: prevCount > 0 } : e) }));
+    });
+
     setPendingStatusSync(true);
     return true;
   };

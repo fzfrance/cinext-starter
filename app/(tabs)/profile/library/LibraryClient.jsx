@@ -117,7 +117,22 @@ export default function LibraryClient() {
         // matches an international show by its English name (e.g. "Notes
         // From the Last Row") even when it's currently *displaying* under
         // its original-language title, same as Explore's own search does.
-        return { id: result.id, title: resolveTitle(result, readableLanguages), englishTitle: result.title, posterPath: result.posterPath, genre: result.genre, ...byShow[id], status: resolvedStatus, lastWatchedAt: summary[id]?.lastWatchedAt ?? null };
+        return {
+          id: result.id,
+          title: resolveTitle(result, readableLanguages),
+          englishTitle: result.title,
+          posterPath: result.posterPath,
+          genre: result.genre,
+          ...byShow[id],
+          status: resolvedStatus,
+          lastWatchedAt: summary[id]?.lastWatchedAt ?? null,
+          // Same field Home's In Progress row reads (progressPct from
+          // /api/shows/library-detail) — undefined for paused/drop shows
+          // (excluded from needsProgress above, same as Home), which
+          // PosterCard's own `progress != null` check already treats as
+          // "no bar" rather than a bogus 0%.
+          progress: result.progressPct,
+        };
       }).filter(Boolean));
       setLoading(false);
     })().catch((err) => { console.error(err); if (!cancelled) setLoading(false); });
@@ -260,7 +275,7 @@ export default function LibraryClient() {
         <>
           <PosterGrid className="px-6 mt-4" columns={3}>
             {sortedLibrary.map((s) => (
-              <PosterCard key={s.id} show={s} href={`/show/${s.id}`} width="100%" titlePlacement="overlay" favorite={isFavorite(s.id)} onToggleFavorite={() => toggleFavorite(s.id, "ProfileLibrary:grid")} onLongPress={(show, rect) => setLongPress({ show, rect })} />
+              <PosterCard key={s.id} show={s} href={`/show/${s.id}`} width="100%" titlePlacement="overlay" favorite={isFavorite(s.id)} onToggleFavorite={() => toggleFavorite(s.id, "ProfileLibrary:grid")} onLongPress={(show, rect) => setLongPress({ show, rect })} progress={s.progress} />
             ))}
           </PosterGrid>
 

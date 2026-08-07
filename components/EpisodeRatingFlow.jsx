@@ -235,8 +235,17 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
     <div className="fixed inset-0 z-50" style={{ background: t.bg }}>
       <div className="h-full overflow-y-auto pb-8" style={{ scrollbarWidth: "none" }}>
 
-        {/* hero art */}
-        <div className="relative w-full" style={{ height: stage === "done" ? 260 : 300 }}>
+        {/* hero art — same fixed height on both stages (previously
+            300/260, which read as compressed: the episode info and the
+            "Thanks for rating!" confirmation both sat close to the top of
+            the screen instead of low in the hero). 420 gives the image
+            real room to breathe above the content, and PosterArt's own
+            object-fit: cover just fills whatever height it's given, no
+            crop/position changes needed. Content within stays anchored
+            near the bottom of this box (bottom:18 / pb-6 below) exactly
+            as before — a taller box alone is what pushes that content
+            down into the hero's lower third instead of the middle. */}
+        <div className="relative w-full" style={{ height: 420 }}>
           <PosterArt posterPath={subject.posterPath} base={subject.base} glow={subject.glow} alt={subject.title} />
           <div className="absolute inset-0" style={{ background: stage === "done" ? "linear-gradient(0deg, #0A0A0C 4%, rgba(10,10,12,0.55) 45%, rgba(10,10,12,0.15) 100%)" : "linear-gradient(0deg, #0A0A0C 6%, transparent 55%)" }} />
 
