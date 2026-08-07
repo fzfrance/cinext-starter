@@ -238,14 +238,18 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
         {/* hero art — same fixed height on both stages (previously
             300/260, which read as compressed: the episode info and the
             "Thanks for rating!" confirmation both sat close to the top of
-            the screen instead of low in the hero). 420 gives the image
-            real room to breathe above the content, and PosterArt's own
-            object-fit: cover just fills whatever height it's given, no
-            crop/position changes needed. Content within stays anchored
-            near the bottom of this box (bottom:18 / pb-6 below) exactly
-            as before — a taller box alone is what pushes that content
-            down into the hero's lower third instead of the middle. */}
-        <div className="relative w-full" style={{ height: 420 }}>
+            the screen instead of low in the hero). Was 420, eased back
+            10% to 378 (still comfortably taller than the original
+            300/260) — on an installed PWA (no Safari chrome to eat into
+            the viewport) 420 pushed the content down far enough to sit
+            too close to the screen's actual vertical middle; 378 keeps it
+            just short of that. PosterArt's own object-fit: cover just
+            fills whatever height it's given — the source image itself
+            isn't touched, only how much of the container (and therefore
+            how much of the image) is visible. Content within stays
+            anchored near the bottom of this box (bottom:18 / pb-6 below)
+            exactly as before. */}
+        <div className="relative w-full" style={{ height: 378 }}>
           <PosterArt posterPath={subject.posterPath} base={subject.base} glow={subject.glow} alt={subject.title} />
           <div className="absolute inset-0" style={{ background: stage === "done" ? "linear-gradient(0deg, #0A0A0C 4%, rgba(10,10,12,0.55) 45%, rgba(10,10,12,0.15) 100%)" : "linear-gradient(0deg, #0A0A0C 6%, transparent 55%)" }} />
 
@@ -394,32 +398,45 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
                 and evenly paced. justifyContent: center keeps each box's
                 content vertically centered now that the taller padding
                 can leave more room than the content strictly needs. */}
-            <Card style={{ ...DONE_CARD_STYLE, marginTop: DONE_SECTION_GAP }}>
-              {/* Text/info sized up ~12% across this card (eyebrow 13->14.5,
-                  title 19->21.5, runtime 13->14.5, star recap 14->16px +
-                  gap 2->2.25, rating label 14->15.5, plus the matching
-                  ~12% bump on the spacing between them) per the "feels too
-                  tight" ask — same card padding/margin/width as before, so
-                  the bigger content just fills the existing box better
-                  instead of sitting small inside it. WatchDateBadge is left
-                  untouched since it's a shared component also used in the
-                  "rate" stage's hero overlay, not something local to this
-                  card alone. */}
-              <div className="flex items-center justify-between w-full">
-                <div>
+            <Card style={{ ...DONE_CARD_STYLE, marginTop: DONE_SECTION_GAP, justifyContent: "flex-start", padding: "26px 19px 24px" }}>
+              {/* Three loose zones (episode info -> metadata -> rating),
+                  not one centered block — DONE_CARD_STYLE's own
+                  justifyContent:center (meant for the mood/MVP cards,
+                  which are short and single-purpose) was exactly what
+                  compressed everything toward the middle here once the
+                  title wrapped to 2 lines: flex-start lets the card grow
+                  downward instead, with each zone keeping its own
+                  distance instead of huddling together in the middle.
+                  items-start (not items-center) on the header row keeps
+                  the eyebrow+title anchored at the top-left even once the
+                  title wraps, instead of the runtime/date column
+                  vertically re-centering against it. flex:1 + min-w-0 on
+                  the title column is what actually gives it the room to
+                  use — a flex row's default (flex-shrink:1 on both
+                  children) let the runtime/date column compete for width
+                  and squeeze the title into wrapping earlier than it
+                  needed to; flex-shrink-0 here pins that column to its
+                  own natural (small) content width instead, so it's the
+                  title that gets whatever's left, not the other way
+                  around. */}
+              <div className="flex items-start justify-between w-full gap-3">
+                <div className="min-w-0" style={{ flex: 1 }}>
                   <div style={{ fontSize: 14.5, color: accent, fontWeight: 600, letterSpacing: "0.1em" }}>{subject.eyebrow}</div>
-                  <div style={{ fontSize: 21.5, fontWeight: 700, color: "#fff", marginTop: 2 }}>{subject.title}</div>
+                  <div style={{ fontSize: 21.5, fontWeight: 700, color: "#fff", marginTop: 2, lineHeight: 1.28 }}>{subject.title}</div>
                 </div>
-                <div className="flex flex-col items-end gap-1.5">
-                  {subject.runtimeMin && <span style={{ fontSize: 14.5, color: t.textDim }}>{subject.runtimeMin}m</span>}
+                <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                  {subject.runtimeMin && <span style={{ fontSize: 14.5, color: t.textDim, whiteSpace: "nowrap" }}>{subject.runtimeMin}m</span>}
                   <WatchDateBadge watch={watch} onClick={() => setDateSheetOpen(true)} />
                 </div>
               </div>
               {/* StarInput (readOnly) rather than a plain Icon loop — stars
                   can now be a half-star value (e.g. 3.5 out of 5), which a binary
                   `stars >= i` fill can't render correctly; StarInput
-                  already knows how to paint a half-filled star. */}
-              <div style={{ marginTop: 18 }}><StarInput value={stars} onChange={() => {}} size={26} color={accent} gap={4} maxStars={5} readOnly /></div>
+                  already knows how to paint a half-filled star. Pushed
+                  down further (18->32) so the rating result reads as its
+                  own zone, clearly separated from the episode
+                  metadata above rather than following right on its heels. */}
+              <div style={{ marginTop: 32 }}><StarInput value={stars} onChange={() => {}} size={26} color={accent} gap={4} maxStars={5} readOnly /></div>
               {stars > 0 && <div style={{ fontSize: 15.5, color: t.textDim, marginTop: 4.5 }}>{ratingLabelFor(stars)}</div>}
             </Card>
 
