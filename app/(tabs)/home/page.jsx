@@ -997,13 +997,11 @@ export default function Page() {
                           backgroundSize: "cover",
                           backgroundPosition: "center 28%",
                           backgroundRepeat: "no-repeat",
-                          // Blur/darkness bumped ~12% (blur 18→20px,
-                          // brightness 0.51→0.45) — keeps the same soft
-                          // atmospheric band at the top, just a bit
-                          // thicker/foggier and darker, per explicit
-                          // request. Not a big change — same idea, just
-                          // 10-15% more of it.
-                          filter: "blur(20px) brightness(0.45) saturate(1.08)",
+                          // Blur eased back ~10% (20→18px) at the top,
+                          // per explicit request — same soft atmospheric
+                          // band behind the logo/avatar, just a touch less
+                          // foggy.
+                          filter: "blur(18px) brightness(0.45) saturate(1.08)",
                           transform: "scale(1.06)",
                         }}
                       />
@@ -1088,16 +1086,16 @@ export default function Page() {
                     strongest right behind the logo, fading out well before
                     the bottom so it doesn't read as a flat dark band or
                     encroach on the character art lower in the image.
-                    Opacity nudged up slightly (0.58->0.68, 0.34->0.42,
-                    0.12->0.16) — a subtle bump for logo/avatar contrast on
-                    brighter backdrops, not a heavy scrim. */}
+                    Opacity eased back ~10% (0.68->0.61, 0.42->0.38,
+                    0.16->0.14) per explicit request — same shape, just a
+                    touch lighter behind the logo/avatar. */}
                 <div
                   className="absolute top-0 left-0 right-0"
                   style={{
                     height: 240,
                     zIndex: 3,
                     pointerEvents: "none",
-                    background: "linear-gradient(180deg, rgba(0,0,0,0.68) 0%, rgba(0,0,0,0.42) 45%, rgba(0,0,0,0.16) 75%, transparent 100%)",
+                    background: "linear-gradient(180deg, rgba(0,0,0,0.61) 0%, rgba(0,0,0,0.38) 45%, rgba(0,0,0,0.14) 75%, transparent 100%)",
                   }}
                 />
 

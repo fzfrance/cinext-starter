@@ -6,7 +6,6 @@ import Link from "next/link";
 import Icon from "@/components/ui/Icon";
 import PosterArt from "@/components/ui/PosterArt";
 import StatusMenu, { statusMenuOptions } from "@/components/StatusMenu";
-import RatingFlow from "@/components/RatingFlow";
 import ExploreClient from "@/app/(tabs)/explore/ExploreClient";
 import { useFavorites } from "@/lib/favorites-context";
 import { useLibraryStatus } from "@/lib/useLibraryStatus";
@@ -68,7 +67,7 @@ export default function SearchClient({ trending, heroSlides }) {
   const router = useRouter();
   const readableLanguages = useReadableLanguages();
   const { isFavorite, toggleFavorite } = useFavorites();
-  const { resolvedStatusMap, ratingItem, setRatingItem, selectStatus } = useLibraryStatus("Search");
+  const { resolvedStatusMap, selectStatus } = useLibraryStatus("Search");
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -185,15 +184,6 @@ export default function SearchClient({ trending, heroSlides }) {
           )}
         </div>
       </div>
-
-      {ratingItem && (
-        <RatingFlow
-          subject={{ eyebrow: "TV SHOW", title: ratingItem.title, meta: ratingItem.date, posterPath: ratingItem.posterPath }}
-          ratingNoun="show"
-          onClose={() => setRatingItem(null)}
-          onSave={() => setRatingItem(null)}
-        />
-      )}
     </div>
   );
 }

@@ -147,12 +147,11 @@ export default function Page() {
           </div>
         )}
       </div>
-      {/* fixed + width="100%" — cards grow evenly to fill each row
-          (auto-fill/1fr keeps the column count constant regardless of
-          how many favorites exist, so a lone favorite still renders at
-          the normal per-column size instead of stretching to fill the
-          whole width). */}
-      <PosterGrid className="px-6" fixed minCardWidth={140} style={{ marginTop: 18 }}>
+      {/* columns=3 + width="100%" — 3 fixed-width tracks regardless of how
+          many favorites exist, so a lone favorite still renders at the
+          normal per-column size instead of stretching to fill the whole
+          width. */}
+      <PosterGrid className="px-6" columns={3} style={{ marginTop: 18 }}>
         {displayedFavorites.map((s) => (
           <div
             key={s.id}

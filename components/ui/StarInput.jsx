@@ -8,11 +8,10 @@ const accent = DEFAULT_ACCENT;
 
 /**
  * StarInput — the one draggable star rating input, half-star precision.
- * Shared by RatingFlow.jsx (season/show reviews, 5 stars — the default,
- * fixed `size`/`gap`) and EpisodeRatingFlow.jsx (episode ratings, 10
- * stars via `maxStars`, `autoFit` on), which previously each had their
- * own: RatingFlow's own quarter-star drag version, and EpisodeRatingFlow's
- * separate whole-star click-only StarRow. Both are now this one component
+ * Shared by SeasonRatingScreen.jsx (season/show reviews, 5 stars — the
+ * default, fixed `size`/`gap`) and EpisodeRatingFlow.jsx (episode ratings,
+ * 10 stars via `maxStars`, `autoFit` on), which previously each had their
+ * own separate star-input implementations. Both are now this one component
  * — same precision/interaction wherever a star rating is *input*, just at
  * whichever star count/sizing mode the caller needs (screens that only
  * ever display an already-saved rating, read-only, render it with
@@ -29,7 +28,7 @@ const accent = DEFAULT_ACCENT;
  * Uses window mouse/touch listeners rather than Pointer Capture, since the
  * latter can misbehave inside sandboxed iframes (e.g. artifact previews).
  *
- * autoFit (opt-in, default off — RatingFlow.jsx's 5-star usage is
+ * autoFit (opt-in, default off — SeasonRatingScreen.jsx's 5-star usage is
  * unaffected either way): measures the row's actual rendered container
  * width once on mount and solves for the largest star size (and a gap
  * that scales alongside it) that still fits `maxStars` stars — rather

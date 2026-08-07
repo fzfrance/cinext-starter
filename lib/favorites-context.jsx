@@ -22,7 +22,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { getUserShows, setShowFavorite as setShowFavoriteRow } from "@/lib/userShows";
+import { getUserShows, getUserShow, setShowFavorite as setShowFavoriteRow } from "@/lib/userShows";
 
 const FavoritesContext = createContext({
   isFavorite: () => false,
@@ -51,21 +51,42 @@ export function FavoritesProvider({ children }) {
   const toggleFavorite = useCallback((tmdbShowId, source = "unknown") => {
     if (!user) return;
     const id = Number(tmdbShowId);
+    const knownLocally = Boolean(libraryById[id]);
     const wasFavorite = libraryById[id]?.favorite === true;
     const next = !wasFavorite;
 
     // Optimistic: every consumer reads from this same state, so flipping
     // it here is what makes the toggle "update immediately across all
     // pages" — there's no separate per-screen cache to invalidate.
-    setLibraryById((prev) => (prev[id] ? { ...prev, [id]: { ...prev[id], favorite: next } } : prev));
+    if (knownLocally) {
+      setLibraryById((prev) => (prev[id] ? { ...prev, [id]: { ...prev[id], favorite: next } } : prev));
+    }
 
     setShowFavoriteRow(user.id, id, next, source)
       .then((ok) => {
-        if (!ok) setLibraryById((prev) => (prev[id] ? { ...prev, [id]: { ...prev[id], favorite: wasFavorite } } : prev));
+        if (!ok) {
+          if (knownLocally) setLibraryById((prev) => (prev[id] ? { ...prev, [id]: { ...prev[id], favorite: wasFavorite } } : prev));
+          return;
+        }
+        // The write succeeded against a row this context's one-time
+        // getUserShows load never learned about — e.g. added to the
+        // library earlier in the same session, after this provider
+        // already fetched. Pull the real row in now instead of leaving
+        // the toggle silently invisible to every other screen reading
+        // from this same context (that's what used to make a
+        // just-favorited show never show up on Profile > Favorites).
+        if (!knownLocally) {
+          getUserShow(user.id, id)
+            .then((row) => {
+              if (!row) return;
+              setLibraryById((prev) => ({ ...prev, [id]: { status: row.status, favorite: row.favorite, addedAt: row.addedAt, updatedAt: row.updatedAt } }));
+            })
+            .catch(console.error);
+        }
       })
       .catch((err) => {
         console.error(err);
-        setLibraryById((prev) => (prev[id] ? { ...prev, [id]: { ...prev[id], favorite: wasFavorite } } : prev));
+        if (knownLocally) setLibraryById((prev) => (prev[id] ? { ...prev, [id]: { ...prev[id], favorite: wasFavorite } } : prev));
       });
   }, [user, libraryById]);
 

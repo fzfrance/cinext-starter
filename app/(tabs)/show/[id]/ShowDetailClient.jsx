@@ -14,9 +14,10 @@ import SeasonBanner from "@/components/SeasonBanner";
 import SeasonRatingScreen from "@/components/SeasonRatingScreen";
 import ShareRatingCard from "@/components/ShareRatingCard";
 import { useAuth } from "@/lib/auth-context";
+import { useFavorites } from "@/lib/favorites-context";
 import { useShowCustomizations } from "@/lib/show-customizations-context";
 import { getEpisodeWatches, addEpisodeWatches, clearEpisodeWatches, syncEpisodeWatchCount, rateLatestWatch } from "@/lib/episodeWatches";
-import { getUserShow, setShowStatus, setShowFavorite, removeUserShow, setWatchlistAndClearProgress, removeImplicitLibraryRow } from "@/lib/userShows";
+import { getUserShow, setShowStatus, removeUserShow, setWatchlistAndClearProgress, removeImplicitLibraryRow } from "@/lib/userShows";
 import { getCollections, createCollection, addShowToCollection, removeShowFromCollection } from "@/lib/collections";
 import { getSeasonRatings, saveSeasonRating, deleteSeasonRating, getAutoSeasonScore } from "@/lib/seasonRatings";
 import { getProfile } from "@/lib/profile";
@@ -146,6 +147,7 @@ const moreMenuItems = [
 export default function ShowDetailClient({ showId, show, initialSeasons, cast, videos, similar, watchProviders }) {
   const router = useRouter();
   const { user } = useAuth();
+  const { isFavorite, toggleFavorite } = useFavorites();
   const { getCustomBackdrop, getCustomPoster, getCustomLogo, setCustomImage } = useShowCustomizations();
   const readableLanguages = useReadableLanguages();
   // Resolved once here, per the signed-in user's Readable Languages —
@@ -202,7 +204,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     return () => setNavTint(null);
   }, [showId, setNavTint]);
 
-  const [favorite, setFavorite] = useState(false);
+  const favorite = isFavorite(showId);
   const [inLibrary, setInLibrary] = useState(false);
   // Was hardcoded to "watching" — for a show that's never been added to
   // the library (getUserShow's effect below returns early on `!row` and
@@ -412,7 +414,6 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
       if (cancelled || !row) return;
       setInLibrary(true);
       setStatus(row.status);
-      setFavorite(row.favorite);
       setStatusExplicit(row.statusExplicit ?? true);
     }).catch(console.error);
     return () => { cancelled = true; };
@@ -937,9 +938,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                 </div>
                 <GlassButton onClick={() => {
                   if (!user) { router.push("/login"); return; }
-                  const next = !favorite;
-                  setFavorite(next);
-                  setShowFavorite(user.id, showId, next, "ShowDetailClient:toggleFavorite").catch(console.error);
+                  toggleFavorite(showId, "ShowDetailClient:toggleFavorite");
                 }} style={{ width: 40, height: 40 }}>
                   <Icon name={favorite ? "heart" : "heartOutline"} size={16} color={favorite ? "#e0567a" : "#fff"} />
                 </GlassButton>

@@ -10,7 +10,8 @@ import SpineFace from "@/components/library/art/SpineFace";
 import Disc from "@/components/library/art/Disc";
 import { SPINE_W, REST_Y } from "@/components/library/ShelfCase";
 import { useAuth } from "@/lib/auth-context";
-import { setShowStatus, setShowFavorite, removeUserShow } from "@/lib/userShows";
+import { useFavorites } from "@/lib/favorites-context";
+import { setShowStatus, removeUserShow } from "@/lib/userShows";
 import { tmdbImage } from "@/lib/tmdb";
 import { themes } from "@/lib/theme";
 import { useNavVisibility } from "@/lib/nav-visibility-context";
@@ -46,9 +47,10 @@ const BIG_H = 322;
 export default function CaseOverlay({ show, origin, onClose, onStatusChange, onFavoriteChange, onRemoved }) {
   const router = useRouter();
   const { user } = useAuth();
+  const { isFavorite, toggleFavorite: toggleFavoriteCtx } = useFavorites();
   const [phase, setPhase] = useState("enter");
   const [statusValue, setStatusValue] = useState(show.status);
-  const [favorited, setFavorited] = useState(!!show.favorite);
+  const favorited = isFavorite(show.id);
   const [menuOpen, setMenuOpen] = useState(false);
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -118,17 +120,9 @@ export default function CaseOverlay({ show, origin, onClose, onStatusChange, onF
     }
   };
 
-  const toggleFavorite = async () => {
-    const next = !favorited;
-    setFavorited(next); // optimistic
-    try {
-      const ok = await setShowFavorite(user.id, show.id, next, "Library:caseOverlay");
-      if (ok) onFavoriteChange?.(show.id, next);
-      else setFavorited(!next); // no existing library row — roll back
-    } catch (err) {
-      console.error("Failed to update favorite:", err);
-      setFavorited(!next);
-    }
+  const toggleFavorite = () => {
+    onFavoriteChange?.(show.id, !favorited);
+    toggleFavoriteCtx(show.id, "Library:caseOverlay");
   };
 
   const confirmRemove = async () => {

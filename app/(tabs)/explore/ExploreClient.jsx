@@ -165,7 +165,11 @@ function ExploreHero({ heroSlides, watchlist, libraryIds, onToggleWatchlist, onO
     return () => clearInterval(timerRef.current);
   }, [heroSlides.length]);
 
-  const slide = heroSlides[index];
+  // heroSlides can now shrink at runtime (a slide leaves the moment its
+  // show gets added to the library — see visibleHeroSlides above), so a
+  // stale index left over from a larger array is wrapped back in range
+  // instead of pointing past the end.
+  const slide = heroSlides.length > 0 ? heroSlides[index % heroSlides.length] : undefined;
 
   if (!slide) {
     return <div className="relative w-full" style={{ height: 500 }} />;
@@ -541,11 +545,18 @@ export default function ExploreClient({ trending: trendingRaw, heroSlides: heroS
 
   const watchlist = new Set(Object.entries(resolvedStatusMap).filter(([, s]) => s === "watchlist").map(([id]) => Number(id)));
   const libraryIds = new Set(Object.keys(resolvedStatusMap).map(Number));
+  // Once a show is in the library under any status (watchlist through
+  // completed), it's done being "recommended" — rather than just showing
+  // an already-saved checkmark while it kept cycling through the hero
+  // forever, drop it from the rotation entirely. Filtered here (not baked
+  // into combinedHeroSlides) so it reacts live to resolvedStatusMap,
+  // including the hero's own toggleWatchlist shortcut.
+  const visibleHeroSlides = heroSlides.filter((s) => !libraryIds.has(s.id));
 
   return (
     <>
       {/* ---------- Hero ---------- */}
-      <ExploreHero heroSlides={heroSlides} watchlist={watchlist} libraryIds={libraryIds} onToggleWatchlist={toggleWatchlist} onOpenShow={(id) => router.push(`/show/${id}`)} />
+      <ExploreHero heroSlides={visibleHeroSlides} watchlist={watchlist} libraryIds={libraryIds} onToggleWatchlist={toggleWatchlist} onOpenShow={(id) => router.push(`/show/${id}`)} />
 
       {/* ---------- Genre filter ---------- */}
       <div className="mt-5 pl-6 flex gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>

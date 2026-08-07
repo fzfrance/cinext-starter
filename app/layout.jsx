@@ -34,6 +34,20 @@ export const viewport = {
   viewportFit: "cover",
 };
 
+// Forces every page in the app to render dynamically instead of Next
+// statically generating it at build time — inherited by every nested
+// route, same as any other route segment config set on a layout. Every
+// screen here is "use client" fetching its own live personal data on
+// mount anyway (see next.config.mjs's staleTimes comment), so a
+// statically generated shell buys nothing. It actively broke the PWA:
+// Next.js overwrites next.config.mjs's Cache-Control header in
+// production for statically generated pages (s-maxage=1y,
+// stale-while-revalidate instead of the no-store this app declares), and
+// an installed PWA — with no real hard-refresh gesture — could get stuck
+// on that cached shell indefinitely. Dynamic rendering makes Next use its
+// own no-store-by-default response instead, so no-store actually holds.
+export const dynamic = "force-dynamic";
+
 // suppressHydrationWarning below: this app never sets a class on <html>
 // itself — this warning is the classic false positive caused by a browser
 // extension (Grammarly, Dark Reader, translators, etc.) injecting a class
