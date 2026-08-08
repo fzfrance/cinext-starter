@@ -9,6 +9,7 @@ import PosterCard from "@/components/ui/PosterCard";
 import PosterGrid from "@/components/ui/PosterGrid";
 import YearSlider from "@/components/YearSlider";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
+import { hrefForMedia, mediaKey } from "@/lib/media";
 import { themes } from "@/lib/theme";
 import { tmdbImage } from "@/lib/tmdb";
 
@@ -56,6 +57,30 @@ const GENRES = [
   { name: "Family", genreIds: "10751" },
 ];
 
+// Movie genre chip set — real, distinct TMDB movie genre ids throughout,
+// unlike GENRES above: movies have Horror/Thriller/Romance/War/Sci-Fi/
+// Fantasy/Action/Adventure as their own real ids (TMDB's movie taxonomy
+// is the wider of the two), so none of GENRES' fallback-mapping comment
+// applies here.
+const MOVIE_GENRES = [
+  { name: "All", genreIds: null },
+  { name: "Drama", genreIds: "18" },
+  { name: "Action", genreIds: "28" },
+  { name: "Comedy", genreIds: "35" },
+  { name: "Thriller", genreIds: "53" },
+  { name: "Crime", genreIds: "80" },
+  { name: "Mystery", genreIds: "9648" },
+  { name: "Sci-Fi", genreIds: "878" },
+  { name: "Fantasy", genreIds: "14" },
+  { name: "Adventure", genreIds: "12" },
+  { name: "Romance", genreIds: "10749" },
+  { name: "Horror", genreIds: "27" },
+  { name: "War", genreIds: "10752" },
+  { name: "Animation", genreIds: "16" },
+  { name: "Documentary", genreIds: "99" },
+  { name: "Family", genreIds: "10751" },
+];
+
 // Real TMDB watch-provider ids (same source as the retired
 // browse/platform page). mono/color are only a fallback for whichever
 // provider a given region's watch-providers response doesn't include —
@@ -96,29 +121,33 @@ const LANGUAGES = [
   { code: "pl", name: "Polish" },
 ];
 
-async function fetchLibrary({ genre, yearFrom, yearTo, platforms, languages, page = 1 }) {
+async function fetchLibrary({ genre, yearFrom, yearTo, platforms, languages, contentType, page = 1 }) {
   const params = new URLSearchParams();
   if (genre) params.set("genre", genre);
   if (yearFrom) params.set("yearFrom", yearFrom);
   if (yearTo) params.set("yearTo", yearTo);
   if (platforms.length) params.set("platforms", platforms.join(","));
   if (languages.length) params.set("languages", languages.join(","));
+  if (contentType) params.set("contentType", contentType);
   params.set("page", page);
   const res = await fetch(`/api/shows/discover-library?${params.toString()}`);
   return res.json();
 }
 
-// Defensive against duplicate TMDB ids across pages (the multi-language
-// fan-out in particular can't overlap by definition, but a rapid
-// genre/filter switch racing with an in-flight load-more, or TMDB itself
-// shifting page boundaries between requests, both could otherwise show the
-// same show twice).
-function dedupeById(list) {
+// Defensive against duplicate items across pages (the multi-language/
+// mixed-media-type fan-out in particular can't overlap by definition, but
+// a rapid genre/filter switch racing with an in-flight load-more, or TMDB
+// itself shifting page boundaries between requests, both could otherwise
+// show the same item twice). Keyed on the composite mediaType-id string
+// (lib/media.js's mediaKey) — a bare numeric id isn't unique once movies
+// and TV shows are pooled together, since the two id spaces can collide.
+function dedupeByKey(list) {
   const seen = new Set();
   const out = [];
   for (const item of list) {
-    if (seen.has(item.id)) continue;
-    seen.add(item.id);
+    const key = mediaKey(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
     out.push(item);
   }
   return out;
@@ -141,6 +170,23 @@ export default function LibraryClient({ providerLogos = {} }) {
   const readableLanguages = useReadableLanguages();
 
   const [activeGenre, setActiveGenre] = useState(null);
+  // "movie" | "tv" | null ("All" — mixed by default, per the movies-as-
+  // content-type plan). Lifted outside appliedFilters/draftFilters
+  // (unlike Year/Platforms/Language) — the always-visible genre chip row
+  // needs this immediately to swap which genre-id list it's showing,
+  // independent of the dropdown's own draft/apply gate, and the in-
+  // dropdown toggle below writes to it directly for the same reason
+  // (takes effect immediately, like the genre chips do, not gated behind
+  // "Show Results").
+  const [contentType, setContentType] = useState(null);
+  const changeContentType = (next) => {
+    setContentType(next);
+    // A TV genre id is meaningless as a movie with_genres value and vice
+    // versa (see MOVIE_GENRES' own comment on where the two id spaces
+    // diverge) — resetting is required for correctness, not just UX
+    // polish.
+    setActiveGenre(null);
+  };
   const [appliedFilters, setAppliedFilters] = useState(DEFAULT_FILTERS);
   const [hydrated, setHydrated] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -187,10 +233,10 @@ export default function LibraryClient({ providerLogos = {} }) {
     setLoading(true);
     setShows([]);
     setPage(1);
-    fetchLibrary({ genre: activeGenre, ...appliedFilters, page: 1 })
+    fetchLibrary({ genre: activeGenre, ...appliedFilters, contentType, page: 1 })
       .then((data) => {
         if (cancelled || generation !== generationRef.current) return;
-        setShows(dedupeById(data.results ?? []));
+        setShows(dedupeByKey(data.results ?? []));
         setTotalCount(data.totalResults ?? 0);
         setTotalPages(data.totalPages ?? 0);
         setLoading(false);
@@ -200,7 +246,7 @@ export default function LibraryClient({ providerLogos = {} }) {
         if (!cancelled && generation === generationRef.current) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [hydrated, activeGenre, appliedFilters]);
+  }, [hydrated, activeGenre, appliedFilters, contentType]);
 
   // Infinite scroll — appends the next page for the *current* genre/
   // filters only. Guarded by generationRef so a page that was still in
@@ -212,10 +258,10 @@ export default function LibraryClient({ providerLogos = {} }) {
     const generation = generationRef.current;
     const nextPage = page + 1;
     setLoadingMore(true);
-    fetchLibrary({ genre: activeGenre, ...appliedFilters, page: nextPage })
+    fetchLibrary({ genre: activeGenre, ...appliedFilters, contentType, page: nextPage })
       .then((data) => {
         if (generation !== generationRef.current) return;
-        setShows((prev) => dedupeById([...prev, ...(data.results ?? [])]));
+        setShows((prev) => dedupeByKey([...prev, ...(data.results ?? [])]));
         setPage(nextPage);
         setLoadingMore(false);
       })
@@ -223,7 +269,7 @@ export default function LibraryClient({ providerLogos = {} }) {
         console.error("Failed to load more library results:", err);
         if (generation === generationRef.current) setLoadingMore(false);
       });
-  }, [loading, loadingMore, hasMore, page, activeGenre, appliedFilters]);
+  }, [loading, loadingMore, hasMore, page, activeGenre, appliedFilters, contentType]);
 
   // Sentinel div at the bottom of the grid — IntersectionObserver fires
   // loadMore once it scrolls into view, the standard infinite-scroll
@@ -247,12 +293,12 @@ export default function LibraryClient({ providerLogos = {} }) {
     if (!dropdownOpen) return;
     let cancelled = false;
     const handle = setTimeout(() => {
-      fetchLibrary({ genre: activeGenre, ...draftFilters })
+      fetchLibrary({ genre: activeGenre, ...draftFilters, contentType })
         .then((data) => { if (!cancelled) setDraftCount(data.totalResults ?? 0); })
         .catch(() => { if (!cancelled) setDraftCount(null); });
     }, 400);
     return () => { cancelled = true; clearTimeout(handle); };
-  }, [dropdownOpen, activeGenre, draftFilters]);
+  }, [dropdownOpen, activeGenre, draftFilters, contentType]);
 
   const openDropdown = () => {
     setDraftFilters(appliedFilters);
@@ -288,6 +334,8 @@ export default function LibraryClient({ providerLogos = {} }) {
               setDraftFilters={setDraftFilters}
               draftCount={draftCount}
               providerLogos={providerLogos}
+              contentType={contentType}
+              onChangeContentType={changeContentType}
               onClose={dismissDropdown}
               onApply={applyFilters}
             />
@@ -296,34 +344,41 @@ export default function LibraryClient({ providerLogos = {} }) {
       </div>
 
       {/* Genre chips — the primary browsing method, always visible, not
-          tucked into the filter dropdown. */}
-      <div className="flex gap-2 overflow-x-auto px-6" style={{ marginTop: 18, scrollbarWidth: "none" }}>
-        {GENRES.map((g) => {
-          const isActive = activeGenre === g.genreIds;
-          return (
-            <button
-              key={g.name}
-              onClick={() => setActiveGenre(g.genreIds)}
-              className="flex-shrink-0 rounded-full active:scale-95 transition"
-              style={{ padding: "8px 16px", background: isActive ? "#fff" : t.cardFill, border: `1px solid ${isActive ? "transparent" : t.cardBorder}` }}
-            >
-              <span style={{ fontSize: 13, fontWeight: 600, color: isActive ? "#111" : "#fff" }}>{g.name}</span>
-            </button>
-          );
-        })}
-      </div>
+          tucked into the filter dropdown. Only shown once content type is
+          narrowed to Movie or TV Show: movie and TV genre id spaces
+          diverge for several genres (Horror/Thriller/Romance/War/Sci-Fi/
+          Fantasy/Action/Adventure — see MOVIE_GENRES' own comment), so
+          there's no single genre id list that's correct for both at once
+          in the default mixed ("All") view. */}
+      {contentType != null && (
+        <div className="flex gap-2 overflow-x-auto px-6" style={{ marginTop: 18, scrollbarWidth: "none" }}>
+          {(contentType === "movie" ? MOVIE_GENRES : GENRES).map((g) => {
+            const isActive = activeGenre === g.genreIds;
+            return (
+              <button
+                key={g.name}
+                onClick={() => setActiveGenre(g.genreIds)}
+                className="flex-shrink-0 rounded-full active:scale-95 transition"
+                style={{ padding: "8px 16px", background: isActive ? "#fff" : t.cardFill, border: `1px solid ${isActive ? "transparent" : t.cardBorder}` }}
+              >
+                <span style={{ fontSize: 13, fontWeight: 600, color: isActive ? "#111" : "#fff" }}>{g.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="px-6" style={{ marginTop: 18, marginBottom: 10, fontSize: 13, color: t.textDim }}>
-        {loading ? "Loading…" : `${totalCount} show${totalCount === 1 ? "" : "s"}`}
+        {loading ? "Loading…" : `${totalCount} title${totalCount === 1 ? "" : "s"}`}
       </div>
 
       <div className="px-6" style={{ paddingBottom: 32 }}>
         <PosterGrid>
           {shows.map((s) => (
             <PosterCard
-              key={s.id}
+              key={mediaKey(s)}
               show={{ ...s, title: resolveTitle(s, readableLanguages) }}
-              href={`/show/${s.id}`}
+              href={hrefForMedia(s)}
               width="100%"
               titlePlacement="below"
               subtitle={[s.rating ? `★ ${s.rating}` : null, s.year].filter(Boolean).join(" · ")}
@@ -331,7 +386,7 @@ export default function LibraryClient({ providerLogos = {} }) {
           ))}
         </PosterGrid>
         {!loading && shows.length === 0 && (
-          <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: t.textDim }}>No shows match these filters.</div>
+          <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: t.textDim }}>Nothing matches these filters.</div>
         )}
         {/* Sentinel for infinite scroll — invisible, just a trigger point
             for the IntersectionObserver above; the actual loading feedback
@@ -349,7 +404,7 @@ export default function LibraryClient({ providerLogos = {} }) {
 // Small anchored liquid-glass dropdown (matches the frosted-blur treatment
 // used elsewhere, e.g. Edit Profile's source-picker menus), not a
 // full-screen bottom sheet — floats just below the filter button.
-function FilterDropdown({ draftFilters, setDraftFilters, draftCount, providerLogos, onClose, onApply }) {
+function FilterDropdown({ draftFilters, setDraftFilters, draftCount, providerLogos, contentType, onChangeContentType, onClose, onApply }) {
   const [languageQuery, setLanguageQuery] = useState("");
   const filteredLanguages = LANGUAGES.filter((l) => l.name.toLowerCase().includes(languageQuery.trim().toLowerCase()));
 
@@ -371,6 +426,30 @@ function FilterDropdown({ draftFilters, setDraftFilters, draftCount, providerLog
         onClick={(e) => e.stopPropagation()}
       >
         <div className="overflow-y-auto" style={{ maxHeight: "60vh", padding: "18px 18px 4px" }}>
+          {/* Content type — single-select, 3-way (All / Movie / TV Show),
+              same pill-toggle visual pattern as Platforms/Language below.
+              Deliberately writes straight to the lifted contentType state
+              (via onChangeContentType) instead of through
+              draftFilters/setDraftFilters — takes effect immediately, like
+              the always-visible genre chips do, rather than waiting on
+              "Show Results" the way Year/Platforms/Language do. */}
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#fff", marginBottom: 10 }}>Type</div>
+          <div className="flex gap-2" style={{ marginBottom: 22 }}>
+            {[{ id: null, label: "All" }, { id: "movie", label: "Movies" }, { id: "tv", label: "TV Shows" }].map((opt) => {
+              const selected = contentType === opt.id;
+              return (
+                <button
+                  key={opt.label}
+                  onClick={() => onChangeContentType(opt.id)}
+                  className="rounded-full active:scale-95 transition"
+                  style={{ padding: "7px 14px", background: selected ? "#fff" : "rgba(255,255,255,0.05)", border: `1px solid ${selected ? "#fff" : t.cardBorder}` }}
+                >
+                  <span style={{ fontSize: 12.5, fontWeight: 600, color: selected ? "#111" : "#fff" }}>{opt.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
           <div style={{ fontSize: 13.5, fontWeight: 700, color: "#fff", marginBottom: 14 }}>Year</div>
           <YearSlider
             min={MIN_YEAR}

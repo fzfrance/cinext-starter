@@ -8,6 +8,8 @@ import ActivityCard from "@/components/profile/ActivityCard";
 import { useAuth } from "@/lib/auth-context";
 import { getProfile } from "@/lib/profile";
 import { getUserShows } from "@/lib/userShows";
+import { getUserMovies } from "@/lib/userMovies";
+import { getAllMovieRatingsForUser } from "@/lib/movieRatings";
 import { getRecentEpisodeWatches, getShowWatchSummary } from "@/lib/episodeWatches";
 import { getAllSeasonRatingsForUser } from "@/lib/seasonRatings";
 import { getRecentCollectionAdditions } from "@/lib/collections";
@@ -42,18 +44,24 @@ export default function Page() {
     if (!user) return;
     let cancelled = false;
     (async () => {
-      const [profile, byShow, episodeWatches, seasonRatings, collectionAdditions] = await Promise.all([
+      const [profile, byShow, episodeWatches, seasonRatings, collectionAdditions, byMovie, movieRatings] = await Promise.all([
         getProfile(user.id),
         getUserShows(user.id),
         getRecentEpisodeWatches(user.id),
         getAllSeasonRatingsForUser(user.id),
         getRecentCollectionAdditions(user.id),
+        // Independently caught — a movie-side failure must degrade to "no
+        // movie activity" rather than blanking this whole feed (same
+        // resilience pattern as every other TV+movie merge this session).
+        getUserMovies(user.id).catch((err) => { console.error(err); return {}; }),
+        getAllMovieRatingsForUser(user.id).catch((err) => { console.error(err); return []; }),
       ]);
       if (cancelled) return;
       setAvatarUrl(profile?.avatarUrl ?? null);
       setDisplayName(profile?.displayName || "You");
 
       const userShows = Object.entries(byShow).map(([showId, s]) => ({ showId: Number(showId), ...s }));
+      const userMovies = Object.entries(byMovie).map(([movieId, s]) => ({ movieId: Number(movieId), ...s }));
 
       // Real completion (not just the raw `status` column) needs live
       // episode-progress counts, same as Library's own DVD-shelf page —
@@ -65,26 +73,33 @@ export default function Page() {
 
       const otherIds = [...new Set([...episodeWatches.map((w) => w.showId), ...seasonRatings.map((r) => r.showId), ...collectionAdditions.map((c) => c.showId)])];
       const allShowIds = [...new Set([...userShows.map((s) => s.showId), ...otherIds])];
-      if (allShowIds.length === 0) {
-        if (!cancelled) setFeed({ groups: [], showsById: {} });
+      const allMovieIds = [...new Set([...userMovies.map((s) => s.movieId), ...movieRatings.map((r) => r.movieId)])];
+      if (allShowIds.length === 0 && allMovieIds.length === 0) {
+        if (!cancelled) setFeed({ groups: [], showsById: {}, moviesById: {} });
         return;
       }
 
-      const res = await fetch("/api/shows/library-detail", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          shows: allShowIds.map((id) => ({
-            id,
-            needsProgress: resolvableIds.includes(id),
-            watched: watchSummary[id]?.watchedKeys ?? [],
-          })),
-        }),
-      });
-      const { results } = await res.json();
+      const [showRes, movieRes] = await Promise.all([
+        allShowIds.length > 0
+          ? fetch("/api/shows/library-detail", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                shows: allShowIds.map((id) => ({
+                  id,
+                  needsProgress: resolvableIds.includes(id),
+                  watched: watchSummary[id]?.watchedKeys ?? [],
+                })),
+              }),
+            }).then((r) => r.json())
+          : Promise.resolve({ results: [] }),
+        allMovieIds.length > 0
+          ? fetch(`/api/movies/batch?ids=${allMovieIds.join(",")}`).then((r) => r.json()).catch((err) => { console.error(err); return { results: [] }; })
+          : Promise.resolve({ results: [] }),
+      ]);
       if (cancelled) return;
 
-      const detailById = Object.fromEntries(results.map((r) => [r.id, r]));
+      const detailById = Object.fromEntries(showRes.results.map((r) => [r.id, r]));
       const progressByShowId = Object.fromEntries(
         resolvableIds
           .filter((id) => detailById[id])
@@ -104,13 +119,17 @@ export default function Page() {
         const { base, glow } = fallbackPalette(id);
         return [id, { id: r.id, title: r.title, originalTitle: r.originalTitle, originalLanguage: r.originalLanguage, posterPath: r.posterPath, base, glow }];
       }));
+      const moviesById = Object.fromEntries(movieRes.results.map((r) => {
+        const { base, glow } = fallbackPalette(r.id);
+        return [r.id, { id: r.id, title: r.title, originalTitle: r.originalTitle, originalLanguage: r.originalLanguage, posterPath: r.posterPath, base, glow }];
+      }));
 
-      const events = buildActivityEvents({ userShows, episodeWatches, seasonRatings, collectionAdditions, progressByShowId }).slice(0, RENDER_LIMIT);
+      const events = buildActivityEvents({ userShows, episodeWatches, seasonRatings, collectionAdditions, progressByShowId, userMovies, movieRatings }).slice(0, RENDER_LIMIT);
       const groups = groupActivityByRecency(events, now)
-        .map(([label, items]) => [label, items.filter((e) => showsById[e.showId])])
+        .map(([label, items]) => [label, items.filter((e) => (e.mediaType === "movie" ? moviesById[e.movieId] : showsById[e.showId]))])
         .filter(([, items]) => items.length > 0);
 
-      setFeed({ groups, showsById });
+      setFeed({ groups, showsById, moviesById });
     })().catch(console.error);
     return () => { cancelled = true; };
   }, [user, now]);
@@ -161,10 +180,10 @@ export default function Page() {
             <div key={label} style={{ marginTop: 8 }}>
               <div className="px-6" style={{ fontSize: 15, fontWeight: 700, color: t.textDim, letterSpacing: "0.01em", marginTop: 18, marginBottom: 2 }}>{label}</div>
               {items.map((e, i) => {
-                const show = feed.showsById[e.showId];
+                const show = e.mediaType === "movie" ? feed.moviesById[e.movieId] : feed.showsById[e.showId];
                 const displayShow = show ? { ...show, title: resolveTitle(show, readableLanguages) } : show;
                 return (
-                  <ActivityCard key={`${e.type}-${e.showId}-${e.seasonNumber ?? ""}-${e.episodeNumber ?? ""}-${e.timestamp.getTime()}-${i}`} event={e} show={displayShow} avatarUrl={avatarUrl} displayName={displayName} now={now} />
+                  <ActivityCard key={`${e.type}-${e.mediaType}-${e.showId ?? e.movieId}-${e.seasonNumber ?? ""}-${e.episodeNumber ?? ""}-${e.timestamp.getTime()}-${i}`} event={e} show={displayShow} avatarUrl={avatarUrl} displayName={displayName} now={now} />
                 );
               })}
             </div>

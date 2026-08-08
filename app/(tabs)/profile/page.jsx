@@ -13,7 +13,9 @@ import StarInput from "@/components/ui/StarInput";
 import { moodMetasFromField } from "@/components/SeasonBanner";
 import { useAuth } from "@/lib/auth-context";
 import { useFavorites } from "@/lib/favorites-context";
+import { useMovieFavorites } from "@/lib/movie-favorites-context";
 import { getUserShows } from "@/lib/userShows";
+import { getUserMoviesWatchedInYear } from "@/lib/userMovies";
 import { getShowWatchSummary, getWatchedEpisodesForYear } from "@/lib/episodeWatches";
 import { getMyRatingsForUser } from "@/lib/myRatings";
 import { resolveShowStatus } from "@/lib/statusResolver";
@@ -70,8 +72,16 @@ export default function Page() {
   const router = useRouter();
   const { user, loading } = useAuth();
   const { isFavorite, toggleFavorite, loading: favoritesCtxLoading } = useFavorites();
+  const { isFavorite: isMovieFavorite, toggleFavorite: toggleMovieFavorite, favoriteEntries: movieFavoriteEntries, loading: movieFavoritesCtxLoading } = useMovieFavorites();
   const readableLanguages = useReadableLanguages();
   const [library, setLibrary] = useState([]);
+  // "Favorite Movies" preview row — a lightweight one-shot fetch keyed on
+  // the favorited-id set's own identity, unlike the dedicated Favorites
+  // Movies page's incremental sync-diff (app/(tabs)/profile/favorites/
+  // movies/page.jsx): this row only ever shows 6 items, so refetching the
+  // small batch whenever the set of favorited movie ids changes is simpler
+  // and cheap enough not to need that page's more careful diffing.
+  const [movieFavorites, setMovieFavorites] = useState([]);
   const [libraryLoading, setLibraryLoading] = useState(true);
   const [longPress, setLongPress] = useState(null);
   const [libraryRefreshToken, setLibraryRefreshToken] = useState(0);
@@ -105,15 +115,28 @@ export default function Page() {
     if (!user) return;
     let cancelled = false;
     const now = getBangkokNow();
-    getWatchedEpisodesForYear(user.id, now.year).then((rows) => {
+    Promise.all([
+      getWatchedEpisodesForYear(user.id, now.year),
+      // Independently caught — a movie-side failure must degrade to 0
+      // rather than blanking the whole widget row (same reasoning as
+      // every other TV+movie merge this session).
+      getUserMoviesWatchedInYear(user.id, now.year).catch((err) => { console.error(err); return []; }),
+    ]).then(([rows, movieRows]) => {
       if (cancelled) return;
       const monthRows = rows.filter((r) =>
         (r.watch_date_precision === "day" || r.watch_date_precision === "month") &&
         r.watched_year === now.year && r.watched_month === now.month
       );
+      // user_movies.watched_on is a plain date column (no watched_year/
+      // watched_month columns like episode_watches has) — parse the
+      // year/month straight out of the "YYYY-MM-DD" string instead.
+      const monthMovies = movieRows.filter((r) => {
+        const [y, m] = r.watchedOn.split("-").map(Number);
+        return y === now.year && m === now.month;
+      });
       setMonthStats({
-        episodes: monthRows.length,
         shows: new Set(monthRows.map((r) => r.tmdb_show_id)).size,
+        movies: monthMovies.length,
         activeDays: new Set(monthRows.filter((r) => r.watch_date_precision === "day").map((r) => r.watched_on)).size,
         rewatched: computeRewatchCount(monthRows),
       });
@@ -219,6 +242,25 @@ export default function Page() {
     return () => { cancelled = true; };
   }, [user]);
 
+  // "Favorite Movies" preview row — see movieFavorites' own declaration
+  // comment for why this is a simple refetch-on-id-set-change rather than
+  // the dedicated Favorites Movies page's more careful incremental sync.
+  useEffect(() => {
+    if (!user) { setMovieFavorites([]); return; }
+    const ids = movieFavoriteEntries.slice(0, 6).map((e) => e.id);
+    if (ids.length === 0) { setMovieFavorites([]); return; }
+    let cancelled = false;
+    fetch(`/api/movies/batch?ids=${ids.join(",")}`)
+      .then((res) => res.json())
+      .then(({ results }) => {
+        if (cancelled) return;
+        const addedAtById = Object.fromEntries(movieFavoriteEntries.map((e) => [e.id, e.addedAt]));
+        setMovieFavorites(results.map((movie) => ({ ...movie, addedAt: addedAtById[movie.id] })));
+      })
+      .catch(console.error);
+    return () => { cancelled = true; };
+  }, [user, movieFavoriteEntries]);
+
   if (!loading && !user) {
     return (
       <div className="min-h-dvh flex flex-col items-center justify-center text-center px-8" style={{ background: t.bg }}>
@@ -247,6 +289,7 @@ export default function Page() {
   // their own single fetch) before popping in. A real loading placeholder
   // instead of silently rendering zero cards while waiting on both.
   const favoritesRowLoading = libraryLoading || favoritesCtxLoading;
+  const movieFavoritesRowLoading = movieFavoritesCtxLoading;
 
   return (
     <>
@@ -297,15 +340,17 @@ export default function Page() {
         </div>
       </div>
 
-      {/* This-month stats — duplicated from Highlights' own four stat
-          cards (same icons/order/style), so it's a quick at-a-glance
-          summary right on Profile without opening Highlights. */}
+      {/* This-month stats — duplicated from Highlights' own stat cards
+          (same style), so it's a quick at-a-glance summary right on
+          Profile without opening Highlights. Episodes dropped (redundant
+          with Shows right next to it) and Movies added — Shows, Movies,
+          Active Days, Rewatched, per explicit request. */}
       {/* Plain text columns now — no icon, no per-stat card/background.
           Same four stats, same real data, just a big bold number with a
           smaller gray label under it, side by side. */}
       {monthStats && (
         <div className="flex gap-2 px-6" style={{ marginTop: 22 }}>
-          {[[monthStats.episodes, "Episodes"], [monthStats.shows, "Shows"], [monthStats.activeDays, "Active Days"], [monthStats.rewatched, "Rewatched"]].map(([n, l], i) => (
+          {[[monthStats.shows, "Shows"], [monthStats.movies, "Movies"], [monthStats.activeDays, "Active Days"], [monthStats.rewatched, "Rewatched"]].map(([n, l], i) => (
             <div key={i} className="flex-1 flex flex-col items-center text-center">
               <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{n}</div>
               <div style={{ fontSize: 11, color: t.textDim, marginTop: 3, textAlign: "center", lineHeight: 1.2 }}>{l}</div>
@@ -321,7 +366,7 @@ export default function Page() {
 
       <div style={{ marginTop: 22 }}>
         <div className="flex items-center justify-between px-6 mb-3">
-          <span style={{ fontSize: 17.25, fontWeight: 600, color: "#fff" }}>Favorites</span>
+          <span style={{ fontSize: 17.25, fontWeight: 600, color: "#fff" }}>Favorite Shows</span>
           <Link href="/profile/favorites"><Icon name="chevronRight" size={18} color={t.textDim} /></Link>
         </div>
         <div className="flex gap-2.5 overflow-x-auto px-6" style={{ scrollbarWidth: "none" }}>
@@ -336,6 +381,24 @@ export default function Page() {
             // right from this row.
             favorites.slice(0, 6).map((s) => (
               <PosterCard key={s.id} show={s} href={`/show/${s.id}`} width={104} titlePlacement="overlay" favorite={isFavorite(s.id)} onToggleFavorite={() => toggleFavorite(s.id, "Profile:favoritesRow")} onLongPress={(show, rect) => setLongPress({ show, rect })} />
+            ))
+          )}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 26 }}>
+        <div className="flex items-center justify-between px-6 mb-3">
+          <span style={{ fontSize: 17.25, fontWeight: 600, color: "#fff" }}>Favorite Movies</span>
+          <Link href="/profile/favorites/movies"><Icon name="chevronRight" size={18} color={t.textDim} /></Link>
+        </div>
+        <div className="flex gap-2.5 overflow-x-auto px-6" style={{ scrollbarWidth: "none" }}>
+          {movieFavoritesRowLoading ? (
+            [0, 1, 2].map((i) => (
+              <div key={i} className="flex-shrink-0 rounded-xl" style={{ width: 104, aspectRatio: "2 / 3", background: t.cardFill, border: `1px solid ${t.cardBorder}` }} />
+            ))
+          ) : (
+            movieFavorites.slice(0, 6).map((m) => (
+              <PosterCard key={m.id} show={m} href={`/movie/${m.id}`} width={104} titlePlacement="overlay" favorite={isMovieFavorite(m.id)} onToggleFavorite={() => toggleMovieFavorite(m.id, "Profile:movieFavoritesRow")} />
             ))
           )}
         </div>
@@ -377,33 +440,41 @@ export default function Page() {
           </div>
           <div className="flex gap-2.5 overflow-x-auto px-6" style={{ scrollbarWidth: "none" }}>
             {myRatings.map((r) => {
+              const isMovie = r.mediaType === "movie";
               const moodMetas = moodMetasFromField(r.mood);
               // Original-language title when the show's original_language is
               // one of the user's Readable Languages (Settings), same rule
               // resolveTitle() enforces everywhere else in the app — not the
               // English title unconditionally.
               const displayTitle = r.title ? resolveTitle(r, readableLanguages) : null;
+              // Raw ids collide across media types — see the same branch in
+              // app/(tabs)/profile/ratings/page.jsx for the full reasoning.
+              const key = isMovie ? `movie-${r.movieId}` : `tv-${r.showId}-${r.seasonNumber}`;
+              const detailPath = isMovie ? `/movie/${r.movieId}` : `/show/${r.showId}`;
+              const ratingPath = isMovie ? `/movie/${r.movieId}?tab=reviews` : `/show/${r.showId}?tab=reviews&reviewSeason=${r.seasonNumber}`;
+              const palette = fallbackPalette(isMovie ? r.movieId : r.showId);
               return (
-                // Poster opens the show itself; the rest of the card opens
-                // the season's official saved rating card directly (same
-                // deep link SeasonRatingScreen's own edit-pencil uses,
-                // minus &edit=1 — a rating that already exists should land
-                // in its read-only "saved" view, not force the editor).
-                // Neither one opens ShareRatingCard anymore — that's only
-                // reachable from inside the saved card's own Share button
-                // now, not as an immediate first tap.
+                // Poster opens the show/movie itself; the rest of the card
+                // opens the season's/movie's official saved rating card
+                // directly (same deep link SeasonRatingScreen's/
+                // MovieRatingScreen's own edit-pencil uses, minus &edit=1 —
+                // a rating that already exists should land in its read-only
+                // "saved" view, not force the editor). Neither one opens
+                // ShareRatingCard anymore — that's only reachable from
+                // inside the saved card's own Share button now, not as an
+                // immediate first tap.
                 <div
-                  key={`${r.showId}-${r.seasonNumber}`}
-                  onClick={() => router.push(`/show/${r.showId}?tab=reviews&reviewSeason=${r.seasonNumber}`)}
+                  key={key}
+                  onClick={() => router.push(ratingPath)}
                   className="flex-shrink-0 flex items-center text-left active:scale-95 transition rounded-2xl cursor-pointer"
                   style={{ width: 264, gap: 12, padding: 12, background: t.cardFill, border: `1px solid ${t.cardBorder}` }}
                 >
                   <button
-                    onClick={(e) => { e.stopPropagation(); router.push(`/show/${r.showId}`); }}
+                    onClick={(e) => { e.stopPropagation(); router.push(detailPath); }}
                     className="relative rounded-xl overflow-hidden flex-shrink-0"
                     style={{ width: 84, aspectRatio: "2 / 3" }}
                   >
-                    <PosterArt posterPath={r.posterPath} base={fallbackPalette(r.showId).base} glow={fallbackPalette(r.showId).glow} alt={displayTitle ?? ""} />
+                    <PosterArt posterPath={r.posterPath} base={palette.base} glow={palette.glow} alt={displayTitle ?? ""} />
                     {r.isAuto && (
                       <div className="absolute flex items-center gap-1 rounded-full" style={{ left: 5, top: 5, padding: "2px 5px", background: "rgba(232,162,76,0.2)" }}>
                         <Icon name="sparkle" size={8} color={accent} />
@@ -413,7 +484,7 @@ export default function Page() {
                   <div className="min-w-0 flex-1">
                     <div className="truncate" style={{ fontSize: 14.5, fontWeight: 700, color: "#fff" }}>{displayTitle ?? "…"}</div>
                     <div className="flex items-center gap-1.5" style={{ marginTop: 2 }}>
-                      <span style={{ fontSize: 12, color: t.textDim }}>{seasonLabel(r.seasonNumber)}</span>
+                      {!isMovie && <span style={{ fontSize: 12, color: t.textDim }}>{seasonLabel(r.seasonNumber)}</span>}
                       {moodMetas.length > 0 && <span style={{ fontSize: 12 }}>{moodMetas.map((m) => m.emoji).join(" ")}</span>}
                     </div>
                     {/* value is r.rating/2 — r.rating is the app's usual 0-10

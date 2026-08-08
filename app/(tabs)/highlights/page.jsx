@@ -7,10 +7,15 @@ import PosterArt from "@/components/ui/PosterArt";
 import { GenreTagRow } from "@/components/GenreTag";
 import EpisodeRatingFlow from "@/components/EpisodeRatingFlow";
 import WatchDateSheet from "@/components/WatchDateSheet";
+import MovieWatchDateSheet from "@/components/MovieWatchDateSheet";
+import MovieRatingScreen from "@/components/MovieRatingScreen";
 import { useAuth } from "@/lib/auth-context";
 import { useNavVisibility } from "@/lib/nav-visibility-context";
 import { getWatchedEpisodesForYear, getWatchedYears, hideFromHighlights, rateWatchById, setWatchDate } from "@/lib/episodeWatches";
-import { computeTopShows, computeTopGenres, computeRewatchCount, computePersonality } from "@/lib/highlights";
+import { getUserMoviesWatchedInYear, setMovieWatchDate } from "@/lib/userMovies";
+import { getAllMovieRatingsForUser, saveMovieRating, deleteMovieRating } from "@/lib/movieRatings";
+import { resolveSeasonRatings } from "@/lib/myRatings";
+import { computeTopShows, computeTopMovies, computeTopGenres, computeRewatchCount, computePersonality } from "@/lib/highlights";
 import { parseISODate } from "@/lib/watchDate";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { bangkokNow as getBangkokNow } from "@/lib/bangkokDate";
@@ -104,6 +109,20 @@ export default function Page() {
   const silentRefetchRef = useRef(false); // consumed once by the year-level effect
   const silentMonthRefetchRef = useRef(false); // consumed once by the month-level effect, set only when the year-level refetch that triggered it was itself silent
 
+  // Movies get their own year-level fetch, entirely independent of the TV
+  // one above — user_movies.watched_on is a plain date, no
+  // episode_watches-style enrichment pipeline needed for the raw rows
+  // themselves. Caught independently wherever it's used (see the effect
+  // below) so a still-missing user_movies table degrades to "no movie
+  // data" instead of breaking the TV-only Highlights view it used to be.
+  const [yearMovieRows, setYearMovieRows] = useState([]); // [{movieId, watchedOn}]
+  // Overrides the TV-only "empty" verdict when movies alone have activity
+  // this year — otherwise a movie-only year would show the false "No
+  // highlights for {year}" empty state. Purely a render-time derivation
+  // (not baked into yearStatus itself), so it stays correct regardless of
+  // which of the two independent fetches below resolves first.
+  const effectiveYearStatus = yearStatus === "empty" && yearMovieRows.length > 0 ? "ready" : yearStatus;
+
   // Defaults to the actual current Bangkok month/year on first load, per
   // spec — not "whichever month has the most recent activity" (an
   // earlier version of this page did that; changed on explicit request).
@@ -178,7 +197,7 @@ export default function Page() {
   // That's the actual bug behind "August starts off-screen on load": the
   // snap logic itself was always correct, it just never got a chance to
   // run against a real row element.
-  }, [month, year, yearStatus]);
+  }, [month, year, effectiveYearStatus]);
   const [monthStatus, setMonthStatus] = useState("loading"); // loading | ready | error — the month-level enrichment fetch
   const [monthRetryToken, setMonthRetryToken] = useState(0);
   const [monthEntries, setMonthEntries] = useState([]); // one entry per watch EVENT this month (rewatches included as their own entries), enriched via /api/shows/watch-entries
@@ -204,6 +223,13 @@ export default function Page() {
   // stale selection "stuck on" for whichever day the user looks at next.
   const [menuForEntry, setMenuForEntry] = useState(null);
   const [bulkMode, setBulkMode] = useState(null); // null | "remove" | "changeDate"
+  // Which entryType this bulk session covers — "remove" is TV-only (no
+  // hidden_from_highlights column on user_movies, see lib/userMovies.js),
+  // "changeDate" now applies to either, but never mixed: bulkSelectedIds
+  // is only ever homogeneous within one session (started fresh by
+  // startBulkSelect below, cleared on cancelBulkSelect), so every row
+  // gated on this needs to check media type too before joining in.
+  const [bulkMediaType, setBulkMediaType] = useState(null); // null | "tv" | "movie"
   // The bulk-select action bar below replaces the global FloatingNav (rather
   // than floating a second fixed bar at the same screen position) for as
   // long as bulk mode is on — see lib/nav-visibility-context.jsx. Reset on
@@ -236,6 +262,26 @@ export default function Page() {
       .catch(() => { if (!cancelled) setRatingCast([]); });
     return () => { cancelled = true; };
   }, [ratingEntry?.showId]);
+  // Movie equivalent of ratingEntry/ratingCast above — "Rate this Movie"
+  // opens the SAME MovieRatingScreen Movie Detail uses (not a lightweight
+  // inline star flow like EpisodeRatingFlow), since a movie has only ever
+  // one rating, period — there's no per-episode-instance rating concept
+  // to keep lightweight for. "Change Watched Date" for a movie now goes
+  // through the same bulk-select mechanism TV rows use (bulkMode/
+  // bulkMediaType/bulkSelectedIds below), not a separate single-item
+  // sheet — selecting just one movie and applying is the trivial case of
+  // the same flow, no need for a parallel direct-open path.
+  const [ratingMovieEntry, setRatingMovieEntry] = useState(null);
+  const [ratingMovieCast, setRatingMovieCast] = useState([]);
+  useEffect(() => {
+    if (!ratingMovieEntry?.movieId) { setRatingMovieCast([]); return; }
+    let cancelled = false;
+    fetch(`/api/movies/${ratingMovieEntry.movieId}/cast`)
+      .then((res) => res.json())
+      .then(({ cast }) => { if (!cancelled) setRatingMovieCast(cast ?? []); })
+      .catch(() => { if (!cancelled) setRatingMovieCast([]); });
+    return () => { cancelled = true; };
+  }, [ratingMovieEntry?.movieId]);
   const longPressTimerRef = useRef(null);
   const longPressFiredRef = useRef(false);
   const pressStartRef = useRef({ x: 0, y: 0 });
@@ -248,10 +294,19 @@ export default function Page() {
     setCollapsedShowIds(new Set());
     setMenuForEntry(null);
     setBulkMode(null);
+    setBulkMediaType(null);
     setBulkSelectedIds(new Set());
     setBulkDateSheetOpen(false);
     setRatingEntry(null);
+    setRatingMovieEntry(null);
   }, [selectedDay]);
+
+  // Raw TMDB ids collide across media types (a movie id and a TV show id
+  // aren't drawn from the same space) — every entry this press/menu
+  // machinery touches now spans both, so pressedEntryId/menuForEntry need
+  // a media-aware key rather than a bare entry.id (which movie entries
+  // don't even have — they only have movieId).
+  const entryPressKey = (entry) => (entry.entryType === "movie" ? `movie-${entry.movieId}` : entry.id);
 
   // Native iOS/Android press-and-hold, not a browser text-selection
   // gesture: pointer events (not just onContextMenu) so this works the
@@ -263,7 +318,7 @@ export default function Page() {
   const startLongPress = (entry, ev) => {
     longPressFiredRef.current = false;
     pressStartRef.current = { x: ev.clientX, y: ev.clientY };
-    setPressedEntryId(entry.id);
+    setPressedEntryId(entryPressKey(entry));
     longPressTimerRef.current = setTimeout(() => {
       longPressFiredRef.current = true;
       navigator.vibrate?.(10);
@@ -282,16 +337,20 @@ export default function Page() {
     if (Math.sqrt(dx * dx + dy * dy) > LONG_PRESS_MOVE_THRESHOLD) cancelLongPress();
   };
   // Guards the row's own navigate-on-click — a long press that already
-  // opened the menu must not *also* navigate to the episode once the
-  // pointer lifts (a plain click fires right after pointerup regardless).
+  // opened the menu must not *also* navigate to the episode/movie once
+  // the pointer lifts (a plain click fires right after pointerup
+  // regardless).
   const handleRowClick = (entry) => {
     if (longPressFiredRef.current) { longPressFiredRef.current = false; return; }
+    if (entry.entryType === "movie") { router.push(`/movie/${entry.movieId}`); return; }
     router.push(`/show/${entry.showId}/episode/${entry.season}/${entry.episode}`);
   };
 
   const startBulkSelect = (entry, mode) => {
     setBulkMode(mode);
-    setBulkSelectedIds(new Set([entry.id]));
+    const isMovie = entry.entryType === "movie";
+    setBulkMediaType(isMovie ? "movie" : "tv");
+    setBulkSelectedIds(new Set([isMovie ? entry.movieId : entry.id]));
   };
   const toggleBulkSelected = (id) => setBulkSelectedIds((prev) => {
     const next = new Set(prev);
@@ -317,6 +376,7 @@ export default function Page() {
   };
   const cancelBulkSelect = () => {
     setBulkMode(null);
+    setBulkMediaType(null);
     setBulkSelectedIds(new Set());
     setBulkDateSheetOpen(false);
   };
@@ -374,7 +434,11 @@ export default function Page() {
   // patched yearRows, exactly as they do for a single-episode date edit.
   const confirmBulkDateChange = async (result) => {
     if (!user || bulkBusy || bulkSelectedIds.size === 0) return;
-    const entries = (activeDay?.entries ?? []).filter((e) => bulkSelectedIds.has(e.id));
+    // entryType !== "movie" guard is defensive, not load-bearing — a
+    // movie-scoped bulk session only ever adds movieId values to
+    // bulkSelectedIds in the first place (see startBulkSelect), so this
+    // just makes the invariant explicit rather than relying on it.
+    const entries = (activeDay?.entries ?? []).filter((e) => e.entryType !== "movie" && bulkSelectedIds.has(e.id));
     setBulkBusy(true);
     try {
       const resolved = entries
@@ -424,6 +488,53 @@ export default function Page() {
     }
   };
 
+  // Movie equivalent of confirmBulkDateChange above — meaningfully
+  // simpler: user_movies.watched_on is a single plain date column (no
+  // precision/source columns like episode_watches), so there's no
+  // per-field precision object to reassemble, just a date or null. Still
+  // needs the same "release date is per-entry, not the seed's" care as
+  // resolveBulkFields above though — MovieWatchDateSheet's own
+  // pendingResult carries `source` for exactly this (see that component),
+  // so a bulk "Release date" pick re-derives each selected movie's OWN
+  // releaseDate rather than stamping every selected movie with whichever
+  // movie the sheet happened to be seeded from.
+  const confirmBulkMovieDateChange = async (result) => {
+    if (!user || bulkBusy || bulkSelectedIds.size === 0) return;
+    const entries = (activeDay?.entries ?? []).filter((e) => e.entryType === "movie" && bulkSelectedIds.has(e.movieId));
+    setBulkBusy(true);
+    try {
+      const resolved = entries
+        .map((entry) => ({
+          entry,
+          watchedOn: result.source === "release_date" ? (entry.releaseDate ?? null) : result.watchedOn,
+        }))
+        // A release-date bulk pick skips any selected movie with no real
+        // release date on file, rather than clearing its watched_on —
+        // same "don't corrupt what wasn't part of the edit" reasoning as
+        // resolveBulkFields returning null above.
+        .filter((x) => result.source !== "release_date" || x.watchedOn);
+      await Promise.all(resolved.map(({ entry, watchedOn }) => setMovieWatchDate(user.id, entry.movieId, watchedOn)));
+      const watchedOnById = new Map(resolved.map(({ entry, watchedOn }) => [entry.movieId, watchedOn]));
+      setYearMovieRows((prev) => prev
+        .map((r) => (watchedOnById.has(r.movieId) ? { ...r, watchedOn: watchedOnById.get(r.movieId) } : r))
+        // Same "drop it if the edit moved it out of the currently-viewed
+        // year (or cleared it entirely)" rule as the TV version above —
+        // yearMovieRows only ever holds rows genuinely belonging to `year`.
+        .filter((r) => {
+          if (!watchedOnById.has(r.movieId)) return true;
+          const newWatchedOn = watchedOnById.get(r.movieId);
+          return newWatchedOn ? Number(newWatchedOn.split("-")[0]) === year : false;
+        })
+      );
+      cancelBulkSelect();
+    } catch (err) {
+      console.error("Failed to update watch dates:", err);
+      window.alert("Couldn't update these — please try again.");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   // Year-level: just "does this year have any data, and what are its raw
   // rows" — every displayed number/card is computed from the MONTH-level
   // slice of this below, not from the whole year. `silent` (see the
@@ -453,6 +564,18 @@ export default function Page() {
         if (!cancelled) setYearStatus("error");
       });
 
+    return () => { cancelled = true; };
+  }, [user, year, retryToken]);
+
+  // Movies' own year-level fetch — same [user, year, retryToken] triggers
+  // as the TV one above, but a fully separate request/state, caught on
+  // its own so a movie-side failure never touches yearStatus/yearRows.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    getUserMoviesWatchedInYear(user.id, year)
+      .then((rows) => { if (!cancelled) setYearMovieRows(rows.filter((r) => r.watchedOn)); })
+      .catch((err) => { console.error(err); if (!cancelled) setYearMovieRows([]); });
     return () => { cancelled = true; };
   }, [user, year, retryToken]);
 
@@ -549,6 +672,112 @@ export default function Page() {
     return () => { cancelled = true; };
   }, [monthRows, monthRetryToken]);
 
+  // Movies' own month-level slice — filtered client-side from the
+  // already-loaded yearMovieRows, same pattern as monthRows above.
+  // watched_on is a plain "YYYY-MM-DD" date column (no precision concept
+  // the way episode_watches has — a movie's watch date is always exact or
+  // absent), so a direct year/month match on the parsed parts is enough.
+  const monthMovieRows = useMemo(
+    () => yearMovieRows.filter((r) => {
+      const [y, m] = r.watchedOn.split("-").map(Number);
+      return y === year && m === month;
+    }),
+    [yearMovieRows, year, month]
+  );
+
+  // Enriches this month's movie ids via /api/movies/batch — proportional
+  // to what's actually needed (just this month's movies), same reasoning
+  // as yearOnlyEntries below scoping its own TMDB lookups. runtimeMinutes
+  // is named to match a TV entry's own field (batch route calls it
+  // "runtime") so the day-detail panel's shared duration sum
+  // (dayMinutes, further down) can treat TV and movie entries identically
+  // without a type check.
+  const [monthMovieEntries, setMonthMovieEntries] = useState([]);
+  useEffect(() => {
+    if (monthMovieRows.length === 0) { setMonthMovieEntries([]); return; }
+    let cancelled = false;
+    fetch(`/api/movies/batch?ids=${monthMovieRows.map((r) => r.movieId).join(",")}`)
+      .then((res) => res.json())
+      .then(({ results }) => {
+        if (cancelled) return;
+        const byId = Object.fromEntries(results.map((m) => [m.id, m]));
+        setMonthMovieEntries(
+          monthMovieRows
+            .map((r) => {
+              const meta = byId[r.movieId];
+              if (!meta) return null;
+              return {
+                movieId: r.movieId,
+                watchedOn: r.watchedOn,
+                watchedAt: r.watchedOn,
+                title: meta.title,
+                originalTitle: meta.originalTitle,
+                originalLanguage: meta.originalLanguage,
+                posterPath: meta.posterPath,
+                backdropPath: meta.backdropPath,
+                runtimeMinutes: meta.runtime,
+                // releaseDate/genre — not used by the calendar/Top Movies
+                // rendering itself, only carried through for the "Rate
+                // this Movie" long-press flow's own MovieRatingScreen
+                // (year/genre line), so it doesn't need a second fetch.
+                releaseDate: meta.releaseDate,
+                genre: meta.genre,
+              };
+            })
+            .filter(Boolean)
+        );
+      })
+      .catch((err) => { console.error(err); if (!cancelled) setMonthMovieEntries([]); });
+    return () => { cancelled = true; };
+  }, [monthMovieRows]);
+
+  // One fetch per signed-in user, not scoped to the month — cheap (no
+  // TMDB calls, a direct movie_ratings query), so there's no reason to
+  // re-fetch on every month switch the way the TMDB-backed enrichments
+  // above do.
+  const [movieRatingMap, setMovieRatingMap] = useState(new Map());
+  // Full rating records (mood/character/text/savedAt, not just the plain
+  // number movieRatingMap above carries for Top Movies' ranking) — feeds
+  // MovieRatingScreen's own `manual` prop when opened from Highlights'
+  // long-press menu, same shape getMovieRating(userId, movieId) returns
+  // for Movie Detail's own rating screen.
+  const [movieRatingRecords, setMovieRatingRecords] = useState(new Map());
+  useEffect(() => {
+    if (!user) { setMovieRatingMap(new Map()); setMovieRatingRecords(new Map()); return; }
+    let cancelled = false;
+    getAllMovieRatingsForUser(user.id)
+      .then((rows) => {
+        if (cancelled) return;
+        setMovieRatingMap(new Map(rows.map((r) => [r.movieId, r.rating])));
+        setMovieRatingRecords(new Map(rows.map((r) => [r.movieId, r])));
+      })
+      .catch((err) => { console.error(err); if (!cancelled) { setMovieRatingMap(new Map()); setMovieRatingRecords(new Map()); } });
+    return () => { cancelled = true; };
+  }, [user]);
+
+  // Show ratings for Top Shows' rating-first ranking (see
+  // lib/highlights.js's computeTopShows) — scoped to just the
+  // (showId, seasonNumber) pairs actually touched by monthEntries, not
+  // the user's whole rating history, via lib/myRatings.js's
+  // resolveSeasonRatings.
+  const [showRatingMap, setShowRatingMap] = useState(new Map());
+  useEffect(() => {
+    if (!user || monthEntries.length === 0) { setShowRatingMap(new Map()); return; }
+    const pairKeys = new Set();
+    const pairs = [];
+    for (const e of monthEntries) {
+      const key = `${e.showId}-${e.season}`;
+      if (pairKeys.has(key)) continue;
+      pairKeys.add(key);
+      pairs.push({ showId: e.showId, seasonNumber: e.season });
+    }
+    let cancelled = false;
+    resolveSeasonRatings(user.id, pairs)
+      .then((map) => { if (!cancelled) setShowRatingMap(map); })
+      .catch((err) => { console.error(err); if (!cancelled) setShowRatingMap(new Map()); });
+    return () => { cancelled = true; };
+  }, [user, monthEntries]);
+
   // "Year only" precision entries have no month to attach to at all (see
   // episode_watches' schema comment — no invented month), so they can
   // never show up in the month view above no matter which month is
@@ -603,22 +832,38 @@ export default function Page() {
   // Top Shows/Genres, Completionist/Explorer/etc.) that don't care which
   // specific day something happened on.
   const monthEntriesWithDayKey = useMemo(
-    () => monthEntries.map((e) => ({ ...e, dayKey: e.watchDatePrecision === "day" ? e.watchedOn : null })),
+    () => monthEntries.map((e) => ({ ...e, dayKey: e.watchDatePrecision === "day" ? e.watchedOn : null, entryType: "episode" })),
     [monthEntries]
   );
   const dayKeyed = useMemo(() => monthEntriesWithDayKey.filter((e) => e.dayKey), [monthEntriesWithDayKey]);
+  // Movies always have a real dayKey (their own watchedOn IS the day) or
+  // none at all (no watched_on stamped yet) — no coarser precision to
+  // filter out the way TV's month/year precision needs dayKeyed to.
+  const movieDayKeyed = useMemo(
+    () => monthMovieEntries.map((e) => ({ ...e, dayKey: e.watchedOn, entryType: "movie" })),
+    [monthMovieEntries]
+  );
   const totalMinutes = useMemo(() => monthEntries.reduce((sum, e) => sum + (e.runtimeMinutes || 0), 0), [monthEntries]);
   const hours = Math.round(totalMinutes / 60);
   const uniqueShowCount = useMemo(() => new Set(monthEntries.map((e) => e.showId)).size, [monthEntries]);
+  // Active Days/Rewatched stay TV-only, unchanged — dayKeyed here is still
+  // exactly the same TV-only array it always was (movies feed a separate
+  // combined `days` memo below, not this).
   const activeDayCount = useMemo(() => new Set(dayKeyed.map((e) => e.dayKey)).size, [dayKeyed]);
   const rewatchCount = useMemo(() => computeRewatchCount(monthRows), [monthRows]);
   const personality = useMemo(() => computePersonality({ entries: monthEntriesWithDayKey, monthRows }), [monthEntriesWithDayKey, monthRows]);
-  const topShows = useMemo(() => computeTopShows(monthEntries, 5), [monthEntries]);
+  const topShows = useMemo(() => computeTopShows(monthEntries, 5, showRatingMap), [monthEntries, showRatingMap]);
+  const topMovies = useMemo(() => computeTopMovies(monthMovieEntries, 5, movieRatingMap), [monthMovieEntries, movieRatingMap]);
   const topGenres = useMemo(() => computeTopGenres(monthEntries), [monthEntries]);
 
+  // Calendar day cells mix TV + movie activity — a day with one episode
+  // and one movie shows the same dot intensity a day with two episodes
+  // would, entryType on each entry is what lets the day-detail panel
+  // (dayShowGroups/dayMovieEntries below) split them back apart for
+  // display.
   const days = useMemo(() => {
     const byDay = new Map();
-    for (const e of dayKeyed) {
+    for (const e of [...dayKeyed, ...movieDayKeyed]) {
       const day = Number(e.dayKey.split("-")[2]);
       if (!byDay.has(day)) byDay.set(day, []);
       byDay.get(day).push(e);
@@ -629,7 +874,7 @@ export default function Page() {
       const entries = byDay.get(day) || [];
       return { day, level: levelForCount(entries.length), entries };
     });
-  }, [dayKeyed, year, month]);
+  }, [dayKeyed, movieDayKeyed, year, month]);
 
   // Defaults to today (Bangkok) when viewing the actual current month;
   // otherwise the most recent day with activity, matching how a past
@@ -647,15 +892,22 @@ export default function Page() {
 
   // Selected day's episodes, grouped by show — each group renders as a
   // collapsible "Show Title >" header with its own episode cards
-  // underneath, rather than one flat list mixing shows together.
+  // underneath, rather than one flat list mixing shows together. Movie
+  // entries are excluded here (a movie has no "show" to group under) and
+  // rendered as their own flat list, dayMovieEntries below.
   const dayShowGroups = useMemo(() => {
     const byShow = new Map();
     for (const e of activeDay?.entries ?? []) {
+      if (e.entryType === "movie") continue;
       if (!byShow.has(e.showId)) byShow.set(e.showId, { showId: e.showId, showTitle: e.showTitle, entries: [] });
       byShow.get(e.showId).entries.push(e);
     }
     return [...byShow.values()];
   }, [activeDay]);
+  const dayMovieEntries = useMemo(
+    () => (activeDay?.entries ?? []).filter((e) => e.entryType === "movie"),
+    [activeDay]
+  );
   const toggleShowGroup = (showId) => setCollapsedShowIds((prev) => {
     const next = new Set(prev);
     next.has(showId) ? next.delete(showId) : next.add(showId);
@@ -672,7 +924,9 @@ export default function Page() {
   // found first purely to decide whether Release date/Release month
   // render enabled — the real per-entry air date is what actually gets
   // applied on save, via resolveBulkFields above.
-  const bulkSeedEntry = bulkSelectedIds.size > 0 ? (activeDay?.entries ?? []).find((e) => bulkSelectedIds.has(e.id)) : null;
+  const bulkSeedEntry = bulkSelectedIds.size > 0
+    ? (activeDay?.entries ?? []).find((e) => (bulkMediaType === "movie" ? e.entryType === "movie" && bulkSelectedIds.has(e.movieId) : bulkSelectedIds.has(e.id)))
+    : null;
   const bulkTodayStr = `${bangkokNow.year}-${String(bangkokNow.month).padStart(2, "0")}-${String(bangkokNow.day).padStart(2, "0")}`;
 
   const changeYear = (y) => {
@@ -818,7 +1072,7 @@ export default function Page() {
         </div>
       )}
 
-      {yearStatus === "empty" && (
+      {effectiveYearStatus === "empty" && (
         <div className="px-6 flex flex-col items-center text-center" style={{ marginTop: 90 }}>
           <div style={{ width: 56, height: 56, borderRadius: "50%", background: t.cardFill, border: `1px solid ${t.cardBorder}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Icon name="calendar" size={24} color={t.textDim} strokeWidth={1.5} />
@@ -828,7 +1082,7 @@ export default function Page() {
         </div>
       )}
 
-      {yearStatus === "ready" && (
+      {effectiveYearStatus === "ready" && (
         <>
           {monthSelector}
 
@@ -948,7 +1202,7 @@ export default function Page() {
                     pass (width/padding/icon badge/border-radius/margins),
                     plus the number reduced another 10% on top of its own
                     previous pass. */}
-                {[["episodes", monthEntries.length, "Episodes"], ["layers", uniqueShowCount, "Shows"], ["calendar", activeDayCount, "Active Days"], ["refresh", rewatchCount, "Rewatched"]].map(([icon, n, l], i) => (
+                {[["episodes", monthEntries.length, "Episodes"], ["layers", uniqueShowCount, "Shows"], ["ticket", monthMovieEntries.length, "Movies"], ["calendar", activeDayCount, "Active Days"], ["refresh", rewatchCount, "Rewatched"]].map(([icon, n, l], i) => (
                   <div key={i} className="flex-shrink-0 flex flex-col items-center text-center" style={{ width: 86.36, padding: "12.70px 11.29px", background: statCardBg, border: "1px solid rgba(255,255,255,0.05)", borderRadius: 12.23 }}>
                     <div className="flex items-center justify-center rounded-full flex-shrink-0" style={{ width: 37.62, height: 37.62, background: `${statIconGold}12` }}>
                       <Icon name={icon} size={16.93} color={accent} strokeWidth={1.4} />
@@ -983,6 +1237,30 @@ export default function Page() {
                           </div>
                           <div className="mt-2 leading-tight" style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
                           <div style={{ fontSize: 11, color: t.textDim, marginTop: 2 }}>{s.hours}h · {s.episodeCount} ep</div>
+                        </button>
+                      );
+                    })}
+                    <div className="w-2 flex-shrink-0" />
+                  </div>
+                </div>
+              )}
+
+              {/* top movies — directly below Top Shows, same card/row
+                  pattern. No episode-count equivalent for a movie, so the
+                  subtext is just its runtime. */}
+              {topMovies.length > 0 && (
+                <div style={{ marginTop: 26 }}>
+                  <div className="px-6" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 12 }}>Top Movies</div>
+                  <div className="flex gap-3 pl-6 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                    {topMovies.map((m) => {
+                      const title = resolveTitle(m, readableLanguages);
+                      return (
+                        <button key={m.movieId} onClick={() => router.push(`/movie/${m.movieId}`)} className="flex-shrink-0 text-left active:scale-95 transition" style={{ width: 156 }}>
+                          <div className="relative rounded-2xl overflow-hidden" style={{ aspectRatio: "2 / 3", borderRadius: 22, boxShadow: "0 14px 32px rgba(0,0,0,0.34)", filter: "contrast(1.06) saturate(1.05)" }}>
+                            <PosterArt posterPath={m.posterPath} alt={title} />
+                          </div>
+                          <div className="mt-2 leading-tight" style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
+                          <div style={{ fontSize: 11, color: t.textDim, marginTop: 2 }}>{formatDuration(m.runtimeMinutes)}</div>
                         </button>
                       );
                     })}
@@ -1154,7 +1432,13 @@ export default function Page() {
                 </div>
                 {activeDay && activeDay.entries.length > 0 && (
                   <div style={{ fontSize: 14, color: t.textDim, marginTop: 4 }}>
-                    {activeDay.entries.length} episode{activeDay.entries.length !== 1 ? "s" : ""} · {formatDuration(dayMinutes)} watched
+                    {(() => {
+                      const epCount = activeDay.entries.length - dayMovieEntries.length;
+                      const parts = [];
+                      if (epCount > 0) parts.push(`${epCount} episode${epCount !== 1 ? "s" : ""}`);
+                      if (dayMovieEntries.length > 0) parts.push(`${dayMovieEntries.length} movie${dayMovieEntries.length !== 1 ? "s" : ""}`);
+                      return `${parts.join(", ")} · ${formatDuration(dayMinutes)} watched`;
+                    })()}
                   </div>
                 )}
               </div>
@@ -1172,7 +1456,14 @@ export default function Page() {
                     const selectColor = bulkMode === "remove" ? "#e0567a" : accent;
                     const checkColor = bulkMode === "remove" ? "#fff" : "#1a1108";
                     const groupIds = group.entries.map((e) => e.id);
-                    const groupAllSelected = bulkMode && groupIds.length > 0 && groupIds.every((id) => bulkSelectedIds.has(id));
+                    // Gated on bulkMediaType === "tv" too, not just
+                    // bulkMode — a movie-scoped bulk session (entered from
+                    // a movie row's own "Change Watched Date") must not
+                    // also turn TV show groups into selection targets;
+                    // they render at rest, same as when no bulk mode is
+                    // active at all.
+                    const bulkActiveHere = bulkMode && bulkMediaType === "tv";
+                    const groupAllSelected = bulkActiveHere && groupIds.length > 0 && groupIds.every((id) => bulkSelectedIds.has(id));
                     return (
                       <div key={group.showId} style={{ borderTop: gi > 0 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
                         {/* Two separate tap targets, not one row-wide
@@ -1192,11 +1483,11 @@ export default function Page() {
                             episode's own circle one at a time. */}
                         <div className="w-full flex items-center justify-between">
                           <button
-                            onClick={() => (bulkMode ? toggleBulkSelectShow(group) : router.push(`/show/${group.showId}`))}
+                            onClick={() => (bulkActiveHere ? toggleBulkSelectShow(group) : router.push(`/show/${group.showId}`))}
                             className="flex items-center gap-2 min-w-0 flex-1 text-left transition hover:bg-white/[0.03] active:opacity-70"
                             style={{ padding: "14px 16px" }}
                           >
-                            {bulkMode && (
+                            {bulkActiveHere && (
                               <span
                                 className="flex items-center justify-center rounded-full flex-shrink-0"
                                 style={{
@@ -1277,7 +1568,7 @@ export default function Page() {
                                   <div style={{ fontSize: 12, color: t.textDim, marginTop: 2 }}>{formatDuration(e.runtimeMinutes)} watched</div>
                                 </div>
                               </button>
-                              {bulkMode && (
+                              {bulkActiveHere && (
                                 <button
                                   onClick={() => toggleBulkSelected(e.id)}
                                   aria-label={isSelected ? "Deselect" : "Select"}
@@ -1298,6 +1589,92 @@ export default function Page() {
                       </div>
                     );
                   })}
+                  {/* Movies watched this day — a flat list (no "show" to
+                      group under), rendered as a sibling section inside
+                      the same container rather than a separate floating
+                      card, same reasoning as the per-show groups above.
+                      Same tap-and-hold menu as episode rows now (Rate
+                      this Movie / Change Watched Date) — see
+                      entryPressKey/startLongPress/handleRowClick above
+                      for the media-aware wiring shared with TV rows. Bulk
+                      select mirrors the per-episode circle pattern too
+                      (gated on bulkMediaType === "movie" — see
+                      bulkActiveHereMovie below — so a TV-scoped bulk
+                      session doesn't turn movie rows into selection
+                      targets, same guard reasoning as dayShowGroups'
+                      own bulkActiveHere). */}
+                  {dayMovieEntries.length > 0 && (() => {
+                    const bulkActiveHereMovie = bulkMode && bulkMediaType === "movie";
+                    return (
+                      <div style={{ borderTop: dayShowGroups.length > 0 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
+                        {dayMovieEntries.map((e) => {
+                          const isPressed = pressedEntryId === entryPressKey(e);
+                          const isSelected = bulkSelectedIds.has(e.movieId);
+                          const movieRating = movieRatingMap.get(e.movieId);
+                          return (
+                            <div key={e.movieId} className="w-full flex items-center gap-3" style={{ padding: "0 16px 16px" }}>
+                              <button
+                                onPointerDown={(ev) => !bulkMode && startLongPress(e, ev)}
+                                onPointerMove={handlePressMove}
+                                onPointerUp={cancelLongPress}
+                                onPointerLeave={cancelLongPress}
+                                onPointerCancel={cancelLongPress}
+                                onContextMenu={(ev) => ev.preventDefault()}
+                                onClick={() => !bulkMode && handleRowClick(e)}
+                                className="flex-1 min-w-0 flex items-center gap-3 text-left transition hover:bg-white/[0.03]"
+                                style={{
+                                  touchAction: "manipulation",
+                                  userSelect: "none",
+                                  WebkitUserSelect: "none",
+                                  WebkitTouchCallout: "none",
+                                  WebkitTapHighlightColor: "transparent",
+                                  transform: isPressed ? "scale(0.975) translateY(1px)" : "scale(1) translateY(0)",
+                                  filter: isPressed ? "brightness(0.92)" : "brightness(1)",
+                                  transition: "transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1), filter 140ms ease-out",
+                                }}
+                              >
+                                <div className="relative flex-shrink-0 rounded-xl overflow-hidden" style={{ width: 88, height: 50 }}>
+                                  <PosterArt posterPath={e.backdropPath ?? e.posterPath} alt={resolveTitle(e, readableLanguages)} />
+                                  {/* Personal rating badge — same corner/
+                                      style convention as the episode
+                                      thumbnails' own badge above, just the
+                                      movie's real 0-10 scale (movieRatingMap,
+                                      same source Top Movies' ranking reads
+                                      from) instead of an episode's 0-5 stars. */}
+                                  {movieRating != null && (
+                                    <div className="absolute flex items-center gap-1 rounded-full" style={{ left: 5, bottom: 5, padding: "2px 6px", background: "rgba(0,0,0,0.55)" }}>
+                                      <Icon name="star" size={8} color={accent} />
+                                      <span style={{ fontSize: 10, fontWeight: 600, color: "#fff" }}>{movieRating.toFixed(1)}/10</span>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div style={{ fontSize: 16, fontWeight: 600, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{resolveTitle(e, readableLanguages)}</div>
+                                  <div style={{ fontSize: 13, color: "#9B9BA3", marginTop: 2 }}>Movie</div>
+                                  <div style={{ fontSize: 12, color: t.textDim, marginTop: 2 }}>{formatDuration(e.runtimeMinutes)} watched</div>
+                                </div>
+                              </button>
+                              {bulkActiveHereMovie && (
+                                <button
+                                  onClick={() => toggleBulkSelected(e.movieId)}
+                                  aria-label={isSelected ? "Deselect" : "Select"}
+                                  className="flex items-center justify-center rounded-full flex-shrink-0 active:scale-90 transition"
+                                  style={{
+                                    width: 24,
+                                    height: 24,
+                                    border: `1.5px solid ${isSelected ? accent : "rgba(255,255,255,0.5)"}`,
+                                    background: isSelected ? accent : "transparent",
+                                  }}
+                                >
+                                  {isSelected && <Icon name="check" size={13} color="#1a1108" strokeWidth={3} />}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 <div key={`${selectedDay}-empty`} className="flex flex-col items-center text-center rounded-2xl" style={{ marginTop: 14, padding: "36px 20px", background: "#171717", border: "1px solid rgba(255,255,255,0.05)", animation: "highlightsDayFade 200ms ease" }}>
@@ -1314,11 +1691,15 @@ export default function Page() {
       {/* Tap-and-hold menu — small liquid-glass popup, matches this app's
           existing anchored-popover style (e.g. Show Detail's more menu)
           but centered rather than row-anchored, since a long-pressed row
-          can be anywhere in a scrolled list. "Rate the Episode" opens
-          EpisodeRatingFlow right here (see below) rather than navigating
-          away — cast is omitted (that section of the card just doesn't
-          render, per its own design) since Highlights has no reason to
-          fetch a show's full cast list otherwise. */}
+          can be anywhere in a scrolled list. "Rate the Episode"/"Rate this
+          Movie" opens EpisodeRatingFlow/MovieRatingScreen right here (see
+          below) rather than navigating away. Movie rows use the same menu
+          shell, branched by menuForEntry.entryType — "Rate this Movie"
+          opens the full MovieRatingScreen (a movie has just one rating,
+          period, unlike an episode's lightweight per-instance star flow),
+          "Change Watched Date" opens MovieWatchDateSheet directly instead
+          of going through show rows' bulk-select detour (there's nothing
+          to multi-select for a single movie's single watched_on). */}
       {menuForEntry && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setMenuForEntry(null)} />
@@ -1326,17 +1707,31 @@ export default function Page() {
             className="fixed z-50 rounded-2xl overflow-hidden"
             style={{ left: "50%", top: "50%", transform: "translate(-50%, -50%)", width: 240, background: "rgba(22,18,14,0.97)", border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)", boxShadow: "0 20px 50px rgba(0,0,0,0.6)" }}
           >
-            <button
-              onClick={() => { setRatingEntry(menuForEntry); setMenuForEntry(null); }}
-              className="w-full flex items-center gap-3 active:opacity-70 transition"
-              style={{ padding: "14px 16px" }}
-            >
-              <Icon name="star" size={16} color="#fff" />
-              <span style={{ fontSize: 13.5, fontWeight: 600, color: "#fff" }}>Rate the Episode</span>
-            </button>
+            {menuForEntry.entryType === "movie" ? (
+              <button
+                onClick={() => { setRatingMovieEntry(menuForEntry); setMenuForEntry(null); }}
+                className="w-full flex items-center gap-3 active:opacity-70 transition"
+                style={{ padding: "14px 16px" }}
+              >
+                <Icon name="star" size={16} color="#fff" />
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: "#fff" }}>Rate this Movie</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => { setRatingEntry(menuForEntry); setMenuForEntry(null); }}
+                className="w-full flex items-center gap-3 active:opacity-70 transition"
+                style={{ padding: "14px 16px" }}
+              >
+                <Icon name="star" size={16} color="#fff" />
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: "#fff" }}>Rate the Episode</span>
+              </button>
+            )}
             <div style={{ height: 1, background: "rgba(255,255,255,0.07)" }} />
             <button
-              onClick={() => { startBulkSelect(menuForEntry, "changeDate"); setMenuForEntry(null); }}
+              onClick={() => {
+                startBulkSelect(menuForEntry, "changeDate");
+                setMenuForEntry(null);
+              }}
               className="w-full flex items-center gap-3 active:opacity-70 transition"
               style={{ padding: "14px 16px" }}
             >
@@ -1412,6 +1807,42 @@ export default function Page() {
         />
       )}
 
+      {/* Movie rating screen — same component Movie Detail uses, opened
+          here instead of navigating away (mirrors ratingEntry/
+          EpisodeRatingFlow's own inline-render approach above). onSave/
+          onDelete patch movieRatingMap/movieRatingRecords optimistically
+          so Top Movies' ranking and a reopened menu both reflect the
+          change immediately, no refetch. */}
+      {ratingMovieEntry && (
+        <MovieRatingScreen
+          movieTitle={resolveTitle(ratingMovieEntry, readableLanguages)}
+          movie={{
+            posterPath: ratingMovieEntry.posterPath,
+            year: ratingMovieEntry.releaseDate ? ratingMovieEntry.releaseDate.slice(0, 4) : "",
+            runtime: ratingMovieEntry.runtimeMinutes,
+          }}
+          manual={movieRatingRecords.get(ratingMovieEntry.movieId) ?? null}
+          cast={ratingMovieCast}
+          backdropPath={ratingMovieEntry.backdropPath}
+          logoUrl={null}
+          movieGenre={ratingMovieEntry.genre}
+          initialEditing={!movieRatingRecords.get(ratingMovieEntry.movieId)}
+          onClose={() => setRatingMovieEntry(null)}
+          onSave={async (payload) => {
+            if (!user) return;
+            await saveMovieRating(user.id, ratingMovieEntry.movieId, payload);
+            setMovieRatingMap((prev) => new Map(prev).set(ratingMovieEntry.movieId, payload.rating));
+            setMovieRatingRecords((prev) => new Map(prev).set(ratingMovieEntry.movieId, { movieId: ratingMovieEntry.movieId, ...payload, savedAt: new Date() }));
+          }}
+          onDelete={async () => {
+            if (!user) return;
+            await deleteMovieRating(user.id, ratingMovieEntry.movieId);
+            setMovieRatingMap((prev) => { const next = new Map(prev); next.delete(ratingMovieEntry.movieId); return next; });
+            setMovieRatingRecords((prev) => { const next = new Map(prev); next.delete(ratingMovieEntry.movieId); return next; });
+          }}
+        />
+      )}
+
       {/* Persistent bulk-action bar — REPLACES the global FloatingNav at
           this same bottom screen position for as long as bulk select is on
           (see the useNavVisibility effect above, which hides FloatingNav
@@ -1462,14 +1893,27 @@ export default function Page() {
           one specific episode's stored value (see bulkSeedEntry above).
           confirmBulkDateChange applies the result to every selected
           entry, re-deriving Release date/Release month per entry from
-          its own real air date. */}
+          its own real air date. Movies (bulkMediaType === "movie") get
+          the simpler MovieWatchDateSheet + confirmBulkMovieDateChange
+          instead — same "today" seed, same per-entry release-date
+          re-derivation, just without the precision options that only
+          make sense for episodes. */}
       {bulkDateSheetOpen && (
-        <WatchDateSheet
-          current={{ watchDatePrecision: "day", watchedOn: bulkTodayStr, watchedYear: bangkokNow.year, watchedMonth: bangkokNow.month, watchDateSource: null }}
-          episodeAirDate={bulkSeedEntry?.episodeAirDate ?? null}
-          onClose={() => setBulkDateSheetOpen(false)}
-          onSave={confirmBulkDateChange}
-        />
+        bulkMediaType === "movie" ? (
+          <MovieWatchDateSheet
+            current={{ watchedOn: bulkTodayStr }}
+            movieReleaseDate={bulkSeedEntry?.releaseDate ?? null}
+            onClose={() => setBulkDateSheetOpen(false)}
+            onSave={confirmBulkMovieDateChange}
+          />
+        ) : (
+          <WatchDateSheet
+            current={{ watchDatePrecision: "day", watchedOn: bulkTodayStr, watchedYear: bangkokNow.year, watchedMonth: bangkokNow.month, watchDateSource: null }}
+            episodeAirDate={bulkSeedEntry?.episodeAirDate ?? null}
+            onClose={() => setBulkDateSheetOpen(false)}
+            onSave={confirmBulkDateChange}
+          />
+        )
       )}
     </div>
   );

@@ -7,9 +7,11 @@ import GlassCircle from "@/components/ui/GlassCircle";
 import PosterArt from "@/components/ui/PosterArt";
 import PosterCard from "@/components/ui/PosterCard";
 import PosterQuickStatusMenu from "@/components/ui/PosterQuickStatusMenu";
+import MoviePosterQuickStatusMenu from "@/components/ui/MoviePosterQuickStatusMenu";
 import PosterGrid from "@/components/ui/PosterGrid";
 import { useAuth } from "@/lib/auth-context";
 import { useFavorites } from "@/lib/favorites-context";
+import { useMovieFavorites } from "@/lib/movie-favorites-context";
 import { useNavVisibility } from "@/lib/nav-visibility-context";
 import {
   getCollection,
@@ -19,7 +21,9 @@ import {
   deleteCollection,
   addShowToCollection,
   removeShowFromCollection as removeShowFromCollectionRow,
+  removeMovieFromCollection as removeMovieFromCollectionRow,
 } from "@/lib/collections";
+import { hrefForMedia, mediaKey } from "@/lib/media";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 import { CollectionBackdrop, backdropThemes, sortOptions, sortItems } from "../shared";
@@ -43,6 +47,7 @@ export default function Page({ params }) {
   const router = useRouter();
   const { user } = useAuth();
   const { isFavorite, toggleFavorite } = useFavorites();
+  const { isFavorite: isMovieFavorite, toggleFavorite: toggleMovieFavorite } = useMovieFavorites();
   const readableLanguages = useReadableLanguages();
   const [detail, setDetail] = useState(initialDetail);
   const [activeMenu, setActiveMenu] = useState(null); // 'detailMenu' | 'showsSort' | null
@@ -50,7 +55,7 @@ export default function Page({ params }) {
   const [editingList, setEditingList] = useState(false);
   const [reorderMode, setReorderMode] = useState(false);
   const [showsSortMode, setShowsSortMode] = useState("firstAdded");
-  const [dragId, setDragId] = useState(null);
+  const [dragKey, setDragKey] = useState(null);
   const [backdropPickerOpen, setBackdropPickerOpen] = useState(false);
   const [longPress, setLongPress] = useState(null);
   const fileInputRef = useRef(null);
@@ -67,8 +72,15 @@ export default function Page({ params }) {
     return () => setNavHidden(false);
   }, [setNavHidden]);
 
-  // collections + collection_shows, joined against TMDB via the batch
-  // route (this page is client-only, like every screen that reads auth).
+  // collections + collection_shows + collection_movies, joined against
+  // TMDB via the two batch routes (this page is client-only, like every
+  // screen that reads auth). Merged into one mixed covers array, each
+  // item tagged mediaType so downstream rendering (favorite wiring,
+  // long-press menu, href, remove) can branch per item — this is the one
+  // screen in the app that genuinely renders both media types mixed
+  // together in an editable grid, so per-item branching here is
+  // unavoidable (same reasoning already used in LibraryClient.jsx/
+  // ExploreClient.jsx for their own mixed grids).
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -77,14 +89,20 @@ export default function Page({ params }) {
       // (deleted, or a stale/bad id), so its own history entry shouldn't
       // stick around as something "back" could ever land on again.
       if (!row) { if (!cancelled) router.replace("/profile/collections"); return; }
-      if (row.showIds.length === 0) {
+      if (row.showIds.length === 0 && row.movieIds.length === 0) {
         if (!cancelled) setDetail({ id: row.id, name: row.name, description: row.description ?? "", backdropTheme: null, customImage: null, coverStyle: row.coverStyle, covers: [] });
         return;
       }
-      const res = await fetch(`/api/shows/batch?ids=${row.showIds.join(",")}`);
-      const { results } = await res.json();
+      const [showResults, movieResults] = await Promise.all([
+        row.showIds.length > 0 ? fetch(`/api/shows/batch?ids=${row.showIds.join(",")}`).then((r) => r.json()).then((d) => d.results) : Promise.resolve([]),
+        row.movieIds.length > 0 ? fetch(`/api/movies/batch?ids=${row.movieIds.join(",")}`).then((r) => r.json()).then((d) => d.results).catch((err) => { console.error(err); return []; }) : Promise.resolve([]),
+      ]);
       if (cancelled) return;
-      setDetail({ id: row.id, name: row.name, description: row.description ?? "", backdropTheme: null, customImage: null, coverStyle: row.coverStyle, covers: results.map((s) => ({ ...s, addedAt: Date.now() })) });
+      const covers = [
+        ...showResults.map((s) => ({ ...s, mediaType: "tv", addedAt: Date.now() })),
+        ...movieResults.map((m) => ({ ...m, mediaType: "movie", addedAt: Date.now() })),
+      ];
+      setDetail({ id: row.id, name: row.name, description: row.description ?? "", backdropTheme: null, customImage: null, coverStyle: row.coverStyle, covers });
     }).catch(console.error);
     return () => { cancelled = true; };
   }, [user, params.id, router]);
@@ -117,9 +135,14 @@ export default function Page({ params }) {
     setDetail((prev) => ({ ...prev, coverStyle: style, backdropTheme: null, customImage: null }));
     if (user && detail.id) updateCollectionCoverStyle(detail.id, style).catch(console.error);
   };
-  const removeShowFromCollection = (showId) => {
-    setDetail((prev) => ({ ...prev, covers: prev.covers.filter((s) => s.id !== showId) }));
-    if (user && detail.id) removeShowFromCollectionRow(detail.id, showId).catch(console.error);
+  // Branches on the item's own mediaType — same raw-id-collision reasoning
+  // as everywhere else mixed movie/show lists exist in this app (a movie
+  // id and a TV show id aren't drawn from the same space).
+  const removeFromCollection = (item) => {
+    setDetail((prev) => ({ ...prev, covers: prev.covers.filter((s) => mediaKey(s) !== mediaKey(item)) }));
+    if (!user || !detail.id) return;
+    if (item.mediaType === "movie") removeMovieFromCollectionRow(detail.id, item.id).catch(console.error);
+    else removeShowFromCollectionRow(detail.id, item.id).catch(console.error);
   };
   // Awaits the delete before navigating (was fire-and-forget) — pushing
   // away immediately raced the list page's own fetch, which could land
@@ -135,17 +158,20 @@ export default function Page({ params }) {
     }
     router.replace("/profile/collections");
   };
-  const handleDrop = (targetId) => {
-    if (dragId == null || dragId === targetId) return;
+  // Keyed on mediaKey, not raw id — a movie id and a TV show id aren't
+  // drawn from the same space, so a plain `s.id` match could reorder the
+  // wrong item in a mixed collection.
+  const handleDrop = (targetKey) => {
+    if (dragKey == null || dragKey === targetKey) return;
     setDetail((prev) => {
       const arr = [...prev.covers];
-      const fromIdx = arr.findIndex((s) => s.id === dragId);
-      const toIdx = arr.findIndex((s) => s.id === targetId);
+      const fromIdx = arr.findIndex((s) => mediaKey(s) === dragKey);
+      const toIdx = arr.findIndex((s) => mediaKey(s) === targetKey);
       const [moved] = arr.splice(fromIdx, 1);
       arr.splice(toIdx, 0, moved);
       return { ...prev, covers: arr };
     });
-    setDragId(null);
+    setDragKey(null);
   };
   const handleImageUpload = (e) => {
     const file = e.target.files?.[0];
@@ -284,46 +310,51 @@ export default function Page({ params }) {
             // what's actually displayed.
             const resolvedCovers = detail.covers.map((c) => ({ ...c, title: resolveTitle(c, readableLanguages) }));
             return reorderMode ? resolvedCovers : sortItems(resolvedCovers, showsSortMode, "title");
-          })().map((s) => (
-            <div
-              key={s.id}
-              className="active:scale-95 transition"
-              draggable={reorderMode}
-              onDragStart={() => setDragId(s.id)}
-              onDragOver={(e) => reorderMode && e.preventDefault()}
-              onDrop={() => handleDrop(s.id)}
-              style={{ opacity: reorderMode && dragId === s.id ? 0.4 : 1 }}
-            >
-              <PosterCard
-                show={s}
-                width="100%"
-                shrink={false}
-                titlePlacement="overlay"
-                // Navigation is disabled while reordering/editing so a tap
-                // meant to drag or remove a poster can't also follow it to
-                // the show page — only the plain browsing state links out.
-                href={!reorderMode && !editingList ? `/show/${s.id}` : undefined}
-                border={reorderMode ? `1.5px dashed ${t.glassBorder}` : undefined}
-                favorite={!reorderMode && !editingList ? isFavorite(s.id) : false}
-                onToggleFavorite={() => toggleFavorite(s.id, "CollectionDetail:favoriteBadge")}
-                // Same guard as href above — disabled during reorder (a
-                // native drag already owns the press gesture) or editing
-                // (a tap there removes the show, not a status change).
-                onLongPress={!reorderMode && !editingList ? (show, rect) => setLongPress({ show, rect }) : undefined}
-                badge={
-                  reorderMode ? (
-                    <div className="flex items-center justify-center" style={{ width: 26, height: 26, borderRadius: "50%", background: "rgba(0,0,0,0.55)" }}>
-                      <Icon name="reorder" size={13} color="#fff" />
-                    </div>
-                  ) : editingList ? (
-                    <button onClick={() => removeShowFromCollection(s.id)} className="flex items-center justify-center active:scale-90 transition" style={{ width: 22, height: 22, borderRadius: "50%", background: "rgba(0,0,0,0.55)" }}>
-                      <Icon name="x" size={12} color="#fff" />
-                    </button>
-                  ) : null
-                }
-              />
-            </div>
-          ))}
+          })().map((s) => {
+            const isMovie = s.mediaType === "movie";
+            const key = mediaKey(s);
+            return (
+              <div
+                key={key}
+                className="active:scale-95 transition"
+                draggable={reorderMode}
+                onDragStart={() => setDragKey(key)}
+                onDragOver={(e) => reorderMode && e.preventDefault()}
+                onDrop={() => handleDrop(key)}
+                style={{ opacity: reorderMode && dragKey === key ? 0.4 : 1 }}
+              >
+                <PosterCard
+                  show={s}
+                  width="100%"
+                  shrink={false}
+                  titlePlacement="overlay"
+                  // Navigation is disabled while reordering/editing so a tap
+                  // meant to drag or remove a poster can't also follow it to
+                  // the show/movie page — only the plain browsing state
+                  // links out.
+                  href={!reorderMode && !editingList ? hrefForMedia(s) : undefined}
+                  border={reorderMode ? `1.5px dashed ${t.glassBorder}` : undefined}
+                  favorite={!reorderMode && !editingList ? (isMovie ? isMovieFavorite(s.id) : isFavorite(s.id)) : false}
+                  onToggleFavorite={() => (isMovie ? toggleMovieFavorite(s.id, "CollectionDetail:favoriteBadge") : toggleFavorite(s.id, "CollectionDetail:favoriteBadge"))}
+                  // Same guard as href above — disabled during reorder (a
+                  // native drag already owns the press gesture) or editing
+                  // (a tap there removes the item, not a status change).
+                  onLongPress={!reorderMode && !editingList ? (show, rect) => setLongPress({ show: { ...show, mediaType: s.mediaType }, rect }) : undefined}
+                  badge={
+                    reorderMode ? (
+                      <div className="flex items-center justify-center" style={{ width: 26, height: 26, borderRadius: "50%", background: "rgba(0,0,0,0.55)" }}>
+                        <Icon name="reorder" size={13} color="#fff" />
+                      </div>
+                    ) : editingList ? (
+                      <button onClick={() => removeFromCollection(s)} className="flex items-center justify-center active:scale-90 transition" style={{ width: 22, height: 22, borderRadius: "50%", background: "rgba(0,0,0,0.55)" }}>
+                        <Icon name="x" size={12} color="#fff" />
+                      </button>
+                    ) : null
+                  }
+                />
+              </div>
+            );
+          })}
         </PosterGrid>
         {detail.covers.length === 0 && <div style={{ padding: "20px 0", textAlign: "center", fontSize: 13, color: t.textDim }}>No shows in this collection yet.</div>}
       </div>
@@ -429,14 +460,27 @@ export default function Page({ params }) {
 
       {/* No onStatusChange refresh needed — collection membership is
           independent of status, so a status change here never changes
-          what belongs in this collection's grid. */}
-      <PosterQuickStatusMenu
-        show={longPress?.show ?? null}
-        anchorRect={longPress?.rect ?? null}
-        userId={user?.id}
-        source="CollectionDetail:posterLongPress"
-        onClose={() => setLongPress(null)}
-      />
+          what belongs in this collection's grid. Branches on the
+          long-pressed item's own mediaType — a mixed collection can hold
+          both, and each writes to a different table (user_shows vs
+          user_movies). */}
+      {longPress?.show?.mediaType === "movie" ? (
+        <MoviePosterQuickStatusMenu
+          show={longPress?.show ?? null}
+          anchorRect={longPress?.rect ?? null}
+          userId={user?.id}
+          source="CollectionDetail:posterLongPress"
+          onClose={() => setLongPress(null)}
+        />
+      ) : (
+        <PosterQuickStatusMenu
+          show={longPress?.show ?? null}
+          anchorRect={longPress?.rect ?? null}
+          userId={user?.id}
+          source="CollectionDetail:posterLongPress"
+          onClose={() => setLongPress(null)}
+        />
+      )}
     </>
   );
 }

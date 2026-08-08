@@ -1,7 +1,9 @@
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { FavoritesProvider } from "@/lib/favorites-context";
+import { MovieFavoritesProvider } from "@/lib/movie-favorites-context";
 import { ShowCustomizationsProvider } from "@/lib/show-customizations-context";
+import { MovieCustomizationsProvider } from "@/lib/movie-customizations-context";
 import { NavTintProvider } from "@/lib/nav-tint-context";
 import { NavVisibilityProvider } from "@/lib/nav-visibility-context";
 import SwipeBackGesture from "@/components/ui/SwipeBackGesture";
@@ -60,11 +62,15 @@ export default function RootLayout({ children }) {
       <body className="antialiased">
         <AuthProvider>
           <FavoritesProvider>
-            <ShowCustomizationsProvider>
-              <NavTintProvider>
-                <NavVisibilityProvider>{children}</NavVisibilityProvider>
-              </NavTintProvider>
-            </ShowCustomizationsProvider>
+            <MovieFavoritesProvider>
+              <ShowCustomizationsProvider>
+                <MovieCustomizationsProvider>
+                  <NavTintProvider>
+                    <NavVisibilityProvider>{children}</NavVisibilityProvider>
+                  </NavTintProvider>
+                </MovieCustomizationsProvider>
+              </ShowCustomizationsProvider>
+            </MovieFavoritesProvider>
           </FavoritesProvider>
         </AuthProvider>
         <SwipeBackGesture />

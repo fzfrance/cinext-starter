@@ -191,19 +191,14 @@ export default function PersonDetailClient({ person }) {
                     )}
                   </div>
                 );
-                // TV credits go to the existing show-detail page; there's no
-                // movie-detail page anywhere in this app yet, so movie cards
-                // stay visual-only rather than linking nowhere real.
-                return w.type === "tv" ? (
-                  <button key={`${w.type}-${w.id}`} onClick={() => router.push(`/show/${w.id}`)} className="text-left active:scale-95 transition">
+                // TV credits go to Show Detail, movie credits to Movie
+                // Detail (movies-as-content-type plan) — both are real
+                // routes now, so every credit card is clickable.
+                return (
+                  <button key={`${w.type}-${w.id}`} onClick={() => router.push(w.type === "tv" ? `/show/${w.id}` : `/movie/${w.id}`)} className="text-left active:scale-95 transition">
                     {card}
                     <div className="mt-1.5" style={{ fontSize: 11.5, fontWeight: 500, color: "#fff", lineHeight: 1.3 }}>{w.title}</div>
                   </button>
-                ) : (
-                  <div key={`${w.type}-${w.id}`}>
-                    {card}
-                    <div className="mt-1.5" style={{ fontSize: 11.5, fontWeight: 500, color: "#fff", lineHeight: 1.3 }}>{w.title}</div>
-                  </div>
                 );
               })}
             </div>

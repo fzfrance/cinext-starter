@@ -38,6 +38,7 @@ const POSTER_WIDTH = 87; // 76 * 1.15
 export default function ActivityCard({ event, show, avatarUrl, displayName, now }) {
   const router = useRouter();
   if (!show) return null;
+  const isMovie = event.mediaType === "movie";
 
   const rating = (event.type === "watched" || event.type === "rewatched" || event.type === "rated") ? event.rating : null;
   const label = ACTION_LABEL[event.type];
@@ -45,7 +46,7 @@ export default function ActivityCard({ event, show, avatarUrl, displayName, now 
 
   return (
     <button
-      onClick={() => router.push(`/show/${show.id}`)}
+      onClick={() => router.push(isMovie ? `/movie/${show.id}` : `/show/${show.id}`)}
       className="w-full flex flex-col active:opacity-80 transition"
       // paddingLeft bumped ~10% over the standard 24px (px-6) — the
       // avatar/name row was reading as too close to the screen edge.
@@ -73,7 +74,7 @@ export default function ActivityCard({ event, show, avatarUrl, displayName, now 
         {(event.type === "watched" || event.type === "rewatched") && (
           <div style={{ fontSize: 12.5, color: t.textDim, marginTop: 2 }}>Episode {event.episodeNumber}</div>
         )}
-        {event.type === "rated" && (
+        {event.type === "rated" && !isMovie && (
           <div style={{ fontSize: 12.5, color: t.textDim, marginTop: 2 }}>{seasonLabel(event.seasonNumber)}</div>
         )}
       </div>

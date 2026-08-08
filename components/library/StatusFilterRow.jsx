@@ -10,6 +10,15 @@ const STATUS_ITEMS = [
   { id: "completed", label: "Completed", icon: "select" },
 ];
 
+// Movies use the simplified Watchlist/Watched-only vocabulary (see
+// components/StatusMenu.jsx's movieStatusMenuOptions) — "completed" is
+// still the real underlying status value, just relabeled "Watched" here
+// to match.
+export const MOVIE_STATUS_ITEMS = [
+  { id: "watchlist", label: "Watchlist", icon: "bookmark" },
+  { id: "completed", label: "Watched", icon: "select" },
+];
+
 // Horizontal status filter row, directly under Recommended, centered.
 // Collapsed by default to a bare dim icon (no fill/border); whichever
 // status is the current filter value expands into a solid white pill
@@ -19,11 +28,11 @@ const STATUS_ITEMS = [
 // — an internal-only sentinel the caller already uses for "no filter"),
 // which is how you get back to seeing everything: undo the current pick,
 // don't pick a separate "All" option.
-export default function StatusFilterRow({ statusFilter, counts, onSelect }) {
+export default function StatusFilterRow({ statusFilter, counts, onSelect, items = STATUS_ITEMS }) {
   return (
     <div className="no-scrollbar" style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}>
       <div className="flex items-center justify-center" style={{ gap: 16, padding: "0 20px" }}>
-        {STATUS_ITEMS.map((s) => {
+        {items.map((s) => {
           const active = statusFilter === s.id;
           const count = counts?.[s.id] ?? 0;
           return (

@@ -12,9 +12,11 @@ import PosterQuickStatusMenu from "@/components/ui/PosterQuickStatusMenu";
 import EpisodeRatingFlow from "@/components/EpisodeRatingFlow";
 import { useAuth } from "@/lib/auth-context";
 import { useFavorites } from "@/lib/favorites-context";
+import { useMovieFavorites } from "@/lib/movie-favorites-context";
 import { useShowCustomizations } from "@/lib/show-customizations-context";
 import { useLongPress } from "@/lib/useLongPress";
 import { getUserShows } from "@/lib/userShows";
+import { getUserMovies } from "@/lib/userMovies";
 import { getShowWatchSummary, addEpisodeWatches, rateLatestWatch } from "@/lib/episodeWatches";
 import { getProfile } from "@/lib/profile";
 import { resolveShowStatus } from "@/lib/statusResolver";
@@ -371,6 +373,53 @@ function UpcomingRow({ item, onLongPress }) {
   );
 }
 
+// Movie parallel to UpcomingRow above — no season/episode line (a movie
+// has neither), same countdown treatment against its own release date
+// instead of an episode's air date. No long-press quick-status menu here
+// (UpcomingRow's is TV-only, fed by Home's own `longPress` state) — just
+// navigate + favorite, matching what's actually requested.
+function UpcomingMovieRow({ item }) {
+  const router = useRouter();
+  const { isFavorite, toggleFavorite } = useMovieFavorites();
+  const { primary, secondary } = getCountdown(item.releaseDate);
+  const favorited = isFavorite(item.id);
+  return (
+    <div
+      onClick={() => router.push(`/movie/${item.id}`)}
+      className="flex items-center gap-3 p-3 rounded-2xl active:scale-[0.98] transition cursor-pointer"
+      style={{ background: t.cardFill, border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(16px)" }}
+    >
+      <div className="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
+        <PosterArt posterPath={item.posterPath} alt={item.title} />
+        {favorited && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); toggleFavorite(item.id, "Home:upcomingMovieRow"); }}
+            className="absolute flex items-center justify-center active:scale-90 transition"
+            style={{ top: 3, right: 3, width: 16, height: 16, borderRadius: "50%", background: "rgba(0,0,0,0.5)" }}
+          >
+            <Icon name="heart" size={9} color="#e0567a" />
+          </button>
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-white text-[15px] font-bold leading-tight truncate">{item.title}</div>
+        {item.releaseDate ? (
+          <div className="text-[12px] mt-0.5" style={{ color: t.textDim }}>{formatFullDate(item.releaseDate)}</div>
+        ) : (
+          <div className="text-[12px] mt-0.5" style={{ color: t.textDim }}>{item.tmdbStatus || "Release date TBA"}</div>
+        )}
+      </div>
+      {item.releaseDate && (
+        <div className="text-right flex-shrink-0">
+          <div className="text-white font-bold leading-none" style={{ fontSize: secondary ? 22 : 15 }}>{primary}</div>
+          {secondary && <div className="text-[10px] font-medium tracking-[0.14em] mt-1" style={{ color: t.textDim }}>{secondary}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Page() {
   const router = useRouter();
   const { user } = useAuth();
@@ -414,6 +463,12 @@ export default function Page() {
   const [hero, setHero] = useState(null);
   const [inProgress, setInProgress] = useState([]);
   const [upcoming, setUpcoming] = useState([]);
+  // Movies in the user's library (any status — same status-agnostic
+  // scoping as `upcoming` above) whose real-world release hasn't
+  // happened yet. Already shaped for UpcomingMovieRow directly (title/
+  // posterPath/releaseDate/tmdbStatus), no separate derivation step
+  // needed the way upcomingEpisodes exists for TV.
+  const [upcomingMovies, setUpcomingMovies] = useState([]);
   // Bumped after the hero card's Watch button marks an episode watched —
   // that write happens without navigating away, so nothing else would
   // otherwise prompt this page's cached hero/progress data (fetched once
@@ -526,6 +581,35 @@ export default function Page() {
       .finally(() => { if (!cancelled) setLoaded(true); });
     return () => { cancelled = true; };
   }, [user, refreshToken]);
+
+  // Upcoming Movies — a separate effect, deliberately not folded into the
+  // hero/inProgress/upcoming Promise chain above: that one is scoped to
+  // TV progress-resolution movies don't have at all, and coupling them
+  // would mean a TV-fetch failure could silently blank the movies row
+  // too. Any library status (matches the TV Upcoming section's own
+  // status-agnostic scoping) whose real-world release hasn't happened
+  // yet — a future releaseDate, or no releaseDate at all with a TMDB
+  // status that isn't Released/Canceled (a Planned/In Production/Post
+  // Production movie with no confirmed date yet is still "upcoming").
+  useEffect(() => {
+    if (!user) { setUpcomingMovies([]); return; }
+    let cancelled = false;
+    getUserMovies(user.id).then((byMovie) => {
+      const ids = Object.keys(byMovie);
+      if (ids.length === 0) return { results: [] };
+      return fetch(`/api/movies/batch?ids=${ids.join(",")}`).then((r) => r.json());
+    }).then((data) => {
+      if (cancelled || !data) return;
+      const today = bangkokTodayParts();
+      const upcomingList = (data.results ?? [])
+        .filter((r) => r.releaseDate
+          ? calendarDayDiff(today, parseAirDateParts(r.releaseDate)) >= 0
+          : !["Released", "Canceled"].includes(r.tmdbStatus))
+        .sort((a, b) => (a.releaseDate ?? "9999-99-99").localeCompare(b.releaseDate ?? "9999-99-99"));
+      setUpcomingMovies(upcomingList);
+    }).catch(console.error);
+    return () => { cancelled = true; };
+  }, [user]);
 
   // Re-fetches when this tab/app becomes visible again — the effect above
   // only runs on mount (or when refreshToken is bumped by the hero card's
@@ -1271,6 +1355,18 @@ export default function Page() {
               <div className="mt-3 px-6 flex flex-col gap-2.5">
                 {upcomingEpisodes.map((item) => (
                   <UpcomingRow key={item.id} item={item} onLongPress={handleLongPress} />
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* ---------- Upcoming Movies ---------- */}
+          {upcomingMovies.length > 0 && (
+            <>
+              <div className="mt-8 px-6 text-white text-[19.55px] font-semibold">Upcoming Movies</div>
+              <div className="mt-3 px-6 flex flex-col gap-2.5">
+                {upcomingMovies.map((item) => (
+                  <UpcomingMovieRow key={item.id} item={item} />
                 ))}
               </div>
             </>

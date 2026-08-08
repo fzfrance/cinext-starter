@@ -15,6 +15,18 @@ export const statusMenuOptions = [
   { id: "remove", label: "Remove", icon: "trash", danger: true },
 ];
 
+// Movies use a deliberately simplified vocabulary — Watchlist / Watched /
+// Remove only, per explicit request (no Watching/Paused/Drop for movies,
+// unlike shows). "Watched" reuses the existing "completed" id/DB value —
+// user_movies already stamps watched_on on transition to 'completed' (see
+// lib/userMovies.js) — this is a label-only change, not a new status
+// value, so no migration or write-path change is needed.
+export const movieStatusMenuOptions = [
+  { id: "watchlist", label: "Watchlist", icon: "bookmark" },
+  { id: "completed", label: "Watched", icon: "select" },
+  { id: "remove", label: "Remove", icon: "trash", danger: true },
+];
+
 // Shared status-setting popover (Watchlist / Watching / Completed / Paused /
 // Drop / Remove) — used by both Show Detail's "Add to Library" control and
 // Explore search results' "+" button. Self-positions via plain CSS
@@ -29,8 +41,8 @@ export const statusMenuOptions = [
 // currently disabled (Settings > Appearance is "Coming Soon"), so this is
 // effectively always amber in practice today. "Remove" always stays
 // pink/danger-colored regardless of active state.
-export default function StatusMenu({ status, onSelect, align = "center", direction = "down", includeRemove = true, removeLabel = "Remove", style }) {
-  const options = includeRemove ? statusMenuOptions : statusMenuOptions.filter((o) => o.id !== "remove");
+export default function StatusMenu({ status, onSelect, align = "center", direction = "down", includeRemove = true, removeLabel = "Remove", options: optionsProp = statusMenuOptions, style }) {
+  const options = includeRemove ? optionsProp : optionsProp.filter((o) => o.id !== "remove");
   const alignStyle = align === "right" ? { right: 0 } : align === "left" ? { left: 0 } : { left: "50%", transform: "translateX(-50%)" };
   // "up" is for triggers anchored low on screen with little room below them
   // (e.g. CaseOverlay's status pill, which floats roughly mid-to-lower

@@ -149,24 +149,32 @@ export default function Page() {
           </div>
         ) : (
           sorted.map((r) => {
-            const { base, glow } = fallbackPalette(r.showId);
+            const isMovie = r.mediaType === "movie";
+            // Raw ids collide across media types (a movie id and a TV
+            // show id aren't drawn from the same space) — key, ratings-
+            // screen deep-link, and detail-page link all branch on
+            // mediaType rather than assuming showId.
+            const key = isMovie ? `movie-${r.movieId}` : `tv-${r.showId}-${r.seasonNumber}`;
+            const detailPath = isMovie ? `/movie/${r.movieId}` : `/show/${r.showId}`;
+            const ratingPath = isMovie ? `/movie/${r.movieId}?tab=reviews` : `/show/${r.showId}?tab=reviews&reviewSeason=${r.seasonNumber}`;
+            const { base, glow } = fallbackPalette(isMovie ? r.movieId : r.showId);
             const moodMetas = moodMetasFromField(r.mood);
             return (
               // Same card as Profile's own "My Ratings" preview row
               // (poster + title/season/mood + star row + big number),
               // just full-width instead of a horizontal-scroll strip.
-              // Whole card goes to the season's saved rating card — same
+              // Whole card goes to the saved rating card — same
               // destination as the trailing ">" — EXCEPT the poster,
               // which is its own separate control (stopPropagation) that
-              // goes to the show's own page instead.
+              // goes to the show/movie's own page instead.
               <div
-                key={`${r.showId}-${r.seasonNumber}`}
-                onClick={() => router.push(`/show/${r.showId}?tab=reviews&reviewSeason=${r.seasonNumber}`)}
+                key={key}
+                onClick={() => router.push(ratingPath)}
                 className="w-full flex items-center text-left rounded-2xl cursor-pointer active:scale-[0.98] transition"
                 style={{ gap: 11.7, padding: 11.7, background: t.cardFill, border: `1px solid ${t.cardBorder}` }}
               >
                 <button
-                  onClick={(e) => { e.stopPropagation(); router.push(`/show/${r.showId}`); }}
+                  onClick={(e) => { e.stopPropagation(); router.push(detailPath); }}
                   className="relative rounded-xl overflow-hidden flex-shrink-0 active:opacity-70 transition"
                   style={{ width: 82.8, aspectRatio: "2 / 3" }}
                 >
@@ -180,7 +188,9 @@ export default function Page() {
                 <div className="min-w-0 flex-1">
                   <div className="truncate" style={{ fontSize: 14.4, fontWeight: 700, color: "#fff" }}>{r.displayTitle}</div>
                   <div className="flex items-center gap-1.5" style={{ marginTop: 2 }}>
-                    <span style={{ fontSize: 11.88, color: t.textDim }}>{seasonLabel(r.seasonNumber)}</span>
+                    {/* No season line for a movie — it has none. Mood
+                        emojis alone are enough, no replacement text. */}
+                    {!isMovie && <span style={{ fontSize: 11.88, color: t.textDim }}>{seasonLabel(r.seasonNumber)}</span>}
                     {moodMetas.length > 0 && <span style={{ fontSize: 11.88 }}>{moodMetas.map((m) => m.emoji).join(" ")}</span>}
                   </div>
                   <div style={{ marginTop: 7.92 }}>

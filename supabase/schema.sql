@@ -211,6 +211,80 @@ create table if not exists show_customizations (
   unique (user_id, tmdb_show_id)
 );
 
+-- A movie a user has added to their library, with its status. Mirrors
+-- user_shows exactly (same status vocabulary/StatusMenu, same favorite
+-- flag), minus anything TV-progress-specific — a movie has no episodes,
+-- so status is always fully user-explicit (see lib/userMovies.js: there's
+-- no implicit-row-creation path the way marking an episode watched
+-- creates one for user_shows, so status_explicit is always true here —
+-- kept as a column anyway purely for shape-parity with getUserShow's
+-- return value, not because movies need the auto-vs-explicit distinction
+-- user_shows does).
+create table if not exists user_movies (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  tmdb_movie_id integer not null,
+  status text not null check (status in ('watchlist', 'watching', 'paused', 'drop', 'completed')),
+  favorite boolean not null default false,
+  status_explicit boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, tmdb_movie_id)
+);
+
+-- Movie rating — mirrors season_ratings, minus season_number: one row per
+-- (user, movie), not per (user, movie, season), since a movie has no
+-- seasons/episodes to average an "auto" score from (see
+-- lib/movieRatings.js — there is no auto-rating concept for movies at
+-- all, manual only). Uses tmdb_movie_id (not movie_id) for naming
+-- consistency with user_shows.tmdb_show_id — deliberately not
+-- propagating season_ratings' own tmdb_show_id-vs-show_id naming quirk
+-- into this new table. share_id mirrors season_ratings' own opt-in
+-- public-sharing column (Movie Detail's Share button/MovieShareRatingCard).
+create table if not exists movie_ratings (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  tmdb_movie_id integer not null,
+  rating numeric(3,1) not null,
+  mood text,
+  favorite_character_id text,
+  favorite_character_name text,
+  review_text text,
+  share_id text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, tmdb_movie_id)
+);
+alter table movie_ratings add column if not exists share_id text;
+
+-- Per-user custom cover/poster/logo picks for movies — mirrors
+-- show_customizations exactly, one media type over.
+create table if not exists movie_customizations (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  tmdb_movie_id integer not null,
+  custom_backdrop_url text,
+  custom_poster_url text,
+  custom_logo_url text,
+  updated_at timestamptz not null default now(),
+  unique (user_id, tmdb_movie_id)
+);
+
+-- Movies inside a user's collection — mirrors collection_shows exactly, a
+-- separate table (not a schema change to collection_shows) so existing
+-- collection_shows rows/queries are entirely untouched.
+create table if not exists collection_movies (
+  collection_id uuid not null references collections(id) on delete cascade,
+  tmdb_movie_id integer not null,
+  added_at timestamptz not null default now(),
+  primary key (collection_id, tmdb_movie_id)
+);
+
+-- One-time watch date for a movie — no rewatch tracking (user_movies is
+-- one row per movie), stamped by setMovieStatus on transition to
+-- 'completed', only if not already set.
+alter table user_movies add column if not exists watched_on date;
+
 -- ---------------------------------------------------------------------------
 -- Row Level Security — every table is per-user private by default.
 -- ---------------------------------------------------------------------------
@@ -221,6 +295,10 @@ alter table season_reviews enable row level security;
 alter table collections enable row level security;
 alter table collection_shows enable row level security;
 alter table show_customizations enable row level security;
+alter table user_movies enable row level security;
+alter table movie_ratings enable row level security;
+alter table movie_customizations enable row level security;
+alter table collection_movies enable row level security;
 
 -- Every policy below is preceded by a matching `drop policy if exists` —
 -- unlike `create table if not exists`, Postgres has no `if not exists`
@@ -262,6 +340,31 @@ create policy "own rows only via parent collection" on collection_shows
 drop policy if exists "own rows only" on show_customizations;
 create policy "own rows only" on show_customizations
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "own rows only" on user_movies;
+create policy "own rows only" on user_movies
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "own rows only" on movie_ratings;
+create policy "own rows only" on movie_ratings
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- Public read of shared ratings — mirrors season_ratings' own "share_id
+-- is not null" public-read policy, one media type over. Only SELECT, only
+-- rows the owner explicitly opted into sharing (share_id set via
+-- ensureMovieShareId) — never a blanket public-read policy.
+drop policy if exists "public read of shared ratings" on movie_ratings;
+create policy "public read of shared ratings" on movie_ratings
+  for select using (share_id is not null);
+
+drop policy if exists "own rows only" on movie_customizations;
+create policy "own rows only" on movie_customizations
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "own rows only via parent collection" on collection_movies;
+create policy "own rows only via parent collection" on collection_movies
+  for all using (exists (select 1 from collections c where c.id = collection_id and c.user_id = auth.uid()))
+  with check (exists (select 1 from collections c where c.id = collection_id and c.user_id = auth.uid()));
 
 -- ---------------------------------------------------------------------------
 -- Storage — avatar / background image uploads (Edit Profile screen).

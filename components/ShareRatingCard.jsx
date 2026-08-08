@@ -484,27 +484,28 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
   }, [showId, readableLanguages]);
   const titleLogoUrl = !titleLogoFailed && titleLogoPath ? tmdbImage(titleLogoPath, "w500") : null;
 
-  // Preview footprint on screen — card and controls share ONE width basis
-  // (both scale off modalW), so the button row is never wider than the
-  // card itself. modalW targets 75vw (the middle of an explicit 72-78vw
-  // ask), capped at 420 — a sensible desktop/tablet max-width and also
-  // ~+24% over the previous flat 340px cap, matching an explicit "make
-  // the card 20-25% bigger" ask in the same pass. Nudged +5% again
-  // (420 -> 441, 0.75 -> 0.7875vw) to help the composition still feel
-  // filled once Edit (below) got smaller, then -10% here per explicit
-  // "preview rating card smaller" feedback (441 -> 397, 0.7875 -> 0.709).
-  const MODAL_MAX_W = 397;
-  const modalW = Math.min(vw * 0.709, MODAL_MAX_W);
-  // GROUP_GAP (card -> controls) + controlsH (real measured height,
-  // unscaled) + MODAL_VPAD (top+bottom safe-area padding, see the modal
-  // container below) have to fit in vh alongside the scaled card, or the
-  // scale shrinks further until they do — "scale the whole card down
-  // slightly rather than letting it overflow," never require scrolling
-  // as the default.
-  const GROUP_GAP = 5; // was 32 — pulled down to ~15% of that per explicit "move the buttons up close to the card" feedback
-  const MODAL_VPAD = 32; // ~= the modal container's own paddingTop+paddingBottom base (16+16), safe-area insets on top of that are extra headroom this doesn't need to account for
+  // ---------------------------------------------------------------------
+  // Redesigned preview hierarchy — card first, everything else lightweight
+  // and secondary (per explicit "make the card the main focus" request).
+  // Edit moved out of the button stack entirely (now a compact corner
+  // icon, see the header row below) and the "Back" text button removed
+  // (the new X close icon replaces it) — both were previously counted in
+  // controlsH, silently shrinking the card via heightScale below even
+  // though modalW's own width target was already close to 80vw. Removing
+  // them is what actually lets the card reach its full targeted width on
+  // a normal phone screen, not just a bigger width fraction on paper.
+  // ---------------------------------------------------------------------
+  const WIDTH_FRACTION = 0.84; // 80-85% of screen width, per explicit spec
+  const MODAL_MAX_W = 480; // sensible desktop/tablet cap — irrelevant on a real phone, where WIDTH_FRACTION * vw is always the binding constraint
+  const modalW = Math.min(vw * WIDTH_FRACTION, MODAL_MAX_W);
+  // HEADER_H clears the fixed X/Edit corner row (see the header row
+  // below) out of the available vertical space, same reasoning MODAL_VPAD
+  // already applied to bottom safe-area clearance.
+  const HEADER_H = 74;
+  const GROUP_GAP = 14; // card -> controls (Segmented + Share) — controls are lightweight now, this can breathe a little more than the old 5px squeeze
+  const MODAL_VPAD = 24;
   const widthScale = modalW / EXPORT_W;
-  const availableH = vh - MODAL_VPAD - GROUP_GAP - controlsH;
+  const availableH = vh - HEADER_H - MODAL_VPAD - GROUP_GAP - controlsH;
   const heightScale = availableH > 0 ? availableH / EXPORT_H : widthScale;
   const previewScale = Math.max(0.15, Math.min(1, widthScale, heightScale));
   // Controls render at exactly the card's own final on-screen width
@@ -514,6 +515,12 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
   // wrapper. This is what actually keeps them visually locked to the
   // card instead of an independent fixed-width cap.
   const controlsW = EXPORT_W * previewScale;
+  // Share's own width is a SCREEN-width fraction (55-60vw), not a
+  // controlsW fraction — controlsW now tracks the card's own ~80-85vw
+  // width, and Share reading at "55-60% of THAT" would land well past the
+  // spec's actual intent (55-60% of the SCREEN). Capped so it never
+  // balloons on a wide viewport.
+  const shareW = Math.min(vw * 0.58, 280);
   const reviewNumberLabel = reviewNumber != null ? String(reviewNumber).padStart(5, "0") : null;
 
   return (
@@ -533,14 +540,36 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
     <div
       className="fixed inset-0 z-50 flex flex-col items-center"
       style={{
-        background: "rgba(0,0,0,0.85)",
+        background: "rgba(0,0,0,0.92)",
         minHeight: "100dvh",
         overflowY: "auto",
-        paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)",
+        // Real layout clearance includes the actual safe-area-inset-top;
+        // HEADER_H above is a plain JS constant used only to approximate
+        // this same space for the previewScale math (no way to read a CSS
+        // env() value from JS) — same "safe-area is bonus slack on top of
+        // the JS estimate" reasoning MODAL_VPAD already relies on.
+        paddingTop: "calc(env(safe-area-inset-top, 0px) + 62px)",
         paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
       }}
       onClick={onClose}
     >
+      {/* Header — X close (left) / Edit pencil (right), fixed to the
+          screen's own top corners rather than living in the button stack
+          below the card. Same glass-circle treatment used everywhere else
+          in this app (Show/Movie Detail's own back/more buttons). */}
+      <div
+        className="fixed left-0 right-0 flex items-center justify-between"
+        style={{ top: 0, padding: "calc(env(safe-area-inset-top, 0px) + 12px) 20px 0", zIndex: 2 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button onClick={onClose} className="flex items-center justify-center rounded-full active:scale-95 transition" style={{ width: 38, height: 38, background: t.cardFill, border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" }}>
+          <Icon name="x" size={16} color="#fff" />
+        </button>
+        <button onClick={onEdit} className="flex items-center justify-center rounded-full active:scale-95 transition" style={{ width: 38, height: 38, background: t.cardFill, border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" }}>
+          <Icon name="edit" size={15} color="#fff" />
+        </button>
+      </div>
+
       {/* Card + controls live inside one wrapper so they stay a single
           visual group. width:100% (matching the outer fixed container)
           keeps the controls' own sizing decoupled from the card's width
@@ -785,11 +814,14 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
       </div>
 
       {/* ---------------- Controls (outside the exported card) ---------------- */}
-      {/* width: controlsW (not w-full/maxWidth:360) — locks this block to
-          the card's own on-screen width exactly, mockup-style, instead of
-          an independent cap that could be wider than the card. No
-          horizontal padding either, matching the mockup's own
-          .ctrl-btn{width:100%} sitting flush with .screen's own edges. */}
+      {/* Just two lightweight things now: the Poster/Backdrop segmented
+          toggle, and Share. Edit moved to the header's corner pencil icon;
+          the old "Back" text button is gone (the header's X covers that
+          job now, plus tapping the backdrop already closes this screen).
+          width: controlsW locks the Segmented control to the card's own
+          on-screen width for visual alignment; Share below it uses its
+          own screen-width-relative sizing instead (see shareW above) so
+          it doesn't stretch to match the card's much wider footprint. */}
       <div ref={controlsRef} style={{ width: controlsW, marginTop: GROUP_GAP }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-center">
           {/* Username/review number are always shown now — no toggle,
@@ -801,41 +833,19 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
           />
         </div>
 
-        {/* Edit — a secondary action, not the main CTA: explicitly capped
-            width (not just auto-sized to its own short label) and a
-            shared height system with the buttons below it, rather than
-            reading as oversized/heavy next to them. 63% of controlsW, cap
-            324 (was 70%/360 — both -10% per explicit "make Edit 10%
-            smaller"), not raw 70vw — the given "min(70vw, 360px)" example
-            assumes a plain full-viewport layout; in this component the
-            button row's own real width basis is controlsW (itself already
-            capped well under the viewport), so sizing off raw vw here
-            barely shrank it at all — it still read as nearly full-width. */}
-        <button onClick={onEdit} className="flex items-center justify-center gap-2.5 rounded-full active:scale-95 transition" style={{ marginTop: 22, marginLeft: "auto", marginRight: "auto", width: Math.min(controlsW * 0.63, 324), minHeight: 52, background: "rgba(255,255,255,0.08)", border: `1px solid ${t.glassBorder}` }}>
-          <Icon name="edit" size={14} color="#fff" />
-          <span style={{ fontSize: 14, fontWeight: 700, color: "#fff", letterSpacing: "0.01em" }}>Edit</span>
-        </button>
-
         {/* Share — the only export action now (Save Image removed per
             explicit request: its direct-download path was the one most
             exposed to the artwork-not-loaded-yet export bug renderCardPng
             now guards against, and Share alone covers the same "get this
-            card out of the app" need). Centered, same sizing the pair
-            used to share. */}
-        <div className="flex items-center justify-center" style={{ marginTop: 20 }}>
-          <button onClick={handleNativeShare} disabled={busy != null} className="flex items-center justify-center rounded-full active:scale-95 transition" style={{ minHeight: 64, paddingInline: 26, gap: 12, whiteSpace: "nowrap", background: `${accent}14`, border: `1.5px solid ${accent}`, boxShadow: `0 0 20px ${accent}22`, opacity: busy ? 0.7 : 1 }}>
-            <Icon name="share" size={15} color={accent} />
-            <span style={{ fontSize: 14, fontWeight: 700, color: accent }}>{busy === "native" ? "Sharing…" : "Share"}</span>
+            card out of the app" need). 55-60vw wide, 54-58px tall, kept
+            visually secondary to the card (same orange accent/outline,
+            just no longer the loudest thing on screen once the card grew). */}
+        <div className="flex items-center justify-center" style={{ marginTop: 16 }}>
+          <button onClick={handleNativeShare} disabled={busy != null} className="flex items-center justify-center rounded-full active:scale-95 transition" style={{ width: shareW, minHeight: 56, gap: 10, whiteSpace: "nowrap", background: `${accent}14`, border: `1.5px solid ${accent}`, boxShadow: `0 0 16px ${accent}1f`, opacity: busy ? 0.7 : 1 }}>
+            <Icon name="share" size={14} color={accent} />
+            <span style={{ fontSize: 13.5, fontWeight: 700, color: accent }}>{busy === "native" ? "Sharing…" : "Share"}</span>
           </button>
         </div>
-
-        {/* Copy Link removed per explicit request — Back now sits at the
-            same distance below the action row that Copy Link used to
-            (marginTop 18, was 4 relative to Copy Link), so it doesn't
-            read as cramped directly under Share. */}
-        <button onClick={onClose} className="w-full flex items-center justify-center active:scale-95 transition" style={{ marginTop: 18, padding: 8 }}>
-          <span style={{ fontSize: 12.5, fontWeight: 500, color: "rgba(255,255,255,0.32)" }}>Back</span>
-        </button>
       </div>
       </div>
 

@@ -832,6 +832,12 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   // immediately-visible area rather than disappearing.
   const watchNextSeason = seasons.find((s) => s.episodes.some((e) => e.daysUntil == null && !e.watched));
   const watchNextEpisodes = watchNextSeason ? watchNextSeason.episodes.filter((e) => e.daysUntil == null) : [];
+  // Gates the whole row on real progress existing — without this, a show
+  // the user just added (zero episodes watched) shows a full unwatched
+  // season row immediately, reading as premature clutter on an otherwise
+  // completely empty show. Once at least one episode anywhere is watched,
+  // Watch Next earns its place.
+  const hasAnyWatchedEpisode = seasons.some((s) => s.episodes.some((e) => e.watched));
   const watchNextRowRef = useRef(null);
   const watchedFingerprint = watchNextEpisodes.map((e) => (e.watched ? "1" : "0")).join("");
   useEffect(() => {
@@ -1021,7 +1027,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                   season accordion's own progress indicator: a plain empty
                   outline when not yet watched (no icon at all), filled
                   amber with a checkmark once it is. */}
-              {watchNextSeason && watchNextEpisodes.length > 0 && (
+              {watchNextSeason && watchNextEpisodes.length > 0 && hasAnyWatchedEpisode && (
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <span style={{ fontSize: 17, fontWeight: 700, color: "#fff" }}>Watch Next</span>
