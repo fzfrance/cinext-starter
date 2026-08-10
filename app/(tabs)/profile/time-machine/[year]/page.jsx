@@ -99,7 +99,7 @@ export default function Page() {
   const readableLanguages = useReadableLanguages();
   const [items, setItems] = useState(null); // null = loading
   const [typeFilter, setTypeFilterState] = useState("all");
-  const [viewMode, setViewModeState] = useState("list");
+  const [viewMode, setViewModeState] = useState("gallery");
   const [activeMenu, setActiveMenu] = useState(null); // "filter" | "view" | null
   const toggleMenu = (key) => setActiveMenu((prev) => (prev === key ? null : key));
 
@@ -232,6 +232,11 @@ export default function Page() {
                 <PosterArt posterPath={item.posterPath} base={base} glow={glow} alt={title} />
                 <div className="absolute inset-x-0 bottom-0" style={{ padding: "8px 8px 7px", background: "linear-gradient(0deg, rgba(0,0,0,0.85) 0%, transparent 70%)" }}>
                   <div className="truncate" style={{ fontSize: 11.5, fontWeight: 700, color: "#fff" }}>{title}</div>
+                  {item.numberOfSeasons && (
+                    <div className="truncate" style={{ fontSize: 10, color: "rgba(255,255,255,0.65)", marginTop: 1 }}>
+                      {item.numberOfSeasons} Season{item.numberOfSeasons === 1 ? "" : "s"}
+                    </div>
+                  )}
                 </div>
               </Link>
             );
@@ -259,7 +264,17 @@ export default function Page() {
                     <span style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.3 }}>{badge.label}</span>
                   </div>
                   <div className="truncate" style={{ fontSize: 14.5, fontWeight: 700, color: "#fff", marginTop: 3 }}>{title}</div>
-                  {item.genre && <div className="truncate" style={{ fontSize: 11.5, color: t.textDim, marginTop: 3 }}>{item.genre}</div>}
+                  {/* Season count — TV only (numberOfSeasons is null for
+                      movies, /api/movies/batch never returns it) — and
+                      genre, each on their own line rather than combined. */}
+                  {item.numberOfSeasons && (
+                    <div className="truncate" style={{ fontSize: 11.5, color: t.textDim, marginTop: 3 }}>
+                      {item.numberOfSeasons} Season{item.numberOfSeasons === 1 ? "" : "s"}
+                    </div>
+                  )}
+                  {item.genre && (
+                    <div className="truncate" style={{ fontSize: 11.5, color: t.textDim, marginTop: 3 }}>{item.genre}</div>
+                  )}
                 </div>
               </Link>
             );

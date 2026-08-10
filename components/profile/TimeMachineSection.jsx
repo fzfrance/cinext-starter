@@ -1,11 +1,10 @@
 "use client";
 
 import Icon from "@/components/ui/Icon";
-import { themes, DEFAULT_ACCENT } from "@/lib/theme";
+import { themes } from "@/lib/theme";
 import TimeMachineYearCard, { CARD_W, CARD_H } from "@/components/profile/TimeMachineYearCard";
 
 const t = themes.dark;
-const accent = DEFAULT_ACCENT;
 
 // Profile's "Time Machine" — one card per calendar year the user watched
 // *anything* in (TV or movie), newest first. See app/(tabs)/profile/
@@ -13,7 +12,7 @@ const accent = DEFAULT_ACCENT;
 // watched_year/watched_on, never release/premiere year). Deliberately a
 // secondary, smaller-than-My-Ratings section — same header spacing/
 // typography convention (px-6, 17.25/600 title) every other Profile
-// section already uses, just with an amber history icon ahead of the
+// section already uses, just with a white history icon ahead of the
 // title and a muted subtitle underneath. No chevron here (removed per
 // request) — the header is plain, non-interactive text; each year card
 // itself is the tap target, routing straight to that year's own detail
@@ -24,7 +23,7 @@ export default function TimeMachineSection({ years, loading, onYearSelect }) {
   return (
     <div style={{ marginTop: 26 }}>
       <div className="flex items-center gap-2 px-6 mb-1">
-        <Icon name="history" size={16} color={accent} />
+        <Icon name="history" size={16} color="#fff" />
         <span style={{ fontSize: 17.25, fontWeight: 600, color: "#fff" }}>Time Machine</span>
       </div>
       <div className="px-6" style={{ marginBottom: 12 }}>

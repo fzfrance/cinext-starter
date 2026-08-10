@@ -7,6 +7,7 @@ import Icon from "@/components/ui/Icon";
 import PosterArt from "@/components/ui/PosterArt";
 import PosterFanStack from "@/components/PosterFanStack";
 import MediaFavoriteBadge from "@/components/ui/MediaFavoriteBadge";
+import MediaStatusBadge from "@/components/ui/MediaStatusBadge";
 import { useAuth } from "@/lib/auth-context";
 import { useShowCustomizations } from "@/lib/show-customizations-context";
 import { getUserShows, removeUserShow, setWatchlistAndClearProgress } from "@/lib/userShows";
@@ -58,14 +59,14 @@ function GenreChip({ label, active, onClick }) {
   );
 }
 
-function TrendingCard({ item, rank }) {
+function TrendingCard({ item, rank, status }) {
   const { getCustomPoster } = useShowCustomizations();
   return (
     <Link href={hrefForMedia(item)} className="block flex-shrink-0 active:scale-95 transition cursor-pointer" style={{ width: 116 }}>
       <div className="relative rounded-2xl overflow-hidden" style={{ width: 116, height: 164, boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
         <PosterArt posterPath={item.posterPath} overrideSrc={item.mediaType === "movie" ? undefined : getCustomPoster(item.id)} base={item.base} glow={item.glow} alt={item.title} />
         {rank != null && <div style={{ position: "absolute", top: 8, left: 10, fontSize: 26, fontWeight: 800, color: "rgba(255,255,255,0.88)", textShadow: "0 2px 10px rgba(0,0,0,0.7)" }}>{rank}</div>}
-        <MediaFavoriteBadge item={item} source="Explore:favoriteBadge" />
+        {status ? <MediaStatusBadge status={status} /> : <MediaFavoriteBadge item={item} source="Explore:favoriteBadge" />}
       </div>
       {/* Fixed 2-line height (not just line-clamp) — same reasoning as
           PosterCard's title/subtitle (components/ui/PosterCard.jsx): a
@@ -77,13 +78,13 @@ function TrendingCard({ item, rank }) {
   );
 }
 
-function RecommendedCard({ item }) {
+function RecommendedCard({ item, status }) {
   const { getCustomPoster } = useShowCustomizations();
   return (
     <Link href={hrefForMedia(item)} className="block flex-shrink-0 active:scale-95 transition cursor-pointer" style={{ width: 116 }}>
       <div className="relative rounded-2xl overflow-hidden" style={{ width: 116, height: 164, boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
         <PosterArt posterPath={item.posterPath} overrideSrc={item.mediaType === "movie" ? undefined : getCustomPoster(item.id)} base={item.base} glow={item.glow} alt={item.title} />
-        <MediaFavoriteBadge item={item} source="Explore:favoriteBadge" />
+        {status ? <MediaStatusBadge status={status} /> : <MediaFavoriteBadge item={item} source="Explore:favoriteBadge" />}
       </div>
       {/* Fixed 2-line height (not just line-clamp) — same reasoning as
           PosterCard's title/subtitle (components/ui/PosterCard.jsx): a
@@ -297,7 +298,7 @@ function GridPosterCard({ item }) {
     <Link href={hrefForMedia(item)} className="block active:scale-95 transition cursor-pointer">
       <div className="relative rounded-xl overflow-hidden" style={{ aspectRatio: "2 / 3", boxShadow: "0 6px 16px rgba(0,0,0,0.45)" }}>
         <PosterArt posterPath={item.posterPath} overrideSrc={item.mediaType === "movie" ? undefined : getCustomPoster(item.id)} base={item.base} glow={item.glow} alt={item.title} />
-        <MediaFavoriteBadge item={item} source="Explore:favoriteBadge" />
+        {item.status ? <MediaStatusBadge status={item.status} /> : <MediaFavoriteBadge item={item} source="Explore:favoriteBadge" />}
       </div>
       <div className="mt-1.5 text-[11.5px] font-semibold text-white leading-tight">{item.title}</div>
       {item.meta && <div className="text-[10px] mt-0.5" style={{ color: t.textDim }}>{item.meta}</div>}
@@ -573,17 +574,17 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
   const openTrendingShows = () => setSectionView({
     title: "Trending Shows",
     subtitle: "The most-watched shows this week.",
-    items: trendingShows.map((t) => ({ ...t, meta: t.genre })),
+    items: trendingShows.map((t) => ({ ...t, meta: t.genre, status: resolvedStatusMap[mediaKey(t)] ?? null })),
   });
   const openTrendingMovies = () => setSectionView({
     title: "Trending Movies",
     subtitle: "The most-watched movies this week.",
-    items: trendingMovies.map((t) => ({ ...t, meta: t.genre })),
+    items: trendingMovies.map((t) => ({ ...t, meta: t.genre, status: resolvedStatusMap[mediaKey(t)] ?? null })),
   });
   const openRecommendedAll = () => setSectionView({
     title: "For You",
     subtitle: "Based on what you watch.",
-    items: recommendedAllResolved.map((t) => ({ ...t, meta: t.genre })),
+    items: recommendedAllResolved.map((t) => ({ ...t, meta: t.genre, status: resolvedStatusMap[mediaKey(t)] ?? null })),
   });
 
   const watchlist = new Set(Object.entries(resolvedStatusMap).filter(([, s]) => s === "watchlist").map(([key]) => key));
@@ -620,7 +621,7 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
             <SectionHeader title="For You" onOpen={openRecommendedAll} />
           </div>
           <div className="mt-3 pl-6 flex gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-            {recommendedAllResolved.map((item) => <RecommendedCard key={mediaKey(item)} item={item} />)}
+            {recommendedAllResolved.map((item) => <RecommendedCard key={mediaKey(item)} item={item} status={resolvedStatusMap[mediaKey(item)]} />)}
             <div className="w-2 flex-shrink-0" />
           </div>
         </>
@@ -632,7 +633,7 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
       </div>
       <div className="mt-3 pl-6 flex gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
         {filteredTrendingShows.map((item, i) => (
-          <TrendingCard key={mediaKey(item)} item={item} rank={i + 1} />
+          <TrendingCard key={mediaKey(item)} item={item} rank={i + 1} status={resolvedStatusMap[mediaKey(item)]} />
         ))}
         <div className="w-2 flex-shrink-0" />
       </div>
@@ -646,7 +647,7 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
       </div>
       <div className="mt-3 pl-6 flex gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
         {filteredTrendingMovies.map((item, i) => (
-          <TrendingCard key={mediaKey(item)} item={item} rank={i + 1} />
+          <TrendingCard key={mediaKey(item)} item={item} rank={i + 1} status={resolvedStatusMap[mediaKey(item)]} />
         ))}
         <div className="w-2 flex-shrink-0" />
       </div>

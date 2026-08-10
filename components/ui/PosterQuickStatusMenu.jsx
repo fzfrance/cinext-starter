@@ -19,7 +19,7 @@ const MENU_W = 190;
 const GAP = 8;
 const EST_MENU_H = 260;
 
-export default function PosterQuickStatusMenu({ show, userId, currentStatus = null, source, anchorRect, onClose, onStatusChange, removeLabel = "Remove", onRemove }) {
+export default function PosterQuickStatusMenu({ show, userId, currentStatus = null, source, anchorRect, onClose, onStatusChange, removeLabel = "Remove", onRemove, options }) {
   const [busy, setBusy] = useState(false);
 
   // The menu is anchored with `position: fixed` viewport coordinates
@@ -98,6 +98,7 @@ export default function PosterQuickStatusMenu({ show, userId, currentStatus = nu
           align={align}
           direction={direction}
           removeLabel={removeLabel}
+          options={options}
           style={{ opacity: busy ? 0.5 : 1, pointerEvents: busy ? "none" : "auto" }}
         />
       </div>

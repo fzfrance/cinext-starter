@@ -27,6 +27,18 @@ export const movieStatusMenuOptions = [
   { id: "remove", label: "Remove", icon: "trash", danger: true },
 ];
 
+// The full Favorites list pages (app/(tabs)/profile/favorites,
+// .../favorites/movies) are unfavorite-only surfaces — status changes
+// belong on the show/movie's own detail page or a real library grid, not
+// here, per explicit request to unify both pages down to a single
+// option. `label` is unused in practice (StatusMenu's own render always
+// overrides the "remove" row's label with the caller's `removeLabel`
+// prop instead — kept here for readability/parity with the other option
+// lists).
+export const favoritesOnlyOptions = [
+  { id: "remove", label: "Remove from Favorites", icon: "trash", danger: true },
+];
+
 // Shared status-setting popover (Watchlist / Watching / Completed / Paused /
 // Drop / Remove) — used by both Show Detail's "Add to Library" control and
 // Explore search results' "+" button. Self-positions via plain CSS
@@ -79,7 +91,12 @@ export default function StatusMenu({ status, onSelect, align = "center", directi
             style={{ padding: "10px 12px", background: active ? "rgba(255,255,255,0.14)" : "transparent" }}
           >
             <Icon name={opt.id === "watchlist" && active ? "bookmarkFilled" : opt.icon} size={16} color={opt.danger ? "#e0567a" : accent} />
-            <span style={{ fontSize: 13.5, color: opt.danger ? "#e0567a" : "#fff", fontWeight: 500 }}>{label}</span>
+            {/* textAlign left — without it, a label long enough to wrap
+                (e.g. "Remove from Favorites") inherits the <button>
+                element's own default center text-align and visibly
+                centers each wrapped line instead of flowing left from the
+                icon like every single-line label already does. */}
+            <span style={{ fontSize: 13.5, color: opt.danger ? "#e0567a" : "#fff", fontWeight: 500, textAlign: "left" }}>{label}</span>
             {active && !opt.danger && <Icon name="check" size={13} color="#fff" strokeWidth={2.4} />}
           </button>
         );

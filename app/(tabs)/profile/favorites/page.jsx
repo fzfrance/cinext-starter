@@ -7,6 +7,7 @@ import GlassCircle from "@/components/ui/GlassCircle";
 import PosterCard from "@/components/ui/PosterCard";
 import PosterQuickStatusMenu from "@/components/ui/PosterQuickStatusMenu";
 import PosterGrid from "@/components/ui/PosterGrid";
+import { favoritesOnlyOptions } from "@/components/StatusMenu";
 import { useAuth } from "@/lib/auth-context";
 import { useFavorites } from "@/lib/favorites-context";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
@@ -135,7 +136,7 @@ export default function Page() {
       </div>
       <div className="flex items-center justify-between px-6" style={{ marginTop: 16 }}>
         <div>
-          <div style={{ fontSize: 32.2, fontWeight: 800, color: "#fff" }}>Favorites</div>
+          <div style={{ fontSize: 32.2, fontWeight: 800, color: "#fff" }}>Favorite Shows</div>
           <div style={{ fontSize: 12.5, color: t.textDim, marginTop: 3 }}>{favorites.length} shows</div>
         </div>
         {!reorderMode && (
@@ -214,21 +215,23 @@ export default function Page() {
       {/* tap-outside catcher for open menus */}
       {activeMenu && <div className="fixed inset-0 z-20" onClick={() => setActiveMenu(null)} />}
 
-      {/* No onStatusChange refresh needed — this grid is purely "shows
-          you've favorited," independent of status, so a status change
-          here never changes what belongs in this list. removeLabel/onRemove
-          override the shared menu's default "Remove" (which normally drops
-          the show from the library entirely) — here it should just
-          unfavorite, same action and wording as the heart badge/unheart
-          above, so the grid drops it via the same reactive sync instead of
-          a separate removeUserShow path. */}
+      {/* This is a favorites-only surface — status changes belong on the
+          show's own detail page, not here — so the long-press menu is
+          pared down to a single "Remove from Favorites" option
+          (favoritesOnlyOptions), unified with the Movies favorites page.
+          removeLabel/onRemove override the shared menu's default "Remove"
+          (which normally drops the show from the library entirely) —
+          here it should just unfavorite, same action and wording as the
+          heart badge/unheart above, so the grid drops it via the same
+          reactive sync instead of a separate removeUserShow path. */}
       <PosterQuickStatusMenu
         show={longPress?.show ?? null}
         anchorRect={longPress?.rect ?? null}
         userId={user?.id}
         source="ProfileFavorites:posterLongPress"
         onClose={() => setLongPress(null)}
-        removeLabel="Remove from Favorite"
+        options={favoritesOnlyOptions}
+        removeLabel="Remove from Favorites"
         onRemove={(showId) => unheart(showId)}
       />
     </>

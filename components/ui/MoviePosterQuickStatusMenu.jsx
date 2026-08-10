@@ -20,7 +20,7 @@ const MENU_W = 190;
 const GAP = 8;
 const EST_MENU_H = 260;
 
-export default function MoviePosterQuickStatusMenu({ show, userId, currentStatus = null, source, anchorRect, onClose, onStatusChange, removeLabel = "Remove", onRemove }) {
+export default function MoviePosterQuickStatusMenu({ show, userId, currentStatus = null, source, anchorRect, onClose, onStatusChange, removeLabel = "Remove", onRemove, options = movieStatusMenuOptions }) {
   const [busy, setBusy] = useState(false);
 
   const isOpen = Boolean(show);
@@ -87,7 +87,7 @@ export default function MoviePosterQuickStatusMenu({ show, userId, currentStatus
           align={align}
           direction={direction}
           removeLabel={removeLabel}
-          options={movieStatusMenuOptions}
+          options={options}
           style={{ opacity: busy ? 0.5 : 1, pointerEvents: busy ? "none" : "auto" }}
         />
       </div>

@@ -56,10 +56,17 @@ function toHex(rgb) {
 // real poster instead of a deterministic per-id table, so every gradient
 // string this card already had (`${glow}45`, `${base} 55%`, etc.) keeps
 // working unchanged.
+// Mixes 10% white into a channel — the explicit "lighten the preview tint
+// by 10%" request, applied uniformly to both base and glow below rather
+// than tuning their own mix ratios individually.
+function lighten10(rgb) {
+  return rgb.map((c) => c * 0.9 + 255 * 0.1);
+}
+
 function paletteFromRGB(rgb) {
   return {
-    base: toHex(rgb.map((c) => c * 0.24 + NEUTRAL_RGB[0] * 0.03 + 9)),
-    glow: toHex(rgb.map((c) => c * 0.82 + 255 * 0.18)),
+    base: toHex(lighten10(rgb.map((c) => c * 0.24 + NEUTRAL_RGB[0] * 0.03 + 9))),
+    glow: toHex(lighten10(rgb.map((c) => c * 0.82 + 255 * 0.18))),
   };
 }
 

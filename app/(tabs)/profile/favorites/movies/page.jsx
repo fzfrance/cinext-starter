@@ -7,6 +7,7 @@ import GlassCircle from "@/components/ui/GlassCircle";
 import PosterCard from "@/components/ui/PosterCard";
 import MoviePosterQuickStatusMenu from "@/components/ui/MoviePosterQuickStatusMenu";
 import PosterGrid from "@/components/ui/PosterGrid";
+import { favoritesOnlyOptions } from "@/components/StatusMenu";
 import { useAuth } from "@/lib/auth-context";
 import { useMovieFavorites } from "@/lib/movie-favorites-context";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
@@ -217,21 +218,23 @@ export default function Page() {
       {/* tap-outside catcher for open menus */}
       {activeMenu && <div className="fixed inset-0 z-20" onClick={() => setActiveMenu(null)} />}
 
-      {/* No onStatusChange refresh needed — this grid is purely "movies
-          you've favorited," independent of status, so a status change
-          here never changes what belongs in this list. removeLabel/onRemove
-          override the shared menu's default "Remove" (which normally drops
-          the movie from the library entirely) — here it should just
-          unfavorite, same action and wording as the heart badge/unheart
-          above, so the grid drops it via the same reactive sync instead of
-          a separate removeUserMovie path. */}
+      {/* This is a favorites-only surface — status changes belong on the
+          movie's own detail page, not here — so the long-press menu is
+          pared down to a single "Remove from Favorites" option
+          (favoritesOnlyOptions), unified with the Shows favorites page.
+          removeLabel/onRemove override the shared menu's default "Remove"
+          (which normally drops the movie from the library entirely) —
+          here it should just unfavorite, same action and wording as the
+          heart badge/unheart above, so the grid drops it via the same
+          reactive sync instead of a separate removeUserMovie path. */}
       <MoviePosterQuickStatusMenu
         show={longPress?.show ?? null}
         anchorRect={longPress?.rect ?? null}
         userId={user?.id}
         source="ProfileFavoritesMovies:posterLongPress"
         onClose={() => setLongPress(null)}
-        removeLabel="Remove from Favorite"
+        options={favoritesOnlyOptions}
+        removeLabel="Remove from Favorites"
         onRemove={(movieId) => unheart(movieId)}
       />
     </>

@@ -6,6 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import Icon from "@/components/ui/Icon";
 import PosterArt from "@/components/ui/PosterArt";
+import MediaStatusBadge from "@/components/ui/MediaStatusBadge";
 import StatusMenu, { movieStatusMenuOptions } from "@/components/StatusMenu";
 import MovieRatingBanner from "@/components/MovieRatingBanner";
 import MovieRatingScreen from "@/components/MovieRatingScreen";
@@ -14,7 +15,7 @@ import MovieImagePickerScreen from "@/components/MovieImagePickerScreen";
 import { useAuth } from "@/lib/auth-context";
 import { useMovieFavorites } from "@/lib/movie-favorites-context";
 import { useMovieCustomizations } from "@/lib/movie-customizations-context";
-import { getUserMovie, setMovieStatus, removeUserMovie } from "@/lib/userMovies";
+import { getUserMovie, getUserMovies, setMovieStatus, removeUserMovie } from "@/lib/userMovies";
 import { getMovieRating, saveMovieRating, deleteMovieRating } from "@/lib/movieRatings";
 import { getCollections, createCollection, addMovieToCollection, removeMovieFromCollection } from "@/lib/collections";
 import { getProfile } from "@/lib/profile";
@@ -119,6 +120,23 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
   const readableLanguages = useReadableLanguages();
   const displayTitle = resolveTitle(movie, readableLanguages);
   const resolvedSimilar = similar.map((s) => ({ ...s, title: resolveTitle(s, readableLanguages) }));
+
+  // Status badges for "You May Also Like" — mirrors ShowDetailClient's
+  // own identical addition, one media type over. Raw stored status, not
+  // a live-resolved one (movies have no progress-vs-explicit distinction
+  // to resolve anyway — see lib/userMovies.js).
+  const [similarStatusMap, setSimilarStatusMap] = useState({});
+  useEffect(() => {
+    if (!user) { setSimilarStatusMap({}); return; }
+    let cancelled = false;
+    getUserMovies(user.id)
+      .then((byMovie) => {
+        if (cancelled) return;
+        setSimilarStatusMap(Object.fromEntries(Object.entries(byMovie).map(([id, s]) => [id, s.status])));
+      })
+      .catch(console.error);
+    return () => { cancelled = true; };
+  }, [user]);
 
   // "backdrop" | "poster" | "logo" | null — driven by a `?picker=` query
   // param, same reasoning as ShowDetailClient's own imagePickerType (see
@@ -567,6 +585,7 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
                   <Link key={s.id} href={`/movie/${s.id}`} className="flex-shrink-0 block" style={{ width: 100 }}>
                     <div className="relative rounded-2xl overflow-hidden" style={{ width: 100, height: 140 }}>
                       <PosterArt posterPath={s.posterPath} alt={s.title} />
+                      <MediaStatusBadge status={similarStatusMap[s.id]} />
                     </div>
                     <div style={{ fontSize: 11.5, color: "#fff", marginTop: 6, fontWeight: 500 }}>{s.title}</div>
                   </Link>

@@ -6,14 +6,17 @@ import Image from "next/image";
 import Icon from "@/components/ui/Icon";
 import Grain from "@/components/ui/Grain";
 import PosterArt from "@/components/ui/PosterArt";
+import MediaStatusBadge from "@/components/ui/MediaStatusBadge";
 import { useAuth } from "@/lib/auth-context";
-import { getWatchedShowIds } from "@/lib/episodeWatches";
+import { getUserShows } from "@/lib/userShows";
+import { getUserMovies } from "@/lib/userMovies";
+import { getShowWatchSummary } from "@/lib/episodeWatches";
+import { resolveShowStatus } from "@/lib/statusResolver";
 import { tmdbImage } from "@/lib/tmdb";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
-import { themes, DEFAULT_ACCENT, CAST_GRADIENTS } from "@/lib/theme";
+import { themes, CAST_GRADIENTS } from "@/lib/theme";
 
 const t = themes.dark;
-const accent = DEFAULT_ACCENT;
 
 function GlassButton({ children, onClick, style }) {
   return (
@@ -43,14 +46,65 @@ export default function PersonDetailClient({ person }) {
   const { user } = useAuth();
   const readableLanguages = useReadableLanguages();
   const [filmTab, setFilmTab] = useState("tv");
-  const [watchedShowIds, setWatchedShowIds] = useState(new Set());
-
+  // Status badges for the filmography grid — a browsing surface, same
+  // "already tracking this" glance-badge Explore/Show Detail's own
+  // recommendation rows show (see MediaStatusBadge's own comment).
+  // Replaces the old bare "watched" checkmark (which only ever covered
+  // TV, driven by episode_watches presence rather than real status) with
+  // the full watchlist/watching/completed/paused/drop vocabulary, for
+  // both tabs. Shows are live-resolved through resolveShowStatus (same as
+  // Explore/Show Detail) — a raw user_shows.status column can silently
+  // drift out of sync with real watch history (e.g. every episode marked
+  // watched without ever explicitly picking "Watching"), and this grid
+  // must never disagree with reality. Movies have no such drift (no
+  // progress-vs-explicit distinction exists for them — see
+  // lib/userMovies.js), so their raw stored status is already the real one.
+  const [showStatusMap, setShowStatusMap] = useState({});
+  const [movieStatusMap, setMovieStatusMap] = useState({});
   useEffect(() => {
-    if (!user) return;
+    if (!user) { setShowStatusMap({}); setMovieStatusMap({}); return; }
     let cancelled = false;
-    getWatchedShowIds(user.id).then((ids) => { if (!cancelled) setWatchedShowIds(ids); }).catch(console.error);
+
+    getUserMovies(user.id)
+      .then((byMovie) => { if (!cancelled) setMovieStatusMap(Object.fromEntries(Object.entries(byMovie).map(([id, s]) => [id, s.status]))); })
+      .catch(console.error);
+
+    (async () => {
+      const byShow = await getUserShows(user.id);
+      const ids = person.credits.filter((c) => c.type === "tv").map((c) => c.id).filter((id) => byShow[id]);
+      if (ids.length === 0) { if (!cancelled) setShowStatusMap({}); return; }
+
+      const map = {};
+      for (const id of ids) map[id] = byShow[id].status;
+      if (!cancelled) setShowStatusMap({ ...map });
+
+      const resolvableIds = ids.filter((id) => byShow[id].status !== "paused" && byShow[id].status !== "drop" && byShow[id].status !== "completed");
+      if (resolvableIds.length === 0) return;
+
+      const summary = await getShowWatchSummary(user.id, resolvableIds);
+      const res = await fetch("/api/shows/library-detail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shows: resolvableIds.map((id) => ({ id, needsProgress: true, watched: summary[id]?.watchedKeys ?? [] })) }),
+      });
+      const { results } = await res.json();
+      if (cancelled) return;
+      const byId = Object.fromEntries(results.map((r) => [r.id, r]));
+      const resolved = { ...map };
+      for (const id of resolvableIds) {
+        const result = byId[id];
+        if (!result) continue;
+        resolved[id] = resolveShowStatus({
+          explicitStatus: byShow[id].status,
+          watchedReleasedEpisodes: result.watchedReleasedEpisodes ?? 0,
+          releasedEpisodes: result.releasedEpisodes ?? 0,
+        });
+      }
+      setShowStatusMap(resolved);
+    })().catch(console.error);
+
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, person.credits]);
 
   const grad = CAST_GRADIENTS[person.id % CAST_GRADIENTS.length];
   const work = person.credits
@@ -184,11 +238,7 @@ export default function PersonDetailClient({ person }) {
                 const card = (
                   <div className="relative rounded-xl overflow-hidden" style={{ aspectRatio: "2 / 3", boxShadow: "0 6px 16px rgba(0,0,0,0.45)" }}>
                     <PosterArt posterPath={w.posterPath} alt={w.title} />
-                    {w.type === "tv" && watchedShowIds.has(w.id) && (
-                      <div className="absolute flex items-center justify-center" style={{ right: 6, top: 6, width: 20, height: 20, borderRadius: "50%", background: "rgba(0,0,0,0.55)" }}>
-                        <Icon name="check" size={11} color={accent} strokeWidth={2.6} />
-                      </div>
-                    )}
+                    <MediaStatusBadge status={w.type === "tv" ? showStatusMap[w.id] : movieStatusMap[w.id]} />
                   </div>
                 );
                 // TV credits go to Show Detail, movie credits to Movie

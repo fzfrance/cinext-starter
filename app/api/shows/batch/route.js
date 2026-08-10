@@ -32,6 +32,10 @@ export async function GET(request) {
     // existing caller already just spreads/ignores unrecognized fields.
     backdropPath: show.backdrop_path ?? null,
     genre: (show.genres ?? [])[0]?.name ?? "",
+    // Profile's Time Machine year-detail list ("N Seasons") — already on
+    // getShowDetails' raw TMDB response (same field library-detail/
+    // route.js reads for progress), just not mapped through before now.
+    numberOfSeasons: show.number_of_seasons ?? null,
   }));
 
   return NextResponse.json({ results });

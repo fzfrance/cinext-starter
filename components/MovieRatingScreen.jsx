@@ -321,8 +321,7 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
               <div className="text-center" style={{ fontSize: 15.5, fontWeight: 600, color: "#fff" }}>{editing ? "Write your review" : "Your Review"} {editing && <span style={{ fontSize: 12, color: t.textDim, fontWeight: 500 }}>(optional)</span>}</div>
               {editing ? (
                 <div className="relative rounded-2xl mt-4" style={{ background: "rgba(255,255,255,0.04)" }}>
-                  <textarea value={draftText} onChange={(e) => e.target.value.length <= 500 && setDraftText(e.target.value)} placeholder="Share your thoughts..." rows={4} className="w-full bg-transparent outline-none" style={{ padding: "12px 14px 22px", fontSize: 13.5, color: "#fff", lineHeight: 1.5, resize: "none", textAlign: "left" }} />
-                  <span style={{ position: "absolute", right: 12, bottom: 8, fontSize: 10.5, color: t.textDim }}>{draftText.length}/500</span>
+                  <textarea value={draftText} onChange={(e) => setDraftText(e.target.value)} placeholder="Share your thoughts..." rows={4} className="w-full bg-transparent outline-none" style={{ padding: "12px 14px 14px", fontSize: 13.5, color: "#fff", lineHeight: 1.5, resize: "none", textAlign: "left" }} />
                 </div>
               ) : (
                 <div style={{ fontSize: 14, lineHeight: 1.6, color: "rgba(255,255,255,0.85)", marginTop: 10, textAlign: "left" }}>{manual.text}</div>

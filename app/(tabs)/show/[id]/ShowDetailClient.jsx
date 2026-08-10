@@ -6,6 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import Icon from "@/components/ui/Icon";
 import PosterArt from "@/components/ui/PosterArt";
+import MediaStatusBadge from "@/components/ui/MediaStatusBadge";
 import EpisodeRatingFlow from "@/components/EpisodeRatingFlow";
 import EpisodeDetail from "@/components/EpisodeDetail";
 import ImagePickerScreen from "@/components/ImagePickerScreen";
@@ -16,8 +17,8 @@ import ShareRatingCard from "@/components/ShareRatingCard";
 import { useAuth } from "@/lib/auth-context";
 import { useFavorites } from "@/lib/favorites-context";
 import { useShowCustomizations } from "@/lib/show-customizations-context";
-import { getEpisodeWatches, addEpisodeWatches, clearEpisodeWatches, syncEpisodeWatchCount, rateLatestWatch } from "@/lib/episodeWatches";
-import { getUserShow, setShowStatus, removeUserShow, setWatchlistAndClearProgress, removeImplicitLibraryRow } from "@/lib/userShows";
+import { getEpisodeWatches, addEpisodeWatches, clearEpisodeWatches, syncEpisodeWatchCount, rateLatestWatch, getShowWatchSummary } from "@/lib/episodeWatches";
+import { getUserShow, getUserShows, setShowStatus, removeUserShow, setWatchlistAndClearProgress, removeImplicitLibraryRow } from "@/lib/userShows";
 import { getCollections, createCollection, addShowToCollection, removeShowFromCollection } from "@/lib/collections";
 import { getSeasonRatings, saveSeasonRating, deleteSeasonRating, getAutoSeasonScore } from "@/lib/seasonRatings";
 import { getProfile } from "@/lib/profile";
@@ -155,6 +156,58 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   // `.title` normally.
   const displayTitle = resolveTitle(show, readableLanguages);
   const resolvedSimilar = similar.map((s) => ({ ...s, title: resolveTitle(s, readableLanguages) }));
+
+  // Status badges for "You May Also Like" — a browsing surface, same
+  // "already tracking this" glance-badge Explore's own cards show (see
+  // MediaStatusBadge's own comment). Live-resolved through
+  // resolveShowStatus, same as this show's own status pill below and
+  // Explore's own resolvedStatusMap — a raw user_shows.status column can
+  // silently drift out of sync with real watch history (e.g. every
+  // episode marked watched without ever explicitly picking "Watching"
+  // from the status menu), and this row must never disagree with reality
+  // just because it's "only" a glance badge. `similar` (the prop, stable
+  // across this component's own re-renders) is the dependency, not
+  // resolvedSimilar — that's a brand-new array every render and would
+  // re-fire this effect on every state change.
+  const [similarStatusMap, setSimilarStatusMap] = useState({});
+  useEffect(() => {
+    if (!user) { setSimilarStatusMap({}); return; }
+    let cancelled = false;
+    (async () => {
+      const byShow = await getUserShows(user.id);
+      const ids = similar.map((s) => s.id).filter((id) => byShow[id]);
+      if (ids.length === 0) { if (!cancelled) setSimilarStatusMap({}); return; }
+
+      const map = {};
+      for (const id of ids) map[id] = byShow[id].status;
+      if (!cancelled) setSimilarStatusMap({ ...map });
+
+      const resolvableIds = ids.filter((id) => byShow[id].status !== "paused" && byShow[id].status !== "drop" && byShow[id].status !== "completed");
+      if (resolvableIds.length === 0) return;
+
+      const summary = await getShowWatchSummary(user.id, resolvableIds);
+      const res = await fetch("/api/shows/library-detail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shows: resolvableIds.map((id) => ({ id, needsProgress: true, watched: summary[id]?.watchedKeys ?? [] })) }),
+      });
+      const { results } = await res.json();
+      if (cancelled) return;
+      const byId = Object.fromEntries(results.map((r) => [r.id, r]));
+      const resolved = { ...map };
+      for (const id of resolvableIds) {
+        const result = byId[id];
+        if (!result) continue;
+        resolved[id] = resolveShowStatus({
+          explicitStatus: byShow[id].status,
+          watchedReleasedEpisodes: result.watchedReleasedEpisodes ?? 0,
+          releasedEpisodes: result.releasedEpisodes ?? 0,
+        });
+      }
+      setSimilarStatusMap(resolved);
+    })().catch(console.error);
+    return () => { cancelled = true; };
+  }, [user, similar]);
 
   // "backdrop" | "poster" | "logo" | null — driven by a `?picker=` query
   // param (via router.push/back below) rather than local state, so the
@@ -1004,7 +1057,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
 
           {/* tabs */}
           <div className="mt-5 flex gap-5" style={{ borderBottom: `1px solid ${t.cardBorder}` }}>
-            {[{ id: "episodes", label: "Episodes" }, { id: "cast", label: "Cast & Crew" }, { id: "details", label: "Details" }, { id: "reviews", label: "My Rating" }].map((tb) => (
+            {[{ id: "episodes", label: "Episodes" }, { id: "details", label: "Details" }, { id: "cast", label: "Cast & Crew" }, { id: "reviews", label: "My Rating" }].map((tb) => (
               <button key={tb.id} onClick={() => setTab(tb.id)} className="pb-2.5" style={{
                 fontSize: 13.5, fontWeight: 600, color: tab === tb.id ? "#fff" : t.textDim,
                 borderBottom: tab === tb.id ? `2px solid ${accent}` : "2px solid transparent",
@@ -1488,6 +1541,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                   <Link key={s.id} href={`/show/${s.id}`} className="flex-shrink-0 block" style={{ width: 100 }}>
                     <div className="relative rounded-2xl overflow-hidden" style={{ width: 100, height: 140 }}>
                       <PosterArt posterPath={s.posterPath} base={s.base} glow={s.glow} alt={s.title} />
+                      <MediaStatusBadge status={similarStatusMap[s.id]} />
                     </div>
                     <div style={{ fontSize: 11.5, color: "#fff", marginTop: 6, fontWeight: 500 }}>{s.title}</div>
                   </Link>
