@@ -11,6 +11,10 @@ import { useAuth } from "@/lib/auth-context";
 import { useFavorites } from "@/lib/favorites-context";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
+import {
+  FAVORITE_SHOWS_ORDER_KEY, FAVORITE_SHOWS_SORT_KEY,
+  loadFavoriteOrder, saveFavoriteOrder, loadFavoriteSort, saveFavoriteSort, sortFavorites,
+} from "@/lib/favoritesOrder";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -21,14 +25,6 @@ const sortOptions = [
   { id: "az", label: "A–Z" },
   { id: "userOrder", label: "User Order" },
 ];
-
-function sortItems(items, mode, nameKey) {
-  const arr = [...items];
-  if (mode === "firstAdded") return arr.sort((a, b) => a.addedAt - b.addedAt);
-  if (mode === "lastAdded") return arr.sort((a, b) => b.addedAt - a.addedAt);
-  if (mode === "az") return arr.sort((a, b) => a[nameKey].localeCompare(b[nameKey]));
-  return arr; // userOrder — keep current array order as manually arranged
-}
 
 export default function Page() {
   const router = useRouter();
@@ -78,7 +74,18 @@ export default function Page() {
     toggleFavorite(id, "ProfileFavorites:unheart");
   };
 
-  const [sortMode, setSortMode] = useState("firstAdded");
+  const [sortMode, setSortModeState] = useState("firstAdded");
+  const [order, setOrder] = useState([]);
+  // Hydrate the persisted sort mode + hand-arranged order on mount — same
+  // default-then-hydrate-via-effect pattern as Library's own view-mode
+  // toggle (avoids touching localStorage during SSR). Both are also read
+  // by Profile's own preview row (see lib/favoritesOrder.js), so a choice
+  // made here shows up there too and survives a refresh either way.
+  useEffect(() => {
+    setSortModeState(loadFavoriteSort(FAVORITE_SHOWS_SORT_KEY));
+    setOrder(loadFavoriteOrder(FAVORITE_SHOWS_ORDER_KEY));
+  }, []);
+  const setSortMode = (mode) => { setSortModeState(mode); saveFavoriteSort(FAVORITE_SHOWS_SORT_KEY, mode); };
   const [activeMenu, setActiveMenu] = useState(null); // 'menu' | 'sort' | null
   const toggleMenu = (key) => setActiveMenu((prev) => (prev === key ? null : prev ? null : key));
   const [reorderMode, setReorderMode] = useState(false);
@@ -92,6 +99,10 @@ export default function Page() {
       const toIdx = arr.findIndex((s) => s.id === targetId);
       const [moved] = arr.splice(fromIdx, 1);
       arr.splice(toIdx, 0, moved);
+      // Persisted on every drop (not just on "Done") so the arrangement
+      // is never lost to an accidental refresh/nav-away mid-reorder.
+      setOrder(arr.map((s) => s.id));
+      saveFavoriteOrder(FAVORITE_SHOWS_ORDER_KEY, arr.map((s) => s.id));
       return arr;
     });
     setDragId(null);
@@ -101,7 +112,7 @@ export default function Page() {
   // this list does — and so the A–Z sort below sorts by what's actually
   // displayed, not always the English title.
   const resolvedFavorites = favorites.map((f) => ({ ...f, title: resolveTitle(f, readableLanguages) }));
-  const displayedFavorites = reorderMode ? resolvedFavorites : sortItems(resolvedFavorites, sortMode, "title");
+  const displayedFavorites = reorderMode ? resolvedFavorites : sortFavorites(resolvedFavorites, sortMode, order);
 
   return (
     <>

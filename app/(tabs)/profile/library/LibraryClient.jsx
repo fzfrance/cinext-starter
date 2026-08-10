@@ -6,10 +6,14 @@ import Icon from "@/components/ui/Icon";
 import GlassCircle from "@/components/ui/GlassCircle";
 import PosterCard from "@/components/ui/PosterCard";
 import PosterQuickStatusMenu from "@/components/ui/PosterQuickStatusMenu";
+import MoviePosterQuickStatusMenu from "@/components/ui/MoviePosterQuickStatusMenu";
 import PosterGrid from "@/components/ui/PosterGrid";
+import { MOVIE_STATUS_ITEMS } from "@/components/library/StatusFilterRow";
 import { useAuth } from "@/lib/auth-context";
 import { useFavorites } from "@/lib/favorites-context";
+import { useMovieFavorites } from "@/lib/movie-favorites-context";
 import { getUserShows } from "@/lib/userShows";
+import { getUserMovies } from "@/lib/userMovies";
 import { getShowWatchSummary } from "@/lib/episodeWatches";
 import { resolveShowStatus } from "@/lib/statusResolver";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
@@ -18,6 +22,14 @@ import { themes, statusMeta, DEFAULT_ACCENT } from "@/lib/theme";
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
 
+// Same array shape as MOVIE_STATUS_ITEMS (components/library/StatusFilterRow.jsx)
+// — statusMeta itself (lib/theme.js) is a plain id-keyed object, not an
+// array, so this page's own status-pill row (which needs to iterate
+// either vocabulary the same way once a mediaType toggle exists) converts
+// it once here rather than branching the render between two different
+// iteration shapes.
+const SHOW_STATUS_ITEMS = Object.entries(statusMeta).map(([id, meta]) => ({ id, ...meta }));
+
 // Same options/shape as Profile's own Favorites sort menu, minus "User
 // Order" — that option only makes sense for a manually-reorderable list
 // (Favorites has a real drag-reorder mode with a stored order), and this
@@ -25,6 +37,9 @@ const accent = DEFAULT_ACCENT;
 // library. "Last Watched" is new here — lastWatchedAt already comes free
 // on every show from getShowWatchSummary (fetched below for status
 // resolution anyway), just not previously attached to the display object.
+// Movies have no lastWatchedAt of their own (no per-watch history, just a
+// status) — they all sink to the bottom together under that sort, same as
+// a never-watched show would.
 const sortOptions = [
   { id: "firstAdded", label: "First Added" },
   { id: "lastAdded", label: "Last Added" },
@@ -48,10 +63,14 @@ export default function LibraryClient() {
   const searchParams = useSearchParams();
   const { user } = useAuth();
   const { isFavorite, toggleFavorite } = useFavorites();
+  const { isFavorite: isMovieFavorite, toggleFavorite: toggleMovieFavorite } = useMovieFavorites();
   const readableLanguages = useReadableLanguages();
+  const [type, setType] = useState("shows");
   const [libraryFilter, setLibraryFilter] = useState("all");
   const [library, setLibrary] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [movieLibrary, setMovieLibrary] = useState([]);
+  const [movieLoading, setMovieLoading] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [genreMenuOpen, setGenreMenuOpen] = useState(false);
@@ -62,15 +81,42 @@ export default function LibraryClient() {
   const [libraryRefreshToken, setLibraryRefreshToken] = useState(0);
 
   // Arriving from a Library genre aisle's ">" (e.g. Sci-Fi & Fantasy) tags
-  // this page with ?genre=... — read reactively (not just on first mount)
-  // so navigating here again with a DIFFERENT genre re-applies correctly
-  // even if this page's component instance is reused across the
-  // same-route navigation, and so arriving with no genre param at all
-  // (e.g. from Profile's own Library entry point) explicitly clears any
-  // previously-set filter instead of leaving it stuck.
+  // this page with ?genre=...&type=movies — read reactively (not just on
+  // first mount) so navigating here again with a DIFFERENT genre/type
+  // re-applies correctly even if this page's component instance is
+  // reused across the same-route navigation, and so arriving with no
+  // params at all (e.g. from Profile's own Library entry point) explicitly
+  // clears any previously-set filter instead of leaving it stuck.
   useEffect(() => {
     setGenreFilter(searchParams.get("genre") || null);
+    setType(searchParams.get("type") === "movies" ? "movies" : "shows");
   }, [searchParams]);
+
+  // Updates the URL alongside local state whenever type/genre change via
+  // this page's own filter dropdown (not just on arrival) — so a refresh
+  // or a back-navigation restores the same filtered view instead of
+  // resetting to Shows/All Genres, same reasoning the main Library tab's
+  // own ?tab= now follows.
+  const applyFilterUrl = (nextType, nextGenre) => {
+    const params = new URLSearchParams();
+    if (nextType === "movies") params.set("type", "movies");
+    if (nextGenre) params.set("genre", nextGenre);
+    const qs = params.toString();
+    router.replace(qs ? `/profile/library?${qs}` : "/profile/library", { scroll: false });
+  };
+  const selectType = (nextType) => {
+    setType(nextType);
+    setGenreFilter(null);
+    setLibraryFilter("all"); // show/movie status vocabularies differ — a stale pick from one would silently zero-out the other
+    setGenreMenuOpen(false);
+    applyFilterUrl(nextType, null);
+  };
+  const selectGenre = (g) => {
+    const next = genreFilter === g ? null : g;
+    setGenreFilter(next);
+    setGenreMenuOpen(false);
+    applyFilterUrl(type, next);
+  };
 
   // Same fetch/resolve as Profile's own Library section — library-detail
   // (not the lighter /api/shows/batch) because the *displayed* status must
@@ -139,6 +185,49 @@ export default function LibraryClient() {
     return () => { cancelled = true; };
   }, [user, readableLanguages, libraryRefreshToken]);
 
+  // Movies — mirrors the shows fetch above, meaningfully simpler: no
+  // episode-progress/resolveShowStatus branch at all (a movie's status is
+  // always exactly what the user picked, see lib/userMovies.js), so one
+  // batch fetch (/api/movies/library-detail) is the whole thing. No
+  // lastWatchedAt/progress of its own — left null/undefined, same as a
+  // never-watched show would leave them.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    setMovieLoading(true);
+    (async () => {
+      const byMovie = await getUserMovies(user.id);
+      const ids = Object.keys(byMovie).map(Number);
+      if (ids.length === 0) { if (!cancelled) { setMovieLibrary([]); setMovieLoading(false); } return; }
+
+      const res = await fetch("/api/movies/library-detail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const { results } = await res.json();
+      const byId = Object.fromEntries(results.map((r) => [r.id, r]));
+
+      if (cancelled) return;
+      setMovieLibrary(ids.map((id) => {
+        const result = byId[id];
+        if (!result) return null;
+        return {
+          id: result.id,
+          title: resolveTitle(result, readableLanguages),
+          englishTitle: result.title,
+          posterPath: result.posterPath,
+          genre: result.genre,
+          ...byMovie[id],
+          lastWatchedAt: null,
+          progress: undefined,
+        };
+      }).filter(Boolean));
+      setMovieLoading(false);
+    })().catch((err) => { console.error(err); if (!cancelled) setMovieLoading(false); });
+    return () => { cancelled = true; };
+  }, [user, readableLanguages, libraryRefreshToken]);
+
   if (!user) {
     return (
       <div className="min-h-dvh flex flex-col items-center justify-center text-center px-8" style={{ background: t.bg }}>
@@ -151,17 +240,24 @@ export default function LibraryClient() {
     );
   }
 
-  // Genres actually present in this library, not a fixed master list —
-  // sorted alphabetically so the menu order doesn't shuffle as data loads.
-  const genres = [...new Set(library.map((s) => s.genre).filter(Boolean))].sort();
+  const isMovies = type === "movies";
+  const activeLibrary = isMovies ? movieLibrary : library;
+  const activeLoading = isMovies ? movieLoading : loading;
+  const statusItems = isMovies ? MOVIE_STATUS_ITEMS : SHOW_STATUS_ITEMS;
+
+  // Genres actually present in THIS type's library, not a fixed master
+  // list — sorted alphabetically so the menu order doesn't shuffle as
+  // data loads. Recomputed per type, so switching Shows/Movies never
+  // leaves a genre selected that the other type doesn't even have.
+  const genres = [...new Set(activeLibrary.map((s) => s.genre).filter(Boolean))].sort();
   const trimmedQuery = searchQuery.trim().toLowerCase();
-  const filteredLibrary = library.filter((s) => {
+  const filteredLibrary = activeLibrary.filter((s) => {
     if (libraryFilter !== "all" && s.status !== libraryFilter) return false;
     if (genreFilter && s.genre !== genreFilter) return false;
     if (trimmedQuery && !s.title.toLowerCase().includes(trimmedQuery) && !s.englishTitle?.toLowerCase().includes(trimmedQuery)) return false;
     return true;
   });
-  const counts = Object.keys(statusMeta).reduce((acc, k) => ({ ...acc, [k]: library.filter((s) => s.status === k).length }), {});
+  const counts = statusItems.reduce((acc, item) => ({ ...acc, [item.id]: activeLibrary.filter((s) => s.status === item.id).length }), {});
   const sortedLibrary = sortItems(filteredLibrary, sortMode, "title");
   const pillOn = (active) => ({ background: active ? "#fff" : "rgba(0,0,0,0.3)", color: active ? "#111" : "#fff" });
 
@@ -170,10 +266,10 @@ export default function LibraryClient() {
       <div className="flex items-center justify-between px-6" style={{ paddingTop: "calc(env(safe-area-inset-top) + 21px)" }}>
         <GlassCircle onClick={() => router.back()} t={t}><Icon name="back" size={16} color={t.text} /></GlassCircle>
         <div className="flex items-center gap-2">
-          {/* Genre filter — liquid-glass transparent dropdown, matching the
-              other recently-built dropdown triggers (e.g. Library's own
-              LibraryTabMenu) instead of the old warm opaque
-              rgba(28,22,16,0.95) panel. */}
+          {/* Filter — liquid-glass transparent dropdown. A Shows/Movies
+              toggle sits at the top now, above the genre list, so this one
+              button covers both "which media type" and "which genre"
+              instead of needing a separate control for type. */}
           <div className="relative">
             <button
               onClick={() => setGenreMenuOpen((v) => !v)}
@@ -185,13 +281,29 @@ export default function LibraryClient() {
             {genreMenuOpen && (
               <>
                 <div className="fixed inset-0 z-20" onClick={() => setGenreMenuOpen(false)} />
-                <div className="absolute z-30 rounded-2xl overflow-hidden" style={{ top: "calc(100% + 8px)", right: 0, width: 190, maxHeight: 280, overflowY: "auto", padding: 6, background: `linear-gradient(${accent}10, ${accent}05), rgba(20,18,16,0.42)`, border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(26px)", WebkitBackdropFilter: "blur(26px)", boxShadow: "0 20px 44px rgba(0,0,0,0.55)", scrollbarWidth: "none" }}>
-                  <button onClick={() => { setGenreFilter(null); setGenreMenuOpen(false); }} className="w-full flex items-center justify-between rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
+                <div className="absolute z-30 rounded-2xl overflow-hidden" style={{ top: "calc(100% + 8px)", right: 0, width: 190, maxHeight: 340, overflowY: "auto", padding: 6, background: `linear-gradient(${accent}10, ${accent}05), rgba(20,18,16,0.42)`, border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(26px)", WebkitBackdropFilter: "blur(26px)", boxShadow: "0 20px 44px rgba(0,0,0,0.55)", scrollbarWidth: "none" }}>
+                  <div className="flex items-center rounded-xl" style={{ padding: 3, marginBottom: 6, background: "rgba(255,255,255,0.06)" }}>
+                    {[["shows", "Shows"], ["movies", "Movies"]].map(([id, label]) => {
+                      const active = type === id;
+                      return (
+                        <button
+                          key={id}
+                          onClick={() => selectType(id)}
+                          className="flex-1 flex items-center justify-center rounded-lg active:scale-95 transition"
+                          style={{ padding: "7px 0", background: active ? "#fff" : "transparent" }}
+                        >
+                          <span style={{ fontSize: 12.5, fontWeight: 700, color: active ? "#111" : "#fff" }}>{label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "2px 4px 6px" }} />
+                  <button onClick={() => selectGenre(null)} className="w-full flex items-center justify-between rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
                     <span style={{ fontSize: 13, fontWeight: 500, color: !genreFilter ? accent : "#fff" }}>All Genres</span>
                     {!genreFilter && <Icon name="check" size={13} color={accent} />}
                   </button>
                   {genres.map((g) => (
-                    <button key={g} onClick={() => { setGenreFilter(genreFilter === g ? null : g); setGenreMenuOpen(false); }} className="w-full flex items-center justify-between rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
+                    <button key={g} onClick={() => selectGenre(g)} className="w-full flex items-center justify-between rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
                       <span style={{ fontSize: 13, fontWeight: 500, color: genreFilter === g ? accent : "#fff" }}>{g}</span>
                       {genreFilter === g && <Icon name="check" size={13} color={accent} />}
                     </button>
@@ -211,8 +323,11 @@ export default function LibraryClient() {
       </div>
       <div className="flex items-center justify-between px-6" style={{ marginTop: 16 }}>
         <div>
-          <div style={{ fontSize: 32.2, fontWeight: 800, color: "#fff" }}>Shows</div>
-          <div style={{ fontSize: 12.5, color: t.textDim, marginTop: 3 }}>{library.length} shows</div>
+          {/* Static "Library" now, not a per-type "Shows"/"Movies" title —
+              the filter dropdown's own Shows/Movies toggle is what
+              indicates which type is active, per explicit request. */}
+          <div style={{ fontSize: 32.2, fontWeight: 800, color: "#fff" }}>Library</div>
+          <div style={{ fontSize: 12.5, color: t.textDim, marginTop: 3 }}>{activeLibrary.length} {isMovies ? "movies" : "shows"}</div>
         </div>
         <div className="relative">
           <button onClick={() => setSortMenuOpen((v) => !v)} className="flex items-center gap-1 rounded-full active:scale-95 transition" style={{ padding: "6px 10px", background: t.cardFill, border: `1px solid ${t.cardBorder}` }}>
@@ -257,32 +372,42 @@ export default function LibraryClient() {
 
       <div className="px-6 flex gap-2 overflow-x-auto" style={{ marginTop: 18, scrollbarWidth: "none" }}>
         <button onClick={() => setLibraryFilter("all")} className="flex-shrink-0 flex items-center gap-1.5 rounded-full active:scale-95 transition" style={{ padding: "7px 14px", fontSize: 12.5, fontWeight: 500, ...pillOn(libraryFilter === "all"), border: `1px solid ${libraryFilter === "all" ? "transparent" : t.cardBorder}` }}>
-          <Icon name="gridToggle" size={12} color={libraryFilter === "all" ? "#111" : t.textDim} />All · {library.length}
+          <Icon name="gridToggle" size={12} color={libraryFilter === "all" ? "#111" : t.textDim} />All · {activeLibrary.length}
         </button>
-        {Object.entries(statusMeta).map(([key, meta]) => {
-          const active = libraryFilter === key;
+        {statusItems.map((meta) => {
+          const active = libraryFilter === meta.id;
           return (
-            <button key={key} onClick={() => setLibraryFilter(key)} className="flex-shrink-0 flex items-center gap-1.5 rounded-full active:scale-95 transition" style={{ padding: "7px 14px", fontSize: 12.5, fontWeight: 500, ...pillOn(active), border: `1px solid ${active ? "transparent" : t.cardBorder}` }}>
-              <Icon name={meta.icon} size={12} color={active ? "#111" : t.textDim} />{meta.label} · {counts[key]}
+            <button key={meta.id} onClick={() => setLibraryFilter(meta.id)} className="flex-shrink-0 flex items-center gap-1.5 rounded-full active:scale-95 transition" style={{ padding: "7px 14px", fontSize: 12.5, fontWeight: 500, ...pillOn(active), border: `1px solid ${active ? "transparent" : t.cardBorder}` }}>
+              <Icon name={meta.icon} size={12} color={active ? "#111" : t.textDim} />{meta.label} · {counts[meta.id]}
             </button>
           );
         })}
       </div>
 
-      {loading ? (
+      {activeLoading ? (
         <div style={{ padding: "40px 24px", textAlign: "center", fontSize: 13, color: t.textDim }}>Loading…</div>
       ) : (
         <>
           <PosterGrid className="px-6 mt-4" columns={3}>
             {sortedLibrary.map((s) => (
-              <PosterCard key={s.id} show={s} href={`/show/${s.id}`} width="100%" titlePlacement="overlay" favorite={isFavorite(s.id)} onToggleFavorite={() => toggleFavorite(s.id, "ProfileLibrary:grid")} onLongPress={(show, rect) => setLongPress({ show, rect })} progress={s.progress} />
+              <PosterCard
+                key={s.id}
+                show={s}
+                href={isMovies ? `/movie/${s.id}` : `/show/${s.id}`}
+                width="100%"
+                titlePlacement="overlay"
+                favorite={isMovies ? isMovieFavorite(s.id) : isFavorite(s.id)}
+                onToggleFavorite={() => (isMovies ? toggleMovieFavorite(s.id, "ProfileLibrary:grid") : toggleFavorite(s.id, "ProfileLibrary:grid"))}
+                onLongPress={(show, rect) => setLongPress({ show, rect })}
+                progress={s.progress}
+              />
             ))}
           </PosterGrid>
 
           {filteredLibrary.length === 0 && (
             <div style={{ padding: "40px 24px", textAlign: "center", fontSize: 13, color: t.textDim }}>
               {trimmedQuery || genreFilter
-                ? "No shows match your search/filter."
+                ? `No ${isMovies ? "movies" : "shows"} match your search/filter.`
                 : libraryFilter === "all" ? "Nothing in your library yet." : "Nothing here yet."}
             </div>
           )}
@@ -291,14 +416,25 @@ export default function LibraryClient() {
 
       <div style={{ height: 30 }} />
 
-      <PosterQuickStatusMenu
-        show={longPress?.show ?? null}
-        anchorRect={longPress?.rect ?? null}
-        userId={user?.id}
-        source="ProfileLibrary:posterLongPress"
-        onClose={() => setLongPress(null)}
-        onStatusChange={() => setLibraryRefreshToken((n) => n + 1)}
-      />
+      {isMovies ? (
+        <MoviePosterQuickStatusMenu
+          show={longPress?.show ?? null}
+          anchorRect={longPress?.rect ?? null}
+          userId={user?.id}
+          source="ProfileLibrary:posterLongPress"
+          onClose={() => setLongPress(null)}
+          onStatusChange={() => setLibraryRefreshToken((n) => n + 1)}
+        />
+      ) : (
+        <PosterQuickStatusMenu
+          show={longPress?.show ?? null}
+          anchorRect={longPress?.rect ?? null}
+          userId={user?.id}
+          source="ProfileLibrary:posterLongPress"
+          onClose={() => setLongPress(null)}
+          onStatusChange={() => setLibraryRefreshToken((n) => n + 1)}
+        />
+      )}
     </>
   );
 }

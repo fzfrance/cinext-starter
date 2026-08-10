@@ -11,14 +11,20 @@ import { useAuth } from "@/lib/auth-context";
 import { useMovieFavorites } from "@/lib/movie-favorites-context";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
+import {
+  FAVORITE_MOVIES_ORDER_KEY, FAVORITE_MOVIES_SORT_KEY,
+  loadFavoriteOrder, saveFavoriteOrder, loadFavoriteSort, saveFavoriteSort, sortFavorites,
+} from "@/lib/favoritesOrder";
 
 // Fork of app/(tabs)/profile/favorites/page.jsx, not a parameterized
 // version of it — same reasoning as every other movie/show fork this
 // pass (MovieRatingScreen, MoviePosterQuickStatusMenu): useMovieFavorites()
 // instead of useFavorites(), /api/movies/batch instead of /api/shows/batch,
 // /movie/${id} instead of /show/${id}, MoviePosterQuickStatusMenu instead
-// of the show-only PosterQuickStatusMenu. Sort/reorder logic (sortItems)
-// is media-agnostic and copied verbatim.
+// of the show-only PosterQuickStatusMenu. Sort/reorder logic
+// (lib/favoritesOrder.js's sortFavorites) is media-agnostic and genuinely
+// shared (not copied) — Profile's own Favorite Movies preview row reads
+// the exact same persisted sort/order this page writes.
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -29,14 +35,6 @@ const sortOptions = [
   { id: "az", label: "A–Z" },
   { id: "userOrder", label: "User Order" },
 ];
-
-function sortItems(items, mode, nameKey) {
-  const arr = [...items];
-  if (mode === "firstAdded") return arr.sort((a, b) => a.addedAt - b.addedAt);
-  if (mode === "lastAdded") return arr.sort((a, b) => b.addedAt - a.addedAt);
-  if (mode === "az") return arr.sort((a, b) => a[nameKey].localeCompare(b[nameKey]));
-  return arr; // userOrder — keep current array order as manually arranged
-}
 
 export default function Page() {
   const router = useRouter();
@@ -80,7 +78,17 @@ export default function Page() {
     toggleFavorite(id, "ProfileFavoritesMovies:unheart");
   };
 
-  const [sortMode, setSortMode] = useState("firstAdded");
+  const [sortMode, setSortModeState] = useState("firstAdded");
+  const [order, setOrder] = useState([]);
+  // Hydrate the persisted sort mode + hand-arranged order on mount — same
+  // pattern as the shows Favorites page. Also read by Profile's own
+  // Favorite Movies preview row (lib/favoritesOrder.js), so a choice made
+  // here shows up there too and survives a refresh either way.
+  useEffect(() => {
+    setSortModeState(loadFavoriteSort(FAVORITE_MOVIES_SORT_KEY));
+    setOrder(loadFavoriteOrder(FAVORITE_MOVIES_ORDER_KEY));
+  }, []);
+  const setSortMode = (mode) => { setSortModeState(mode); saveFavoriteSort(FAVORITE_MOVIES_SORT_KEY, mode); };
   const [activeMenu, setActiveMenu] = useState(null); // 'menu' | 'sort' | null
   const toggleMenu = (key) => setActiveMenu((prev) => (prev === key ? null : prev ? null : key));
   const [reorderMode, setReorderMode] = useState(false);
@@ -94,6 +102,10 @@ export default function Page() {
       const toIdx = arr.findIndex((s) => s.id === targetId);
       const [moved] = arr.splice(fromIdx, 1);
       arr.splice(toIdx, 0, moved);
+      // Persisted on every drop (not just on "Done") so the arrangement
+      // is never lost to an accidental refresh/nav-away mid-reorder.
+      setOrder(arr.map((s) => s.id));
+      saveFavoriteOrder(FAVORITE_MOVIES_ORDER_KEY, arr.map((s) => s.id));
       return arr;
     });
     setDragId(null);
@@ -103,7 +115,7 @@ export default function Page() {
   // this list does — and so the A–Z sort below sorts by what's actually
   // displayed, not always the English title.
   const resolvedFavorites = favorites.map((f) => ({ ...f, title: resolveTitle(f, readableLanguages) }));
-  const displayedFavorites = reorderMode ? resolvedFavorites : sortItems(resolvedFavorites, sortMode, "title");
+  const displayedFavorites = reorderMode ? resolvedFavorites : sortFavorites(resolvedFavorites, sortMode, order);
 
   return (
     <>

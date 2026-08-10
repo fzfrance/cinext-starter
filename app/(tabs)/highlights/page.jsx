@@ -1202,7 +1202,14 @@ export default function Page() {
                     pass (width/padding/icon badge/border-radius/margins),
                     plus the number reduced another 10% on top of its own
                     previous pass. */}
-                {[["episodes", monthEntries.length, "Episodes"], ["layers", uniqueShowCount, "Shows"], ["ticket", monthMovieEntries.length, "Movies"], ["calendar", activeDayCount, "Active Days"], ["refresh", rewatchCount, "Rewatched"]].map(([icon, n, l], i) => (
+                {/* Active Days dropped from this row per explicit request —
+                    it now surfaces as inline text next to the "Watch
+                    History" heading below instead (see activeDayCount's
+                    other usage). Profile's own separate this-month stats
+                    row (app/(tabs)/profile/page.jsx) is untouched — it has
+                    its own independent ["Shows","Movies","Active Days",
+                    "Rewatched"] tuple, not this one. */}
+                {[["episodes", monthEntries.length, "Episodes"], ["layers", uniqueShowCount, "Shows"], ["ticket", monthMovieEntries.length, "Movies"], ["refresh", rewatchCount, "Rewatched"]].map(([icon, n, l], i) => (
                   <div key={i} className="flex-shrink-0 flex flex-col items-center text-center" style={{ width: 86.36, padding: "12.70px 11.29px", background: statCardBg, border: "1px solid rgba(255,255,255,0.05)", borderRadius: 12.23 }}>
                     <div className="flex items-center justify-center rounded-full flex-shrink-0" style={{ width: 37.62, height: 37.62, background: `${statIconGold}12` }}>
                       <Icon name={icon} size={16.93} color={accent} strokeWidth={1.4} />
@@ -1234,6 +1241,17 @@ export default function Page() {
                               touch more contrast on the image itself. */}
                           <div className="relative rounded-2xl overflow-hidden" style={{ aspectRatio: "2 / 3", borderRadius: 22, boxShadow: "0 14px 32px rgba(0,0,0,0.34)", filter: "contrast(1.06) saturate(1.05)" }}>
                             <PosterArt posterPath={s.posterPath} alt={title} />
+                            {/* This is the same `rating` computeTopShows already
+                                resolves for ranking (whichever touched season had
+                                the most watched episodes this month) — shown only
+                                when one exists, never a placeholder for an unrated
+                                show. */}
+                            {s.rating != null && (
+                              <div className="absolute flex items-center gap-1 rounded-full" style={{ left: 6, bottom: 6, padding: "3px 6px", background: "rgba(0,0,0,0.68)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)" }}>
+                                <Icon name="star" size={9} color={accent} />
+                                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff" }}>{s.rating.toFixed(1)}</span>
+                              </div>
+                            )}
                           </div>
                           <div className="mt-2 leading-tight" style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
                           <div style={{ fontSize: 11, color: t.textDim, marginTop: 2 }}>{s.hours}h · {s.episodeCount} ep</div>
@@ -1258,6 +1276,14 @@ export default function Page() {
                         <button key={m.movieId} onClick={() => router.push(`/movie/${m.movieId}`)} className="flex-shrink-0 text-left active:scale-95 transition" style={{ width: 156 }}>
                           <div className="relative rounded-2xl overflow-hidden" style={{ aspectRatio: "2 / 3", borderRadius: 22, boxShadow: "0 14px 32px rgba(0,0,0,0.34)", filter: "contrast(1.06) saturate(1.05)" }}>
                             <PosterArt posterPath={m.posterPath} alt={title} />
+                            {/* Same rating computeTopMovies already resolves for
+                                ranking — shown only when one exists. */}
+                            {m.rating != null && (
+                              <div className="absolute flex items-center gap-1 rounded-full" style={{ left: 6, bottom: 6, padding: "3px 6px", background: "rgba(0,0,0,0.68)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)" }}>
+                                <Icon name="star" size={9} color={accent} />
+                                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff" }}>{m.rating.toFixed(1)}</span>
+                              </div>
+                            )}
                           </div>
                           <div className="mt-2 leading-tight" style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
                           <div style={{ fontSize: 11, color: t.textDim, marginTop: 2 }}>{formatDuration(m.runtimeMinutes)}</div>
@@ -1338,7 +1364,13 @@ export default function Page() {
               "No watch activity" copy below. */}
           {monthStatus === "ready" && (
             <div className="px-6" style={{ marginTop: 26 }}>
-              <div style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 12 }}>Watch History</div>
+              <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
+                <span style={{ fontSize: 16.5, fontWeight: 700, color: "#fff" }}>Watch History</span>
+                {/* Active Days moved here from the stat-card row above — same
+                    number (activeDayCount), just relocated to sit next to
+                    the calendar it actually describes. */}
+                <span style={{ fontSize: 12, fontWeight: 500, color: t.textDim }}>{activeDayCount} Active day{activeDayCount === 1 ? "" : "s"}</span>
+              </div>
               <style>{`
                 @keyframes highlightsCalSlide { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: translateX(0); } }
                 @keyframes highlightsDayFade { from { opacity: 0; } to { opacity: 1; } }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Icon from "@/components/ui/Icon";
@@ -10,13 +10,14 @@ import PosterCard from "@/components/ui/PosterCard";
 import PosterQuickStatusMenu from "@/components/ui/PosterQuickStatusMenu";
 import PosterArt from "@/components/ui/PosterArt";
 import StarInput from "@/components/ui/StarInput";
+import TimeMachineSection from "@/components/profile/TimeMachineSection";
 import { moodMetasFromField } from "@/components/SeasonBanner";
 import { useAuth } from "@/lib/auth-context";
 import { useFavorites } from "@/lib/favorites-context";
 import { useMovieFavorites } from "@/lib/movie-favorites-context";
 import { getUserShows } from "@/lib/userShows";
-import { getUserMoviesWatchedInYear } from "@/lib/userMovies";
-import { getShowWatchSummary, getWatchedEpisodesForYear } from "@/lib/episodeWatches";
+import { getUserMoviesWatchedInYear, getAllUserMoviesWatched } from "@/lib/userMovies";
+import { getShowWatchSummary, getWatchedEpisodesForYear, getWatchedYears } from "@/lib/episodeWatches";
 import { getMyRatingsForUser } from "@/lib/myRatings";
 import { resolveShowStatus } from "@/lib/statusResolver";
 import { getCollections } from "@/lib/collections";
@@ -28,6 +29,10 @@ import { themes, DEFAULT_ACCENT, collectionPalette } from "@/lib/theme";
 import { computeRewatchCount } from "@/lib/highlights";
 import { bangkokNow as getBangkokNow } from "@/lib/bangkokDate";
 import CollectionBoxSet from "@/components/CollectionBoxSet";
+import {
+  FAVORITE_SHOWS_ORDER_KEY, FAVORITE_SHOWS_SORT_KEY, FAVORITE_MOVIES_ORDER_KEY, FAVORITE_MOVIES_SORT_KEY,
+  loadFavoriteOrder, loadFavoriteSort, sortFavorites,
+} from "@/lib/favoritesOrder";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -82,6 +87,22 @@ export default function Page() {
   // small batch whenever the set of favorited movie ids changes is simpler
   // and cheap enough not to need that page's more careful diffing.
   const [movieFavorites, setMovieFavorites] = useState([]);
+  // Same sort mode + hand-arranged order the full Favorites list pages
+  // (app/(tabs)/profile/favorites, .../favorites/movies) read and write —
+  // see lib/favoritesOrder.js. Hydrated on mount (this page remounts on
+  // every navigation back to it, so no extra sync needed) so a choice
+  // made on either full list page is reflected here too and survives a
+  // refresh either way.
+  const [showFavSort, setShowFavSort] = useState("firstAdded");
+  const [showFavOrder, setShowFavOrder] = useState([]);
+  const [movieFavSort, setMovieFavSort] = useState("firstAdded");
+  const [movieFavOrder, setMovieFavOrder] = useState([]);
+  useEffect(() => {
+    setShowFavSort(loadFavoriteSort(FAVORITE_SHOWS_SORT_KEY));
+    setShowFavOrder(loadFavoriteOrder(FAVORITE_SHOWS_ORDER_KEY));
+    setMovieFavSort(loadFavoriteSort(FAVORITE_MOVIES_SORT_KEY));
+    setMovieFavOrder(loadFavoriteOrder(FAVORITE_MOVIES_ORDER_KEY));
+  }, []);
   const [libraryLoading, setLibraryLoading] = useState(true);
   const [longPress, setLongPress] = useState(null);
   const [libraryRefreshToken, setLibraryRefreshToken] = useState(0);
@@ -89,6 +110,11 @@ export default function Page() {
   const [profile, setProfile] = useState(null);
   const [monthStats, setMonthStats] = useState(null);
   const [myRatings, setMyRatings] = useState([]);
+  // "Time Machine" — one card per calendar year with any watch activity
+  // (TV or movie), newest first. See the fetch effect below for how this
+  // is built.
+  const [timeMachineYears, setTimeMachineYears] = useState([]);
+  const [timeMachineLoading, setTimeMachineLoading] = useState(true);
 
   // Display name/bio/avatar/background — null (not yet saved) falls back
   // to the account email + decorative gradient placeholders below.
@@ -184,7 +210,7 @@ export default function Page() {
       const byId = Object.fromEntries(results.map((r) => [r.id, r]));
 
       if (cancelled) return;
-      setLibrary(ids.map((id) => {
+      const merged = ids.map((id) => {
         const result = byId[id];
         if (!result) return null;
         const resolvedStatus = resolveShowStatus({
@@ -195,12 +221,69 @@ export default function Page() {
         // Spread byShow[id] first so its raw `status` is overridden by the
         // resolved one below — every downstream filter/count in this file
         // reads `s.status` and must see the resolved value, not the stored one.
-        return { id: result.id, title: resolveTitle(result, readableLanguages), posterPath: result.posterPath, genre: result.genre, ...byShow[id], status: resolvedStatus };
-      }).filter(Boolean));
+        // Full field set — same exact shape as app/(tabs)/library/page.jsx's
+        // own shows merge (englishTitle/backdropPath/genres/tmdbRating/
+        // tagline/base/glow/logoPath), not a trimmed-down subset — kept this
+        // way even though Favorite Shows (the only remaining consumer here)
+        // doesn't need every field, so this stays a drop-in match if another
+        // section ever needs the same richly-shaped rows.
+        const { base, glow } = fallbackPalette(id);
+        return {
+          id: result.id,
+          title: resolveTitle(result, readableLanguages),
+          englishTitle: result.title,
+          year: result.year,
+          meta: result.meta,
+          posterPath: result.posterPath,
+          backdropPath: result.backdropPath,
+          genres: result.genres ?? [],
+          logoPath: null, // filled in by the separate logo-fetch effect below
+          tmdbRating: result.tmdbRating,
+          tagline: result.tagline,
+          base, glow,
+          ...byShow[id],
+          status: resolvedStatus,
+        };
+      }).filter(Boolean);
+      // Preserve any logoPath the logo-fetch effect below already resolved
+      // — see app/(tabs)/library/LibraryClient.jsx's identical comment for
+      // why (this effect re-running after that one succeeded used to
+      // permanently blank every spine's logo back to null instead of
+      // leaving it alone).
+      setLibrary((prev) => {
+        const prevLogoById = Object.fromEntries(prev.filter((s) => s.logoPath != null).map((s) => [s.id, s.logoPath]));
+        return merged.map((s) => (s.id in prevLogoById ? { ...s, logoPath: prevLogoById[s.id] } : s));
+      });
       setLibraryLoading(false);
     })().catch((err) => { console.error(err); if (!cancelled) setLibraryLoading(false); });
     return () => { cancelled = true; };
-  }, [user, libraryRefreshToken]);
+  }, [user, libraryRefreshToken, readableLanguages]);
+
+  // Logos for `library` rows — same effect as app/(tabs)/library/page.jsx's
+  // own (matched to the user's Readable Languages via lib/tmdb.js's
+  // pickBestLogo). Runs once per distinct (ids, readableLanguages) pair.
+  const libraryLogoIdsRef = useRef("");
+  useEffect(() => {
+    if (library.length === 0) return;
+    const ids = library.map((s) => s.id);
+    const key = `${ids.join(",")}|${readableLanguages.join(",")}`;
+    if (libraryLogoIdsRef.current === key) return;
+    libraryLogoIdsRef.current = key;
+    let cancelled = false;
+    fetch("/api/shows/logos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids, readableLanguages }),
+    })
+      .then((res) => res.json())
+      .then(({ results }) => {
+        if (cancelled) return;
+        const logoById = Object.fromEntries((results ?? []).map((r) => [r.id, r.logoPath]));
+        setLibrary((prev) => prev.map((s) => (s.id in logoById ? { ...s, logoPath: logoById[s.id] } : s)));
+      })
+      .catch(console.error);
+    return () => { cancelled = true; };
+  }, [library, readableLanguages]);
 
   useEffect(() => {
     if (!user) return;
@@ -261,6 +344,89 @@ export default function Page() {
     return () => { cancelled = true; };
   }, [user, movieFavoriteEntries]);
 
+  // "Time Machine" — one card per calendar year the user watched *anything*
+  // in (TV or movie), newest first. Important: this is the year the user
+  // WATCHED a title, never its release/premiere year — getWatchedYears/
+  // getWatchedEpisodesForYear key off episode_watches.watched_year (TV),
+  // getAllUserMoviesWatched keys off user_movies.watched_on (movies), both
+  // deliberately independent of release_date/first_air_date. One
+  // representative title per year (whichever was watched most recently
+  // within that year) supplies the card's poster art via fallbackPalette(id)
+  // — the same deterministic per-id atmosphere palette every other surface
+  // in the app already uses (ShelfCase/CollectionBackdrop/My Ratings' poster
+  // glow), not real color-sampling from the poster.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    setTimeMachineLoading(true);
+    (async () => {
+      const [showYears, movieRows] = await Promise.all([
+        getWatchedYears(user.id).catch((err) => { console.error(err); return []; }),
+        getAllUserMoviesWatched(user.id).catch((err) => { console.error(err); return []; }),
+      ]);
+
+      const movieRowsByYear = new Map();
+      for (const r of movieRows) {
+        const year = Number(r.watchedOn.slice(0, 4));
+        if (!movieRowsByYear.has(year)) movieRowsByYear.set(year, []);
+        movieRowsByYear.get(year).push(r);
+      }
+
+      const years = [...new Set([...showYears, ...movieRowsByYear.keys()])].sort((a, b) => b - a);
+      if (years.length === 0) { if (!cancelled) { setTimeMachineYears([]); setTimeMachineLoading(false); } return; }
+
+      const showRowsByYear = await Promise.all(
+        years.map((year) =>
+          showYears.includes(year)
+            ? getWatchedEpisodesForYear(user.id, year).catch((err) => { console.error(err); return []; })
+            : Promise.resolve([])
+        )
+      );
+
+      const entries = years.map((year, i) => {
+        const showRows = showRowsByYear[i];
+        const movieRowsForYear = movieRowsByYear.get(year) ?? [];
+        const showIds = new Set(showRows.map((r) => r.tmdb_show_id));
+        const movieIds = new Set(movieRowsForYear.map((r) => r.movieId));
+
+        // Representative title = whichever watch event, TV or movie,
+        // happened most recently within this calendar year.
+        let repType = null, repId = null, repAt = null;
+        for (const r of showRows) {
+          const at = r.watched_at ?? r.watched_on;
+          if (at && (!repAt || at > repAt)) { repAt = at; repType = "tv"; repId = r.tmdb_show_id; }
+        }
+        for (const r of movieRowsForYear) {
+          if (r.watchedOn && (!repAt || r.watchedOn > repAt)) { repAt = r.watchedOn; repType = "movie"; repId = r.movieId; }
+        }
+
+        return { year, titleCount: showIds.size + movieIds.size, repType, repId };
+      });
+
+      const repShowIds = [...new Set(entries.filter((e) => e.repType === "tv").map((e) => e.repId))];
+      const repMovieIds = [...new Set(entries.filter((e) => e.repType === "movie").map((e) => e.repId))];
+
+      const [showResults, movieResults] = await Promise.all([
+        repShowIds.length ? fetch(`/api/shows/batch?ids=${repShowIds.join(",")}`).then((r) => r.json()).then((d) => d.results) : [],
+        repMovieIds.length ? fetch(`/api/movies/batch?ids=${repMovieIds.join(",")}`).then((r) => r.json()).then((d) => d.results) : [],
+      ]);
+      if (cancelled) return;
+
+      const showById = Object.fromEntries(showResults.map((s) => [s.id, s]));
+      const movieById = Object.fromEntries(movieResults.map((m) => [m.id, m]));
+
+      // No fallbackPalette here — TimeMachineYearCard derives its own
+      // atmosphere by sampling the representative poster's real dominant
+      // color client-side, not a deterministic per-id table.
+      setTimeMachineYears(entries.map((e) => {
+        const rep = e.repType === "movie" ? movieById[e.repId] : showById[e.repId];
+        return { year: e.year, titleCount: e.titleCount, posterPath: rep?.posterPath ?? null };
+      }));
+      setTimeMachineLoading(false);
+    })().catch((err) => { console.error(err); if (!cancelled) setTimeMachineLoading(false); });
+    return () => { cancelled = true; };
+  }, [user]);
+
   if (!loading && !user) {
     return (
       <div className="min-h-dvh flex flex-col items-center justify-center text-center px-8" style={{ background: t.bg }}>
@@ -282,6 +448,10 @@ export default function Page() {
   // (Explore, Collections, the dedicated Favorites screen) is reflected
   // here immediately without this page needing its own refetch.
   const favorites = library.filter((s) => isFavorite(s.id));
+  // Same sort/order the full Favorites list pages apply — see
+  // lib/favoritesOrder.js and this file's own hydration effect above.
+  const displayedFavorites = sortFavorites(favorites, showFavSort, showFavOrder);
+  const displayedMovieFavorites = sortFavorites(movieFavorites, movieFavSort, movieFavOrder);
   // This row depends on TWO independent fetches resolving — this page's
   // own (heavier, status-resolving) library load and favorites-context's
   // own separate getUserShows call — so it was the one section that stayed
@@ -295,26 +465,22 @@ export default function Page() {
     <>
       <div className="relative w-full" style={{ height: 190 }}>
         <AtmosBackdrop imageUrl={profile?.backgroundUrl} />
+        {/* Activity's own entry point moved here from the separate
+            frosted-glass pill it used to be (below the backdrop) — now a
+            plain bell GlassCircle immediately left of Settings, same row/
+            size/spacing. Still opens the exact same /profile/activity page
+            (its own Activity/Notifications tab switcher — see
+            components/profile/ActivityPageSwitcher.jsx — already covers
+            both; this bell doesn't need its own separate notifications
+            surface). */}
         <div className="absolute top-0 right-0 flex items-center gap-2 px-6" style={{ paddingTop: "env(safe-area-inset-top)" }}>
+          <GlassCircle onClick={() => router.push("/profile/activity")} t={t}>
+            <Icon name="bell" size={16} color="#fff" />
+          </GlassCircle>
           <GlassCircle onClick={() => router.push("/profile/settings")} t={t}>
             <Icon name="settings" size={16} color="#fff" />
           </GlassCircle>
         </div>
-        {/* Edit Profile moved to Settings > Account — editing now happens
-            from there instead of this pill. Activity takes over this same
-            slot (frosted-glass pill, same position/size) — a feed +
-            notification center entry point. top: 105% (not bottom: ...)
-            anchors it just below the backdrop's bottom edge, nudged down
-            slightly past it rather than sitting flush — still positioned
-            against this same relative container so it doesn't disturb the
-            avatar row's own -34px overlap positioning right after it in
-            the DOM. Safe from that row's box overlapping it (same
-            vertical band the avatar overlaps into) because that row is
-            pointerEvents: none. */}
-        <button onClick={() => router.push("/profile/activity")} className="absolute flex items-center gap-1.5 rounded-full active:scale-95 transition" style={{ top: "115.5%", right: 20, padding: "7.92px 13.86px", background: t.cardFill, border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" }}>
-          <Icon name="activity" size={13.86} color="#fff" />
-          <span style={{ fontSize: 12.375, fontWeight: 600, color: "#fff" }}>Activity</span>
-        </button>
       </div>
 
       {/* pointerEvents: none — nothing here is interactive (plain avatar
@@ -379,7 +545,7 @@ export default function Page() {
             // is already a favorite by definition, so it's always filled,
             // but still shown for consistency and to let it be unfavorited
             // right from this row.
-            favorites.slice(0, 6).map((s) => (
+            displayedFavorites.slice(0, 6).map((s) => (
               <PosterCard key={s.id} show={s} href={`/show/${s.id}`} width={104} titlePlacement="overlay" favorite={isFavorite(s.id)} onToggleFavorite={() => toggleFavorite(s.id, "Profile:favoritesRow")} onLongPress={(show, rect) => setLongPress({ show, rect })} />
             ))
           )}
@@ -397,7 +563,7 @@ export default function Page() {
               <div key={i} className="flex-shrink-0 rounded-xl" style={{ width: 104, aspectRatio: "2 / 3", background: t.cardFill, border: `1px solid ${t.cardBorder}` }} />
             ))
           ) : (
-            movieFavorites.slice(0, 6).map((m) => (
+            displayedMovieFavorites.slice(0, 6).map((m) => (
               <PosterCard key={m.id} show={m} href={`/movie/${m.id}`} width={104} titlePlacement="overlay" favorite={isMovieFavorite(m.id)} onToggleFavorite={() => toggleMovieFavorite(m.id, "Profile:movieFavoritesRow")} />
             ))
           )}
@@ -504,6 +670,12 @@ export default function Page() {
           </div>
         </div>
       )}
+
+      <TimeMachineSection
+        years={timeMachineYears}
+        loading={timeMachineLoading}
+        onYearSelect={(year) => router.push(`/profile/time-machine/${year}`)}
+      />
 
       <PosterQuickStatusMenu
         show={longPress?.show ?? null}

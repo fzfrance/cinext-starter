@@ -75,6 +75,7 @@ const TYPE = {
   profileSubtitle: { size: 33, weight: 500 },
   reviewNoLabel: { size: 28, weight: 500 }, // was 23 (+20%)
   reviewNoValue: { size: 38, weight: 800 },
+  quote: { size: 30, weight: 500 },
 };
 
 // Fixed row heights + the exact gaps from the spec's own "Consistent
@@ -102,7 +103,12 @@ const TITLE_TOP = 847;
 const PRIMARY_TITLE_H = 143; // was 124, grown to match primaryTitle's own +15%
 const ENGLISH_TITLE_H = 62;
 const SEASON_H = 50; // was 45, grown to match season's own +10%
-const RATING_ROW_H = 86;
+// Two fixed row heights, not a per-quote measured one — matching this
+// file's own "known layout, content never shifts anything downstream"
+// convention. Compact when there's no review text to pull a quote from;
+// tall enough for up to 4 clamped quote lines when there is one.
+const RATING_ROW_H_COMPACT = 86;
+const RATING_ROW_H_QUOTE = 210;
 
 const ENGLISH_TOP = TITLE_TOP + PRIMARY_TITLE_H + 28; // mockup .title-kr margin-bottom: 10px
 const SEASON_TOP = ENGLISH_TOP + ENGLISH_TITLE_H + 22; // mockup .title-en margin-bottom: 8px
@@ -111,16 +117,6 @@ const SEASON_TOP = ENGLISH_TOP + ENGLISH_TITLE_H + 22; // mockup .title-en margi
 // text slots, so it can be one taller image rather than two cramped rows.
 const TITLE_BLOCK_H = ENGLISH_TOP + ENGLISH_TITLE_H - TITLE_TOP;
 const RATING_TOP = SEASON_TOP + SEASON_H + 20; // was +50 — sat too far below "SEASON 1", tightened per explicit feedback
-// SEAM_Y (artwork height) — the gap between the rating row's own bottom
-// edge and the seam was 40, but the ticket notch (NOTCH_H=133) is
-// VERTICALLY CENTERED on the seam, so its own top edge actually reaches
-// NOTCH_H/2 (~66.5) above the seam line — a 40px gap left the notch
-// visually overlapping into the rating row's own space, reported as "the
-// rating shouldn't sit between the notch area." 90 clears that (66.5)
-// with real breathing room on top of it, not just barely.
-const SEAM_Y = RATING_TOP + RATING_ROW_H + 90;
-const CARD_H = SEAM_Y + STUB_H;
-const EXPORT_H = CARD_H + CARD_MARGIN * 2;
 const CARD_W = EXPORT_W - CARD_MARGIN * 2;
 
 // Perforation dots — mockup: 2.5px circles, 32 of them spread via
@@ -251,6 +247,21 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
 
   const score = manual ? manual.rating : auto?.avg10 ?? 0;
   const activeImagePath = imageType === "backdrop" ? (backdropPath ?? season.posterPath) : season.posterPath;
+
+  // Pulled straight from the user's own written review — never a
+  // generated blurb. Only manual ratings ever carry review text (an
+  // auto-computed score has no `manual` object at all). The length cap is
+  // just a safety net against an oversized DOM text node; WebkitLineClamp
+  // below does the actual visual truncation to 4 lines.
+  const reviewQuote = (() => {
+    const raw = (manual?.text || "").trim();
+    if (!raw) return null;
+    return raw.length > 240 ? `${raw.slice(0, 240).trim()}…` : raw;
+  })();
+  const RATING_ROW_H = reviewQuote ? RATING_ROW_H_QUOTE : RATING_ROW_H_COMPACT;
+  const SEAM_Y = RATING_TOP + RATING_ROW_H + 90;
+  const CARD_H = SEAM_Y + STUB_H;
+  const EXPORT_H = CARD_H + CARD_MARGIN * 2;
 
   useEffect(() => {
     if (!activeImagePath) { setAtmoRGB([26, 22, 16]); return; }
@@ -739,10 +750,34 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
                     number itself the loudest thing in the row, "/10" light
                     and small — the eye should land on the number, not read
                     the row as one flat line. */}
-                <div className="absolute flex items-end" style={{ top: RATING_TOP, left: PAD_X, right: PAD_X, height: RATING_ROW_H, gap: 10 }}>
-                  <Icon name="star" size={49} color={accent} />
-                  <span style={{ fontSize: TYPE.ratingNumber.size, fontWeight: TYPE.ratingNumber.weight, color: "#fff", lineHeight: 1, textShadow: "0 2px 10px rgba(0,0,0,0.6)" }}>{score.toFixed(1)}</span>
-                  <span style={{ fontSize: TYPE.ratingSuffix.size, fontWeight: TYPE.ratingSuffix.weight, color: "rgba(255,255,255,0.6)", marginBottom: 8, textShadow: "0 1px 6px rgba(0,0,0,0.6)" }}>/10</span>
+                <div className="absolute flex" style={{ top: RATING_TOP, left: PAD_X, right: PAD_X, height: RATING_ROW_H, alignItems: "flex-start", justifyContent: "space-between" }}>
+                  <div className="flex items-end flex-shrink-0" style={{ gap: 10 }}>
+                    <Icon name="star" size={49} color={accent} />
+                    <span style={{ fontSize: TYPE.ratingNumber.size, fontWeight: TYPE.ratingNumber.weight, color: "#fff", lineHeight: 1, textShadow: "0 2px 10px rgba(0,0,0,0.6)" }}>{score.toFixed(1)}</span>
+                    <span style={{ fontSize: TYPE.ratingSuffix.size, fontWeight: TYPE.ratingSuffix.weight, color: "rgba(255,255,255,0.6)", marginBottom: 8, textShadow: "0 1px 6px rgba(0,0,0,0.6)" }}>/10</span>
+                  </div>
+
+                  {reviewQuote && (
+                    <div style={{ flex: 1, maxWidth: 430, marginLeft: 40, paddingLeft: 28, borderLeft: "1.5px solid rgba(255,255,255,0.16)" }}>
+                      <Icon name="quote" size={22} color={accent} />
+                      <div
+                        style={{
+                          marginTop: 10,
+                          fontSize: TYPE.quote.size,
+                          fontWeight: TYPE.quote.weight,
+                          lineHeight: 1.42,
+                          color: "rgba(255,255,255,0.76)",
+                          textShadow: "0 1px 6px rgba(0,0,0,0.5)",
+                          display: "-webkit-box",
+                          WebkitLineClamp: 4,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}
+                      >
+                        {reviewQuote}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
               </div>

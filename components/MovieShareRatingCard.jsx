@@ -46,21 +46,24 @@ const TYPE = {
   profileSubtitle: { size: 33, weight: 500 },
   reviewNoLabel: { size: 28, weight: 500 },
   reviewNoValue: { size: 38, weight: 800 },
+  quote: { size: 30, weight: 500 },
 };
 
 const TITLE_TOP = 847;
 const PRIMARY_TITLE_H = 143;
 const ENGLISH_TITLE_H = 62;
 const SEASON_H = 50;
-const RATING_ROW_H = 86;
+// Two fixed row heights, not a per-quote measured one — matching this
+// file's own "known layout, content never shifts anything downstream"
+// convention. Compact when there's no review text to pull a quote from;
+// tall enough for up to 4 clamped quote lines when there is one.
+const RATING_ROW_H_COMPACT = 86;
+const RATING_ROW_H_QUOTE = 210;
 
 const ENGLISH_TOP = TITLE_TOP + PRIMARY_TITLE_H + 28;
 const SEASON_TOP = ENGLISH_TOP + ENGLISH_TITLE_H + 22;
 const TITLE_BLOCK_H = ENGLISH_TOP + ENGLISH_TITLE_H - TITLE_TOP;
 const RATING_TOP = SEASON_TOP + SEASON_H + 20;
-const SEAM_Y = RATING_TOP + RATING_ROW_H + 90;
-const CARD_H = SEAM_Y + STUB_H;
-const EXPORT_H = CARD_H + CARD_MARGIN * 2;
 const CARD_W = EXPORT_W - CARD_MARGIN * 2;
 
 const PERFORATION_DOT = 7;
@@ -163,6 +166,20 @@ export default function MovieShareRatingCard({ userId, movieId, movieTitle, orig
   // fixed row, same styling, just a different single fact since a movie
   // has no season to name.
   const yearRuntimeLabel = `${movie.year ?? ""}${movie.runtime ? ` · ${Math.floor(movie.runtime / 60)}h ${movie.runtime % 60}m` : ""}`.trim();
+
+  // Pulled straight from the user's own written review — never a
+  // generated blurb. The length cap is just a safety net against an
+  // oversized DOM text node; WebkitLineClamp below does the actual
+  // visual truncation to 4 lines.
+  const reviewQuote = (() => {
+    const raw = (manual?.text || "").trim();
+    if (!raw) return null;
+    return raw.length > 240 ? `${raw.slice(0, 240).trim()}…` : raw;
+  })();
+  const RATING_ROW_H = reviewQuote ? RATING_ROW_H_QUOTE : RATING_ROW_H_COMPACT;
+  const SEAM_Y = RATING_TOP + RATING_ROW_H + 90;
+  const CARD_H = SEAM_Y + STUB_H;
+  const EXPORT_H = CARD_H + CARD_MARGIN * 2;
 
   useEffect(() => {
     if (!activeImagePath) { setAtmoRGB([26, 22, 16]); return; }
@@ -436,10 +453,34 @@ export default function MovieShareRatingCard({ userId, movieId, movieTitle, orig
                     <span style={{ fontSize: TYPE.season.size, fontWeight: TYPE.season.weight, letterSpacing: TYPE.season.tracking, color: "rgba(255,255,255,0.88)", textShadow: "0 1px 8px rgba(0,0,0,0.75)" }}>{yearRuntimeLabel.toUpperCase()}</span>
                   )}
                 </div>
-                <div className="absolute flex items-end" style={{ top: RATING_TOP, left: PAD_X, right: PAD_X, height: RATING_ROW_H, gap: 10 }}>
-                  <Icon name="star" size={49} color={accent} />
-                  <span style={{ fontSize: TYPE.ratingNumber.size, fontWeight: TYPE.ratingNumber.weight, color: "#fff", lineHeight: 1, textShadow: "0 2px 10px rgba(0,0,0,0.6)" }}>{score.toFixed(1)}</span>
-                  <span style={{ fontSize: TYPE.ratingSuffix.size, fontWeight: TYPE.ratingSuffix.weight, color: "rgba(255,255,255,0.6)", marginBottom: 8, textShadow: "0 1px 6px rgba(0,0,0,0.6)" }}>/10</span>
+                <div className="absolute flex" style={{ top: RATING_TOP, left: PAD_X, right: PAD_X, height: RATING_ROW_H, alignItems: "flex-start", justifyContent: "space-between" }}>
+                  <div className="flex items-end flex-shrink-0" style={{ gap: 10 }}>
+                    <Icon name="star" size={49} color={accent} />
+                    <span style={{ fontSize: TYPE.ratingNumber.size, fontWeight: TYPE.ratingNumber.weight, color: "#fff", lineHeight: 1, textShadow: "0 2px 10px rgba(0,0,0,0.6)" }}>{score.toFixed(1)}</span>
+                    <span style={{ fontSize: TYPE.ratingSuffix.size, fontWeight: TYPE.ratingSuffix.weight, color: "rgba(255,255,255,0.6)", marginBottom: 8, textShadow: "0 1px 6px rgba(0,0,0,0.6)" }}>/10</span>
+                  </div>
+
+                  {reviewQuote && (
+                    <div style={{ flex: 1, maxWidth: 430, marginLeft: 40, paddingLeft: 28, borderLeft: "1.5px solid rgba(255,255,255,0.16)" }}>
+                      <Icon name="quote" size={22} color={accent} />
+                      <div
+                        style={{
+                          marginTop: 10,
+                          fontSize: TYPE.quote.size,
+                          fontWeight: TYPE.quote.weight,
+                          lineHeight: 1.42,
+                          color: "rgba(255,255,255,0.76)",
+                          textShadow: "0 1px 6px rgba(0,0,0,0.5)",
+                          display: "-webkit-box",
+                          WebkitLineClamp: 4,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}
+                      >
+                        {reviewQuote}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
               </div>

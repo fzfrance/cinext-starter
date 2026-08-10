@@ -62,6 +62,12 @@ export default function Icon({ name, size = 18, color = "#fff", strokeWidth = 1.
       );
     case "plus":
       return <svg {...p}><path d="M12 5v14M5 12h14" /></svg>;
+    case "quote":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+          <path d="M4.5 9.6c0-2.6 1.8-4.7 4.6-5.3l.7 1.7c-1.6.5-2.5 1.5-2.6 3h2.5v5H4.5V9.6zm9.4 0c0-2.6 1.8-4.7 4.6-5.3l.7 1.7c-1.6.5-2.5 1.5-2.6 3h2.5v5h-5.2V9.6z" />
+        </svg>
+      );
     case "x":
       return <svg {...p}><path d="M6 6l12 12M18 6L6 18" /></svg>;
     case "warning":
@@ -224,6 +230,22 @@ export default function Icon({ name, size = 18, color = "#fff", strokeWidth = 1.
         <svg {...p}>
           <path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a1.6 1.6 0 0 0 0 3.2V16a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2.8a1.6 1.6 0 0 0 0-3.2V8z" />
           <path d="M10 6.5v11" strokeDasharray="2.2 2.2" />
+        </svg>
+      );
+    case "clapperboard":
+      return (
+        <svg {...p}>
+          <path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z" />
+          <path d="m6.2 5.3 3.1 5.4" />
+          <path d="m12.4 3.4 3.1 5.4" />
+          <path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+        </svg>
+      );
+    case "dvdSpines":
+      return (
+        <svg {...p}>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M8.5 4v16M13 4v16M17 4v16" />
         </svg>
       );
     case "info":
@@ -406,6 +428,14 @@ export default function Icon({ name, size = 18, color = "#fff", strokeWidth = 1.
         <svg {...p}>
           <circle cx="12" cy="12" r="9" />
           <path d="M12 7v5.5l3.5 2" />
+        </svg>
+      );
+    case "history":
+      return (
+        <svg {...p}>
+          <path d="M3 12a9 9 0 1 0 3-6.7" />
+          <path d="M3 4v4h4" />
+          <path d="M12 8v4l3 2" />
         </svg>
       );
     case "checkCircle":

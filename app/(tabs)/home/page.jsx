@@ -559,6 +559,12 @@ export default function Page() {
       const heroResult = heroId != null ? byId[heroId] : null;
       const inProgressResults = inProgressIds.map((id) => byId[id]).filter(Boolean);
       const upcomingResults = allIds
+        // A show marked Completed must stay off this row even when TMDB
+        // reports a future episode for it (a newly announced/renewed
+        // season) — this filter was missing entirely, which is exactly
+        // why a finished show could resurface here on its own once TMDB's
+        // own data changed, despite the user never touching its status.
+        .filter((id) => resolvedStatusOf(id) !== "completed")
         .map((id) => byId[id])
         .filter((r) => r && r.nextEpisodeToAir && !NOT_AIRING_STATUSES.has(r.tmdbStatus))
         // Plain string comparison, not Date subtraction — air_date is
