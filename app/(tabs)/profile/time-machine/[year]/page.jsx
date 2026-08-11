@@ -147,8 +147,13 @@ export default function Page() {
       }
       const lastMovieDate = new Map();
       for (const r of movieRows) {
-        if (!r.watchedOn) continue;
-        if (!lastMovieDate.has(r.movieId) || r.watchedOn > lastMovieDate.get(r.movieId)) lastMovieDate.set(r.movieId, r.watchedOn);
+        // A synthetic sortable string for month/year-precision rows (no
+        // real watchedOn to compare) — a movie with only that precision
+        // must still appear in this year's list, just sorted a bit more
+        // approximately than an exact-date one.
+        const at = r.watchedOn ?? (r.watchedYear ? `${r.watchedYear}-${String(r.watchedMonth ?? 1).padStart(2, "0")}-01` : null);
+        if (!at) continue;
+        if (!lastMovieDate.has(r.movieId) || at > lastMovieDate.get(r.movieId)) lastMovieDate.set(r.movieId, at);
       }
 
       const showIds = [...lastShowDate.keys()];

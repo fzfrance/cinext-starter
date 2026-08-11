@@ -11,7 +11,6 @@ import PosterQuickStatusMenu from "@/components/ui/PosterQuickStatusMenu";
 import PosterArt from "@/components/ui/PosterArt";
 import StarInput from "@/components/ui/StarInput";
 import TimeMachineSection from "@/components/profile/TimeMachineSection";
-import { moodMetasFromField } from "@/components/SeasonBanner";
 import { useAuth } from "@/lib/auth-context";
 import { useFavorites } from "@/lib/favorites-context";
 import { useMovieFavorites } from "@/lib/movie-favorites-context";
@@ -153,13 +152,11 @@ export default function Page() {
         (r.watch_date_precision === "day" || r.watch_date_precision === "month") &&
         r.watched_year === now.year && r.watched_month === now.month
       );
-      // user_movies.watched_on is a plain date column (no watched_year/
-      // watched_month columns like episode_watches has) — parse the
-      // year/month straight out of the "YYYY-MM-DD" string instead.
-      const monthMovies = movieRows.filter((r) => {
-        const [y, m] = r.watchedOn.split("-").map(Number);
-        return y === now.year && m === now.month;
-      });
+      // user_movies now carries the same watched_year/watched_month
+      // columns episode_watches has (precision parity) — read those
+      // directly rather than parsing watchedOn, which is null for
+      // month/year-precision rows.
+      const monthMovies = movieRows.filter((r) => r.watchedYear === now.year && r.watchedMonth === now.month);
       setMonthStats({
         shows: new Set(monthRows.map((r) => r.tmdb_show_id)).size,
         movies: monthMovies.length,
@@ -348,7 +345,7 @@ export default function Page() {
   // in (TV or movie), newest first. Important: this is the year the user
   // WATCHED a title, never its release/premiere year — getWatchedYears/
   // getWatchedEpisodesForYear key off episode_watches.watched_year (TV),
-  // getAllUserMoviesWatched keys off user_movies.watched_on (movies), both
+  // getAllUserMoviesWatched keys off user_movies.watched_year (movies), both
   // deliberately independent of release_date/first_air_date. One
   // representative title per year (whichever was watched most recently
   // within that year) supplies the card's poster art via fallbackPalette(id)
@@ -367,7 +364,12 @@ export default function Page() {
 
       const movieRowsByYear = new Map();
       for (const r of movieRows) {
-        const year = Number(r.watchedOn.slice(0, 4));
+        // watchedYear (not a parsed watchedOn) — populated for both day
+        // AND month precision (see lib/userMovies.js's
+        // getAllUserMoviesWatched), so a month-only-precision movie isn't
+        // silently dropped from its year here.
+        const year = r.watchedYear;
+        if (year == null) continue;
         if (!movieRowsByYear.has(year)) movieRowsByYear.set(year, []);
         movieRowsByYear.get(year).push(r);
       }
@@ -397,7 +399,11 @@ export default function Page() {
           if (at && (!repAt || at > repAt)) { repAt = at; repType = "tv"; repId = r.tmdb_show_id; }
         }
         for (const r of movieRowsForYear) {
-          if (r.watchedOn && (!repAt || r.watchedOn > repAt)) { repAt = r.watchedOn; repType = "movie"; repId = r.movieId; }
+          // A synthetic sortable string for month/year-precision rows
+          // (no real watchedOn to compare) — only used to rank "most
+          // recent within this year" against other entries, never stored.
+          const at = r.watchedOn ?? `${r.watchedYear}-${String(r.watchedMonth ?? 1).padStart(2, "0")}-01`;
+          if (!repAt || at > repAt) { repAt = at; repType = "movie"; repId = r.movieId; }
         }
 
         return { year, titleCount: showIds.size + movieIds.size, repType, repId };
@@ -607,7 +613,6 @@ export default function Page() {
           <div className="flex gap-2.5 overflow-x-auto px-6" style={{ scrollbarWidth: "none" }}>
             {myRatings.map((r) => {
               const isMovie = r.mediaType === "movie";
-              const moodMetas = moodMetasFromField(r.mood);
               // Original-language title when the show's original_language is
               // one of the user's Readable Languages (Settings), same rule
               // resolveTitle() enforces everywhere else in the app — not the
@@ -649,9 +654,12 @@ export default function Page() {
                   </button>
                   <div className="min-w-0 flex-1">
                     <div className="truncate" style={{ fontSize: 14.5, fontWeight: 700, color: "#fff" }}>{displayTitle ?? "…"}</div>
+                    {/* No mood emoji here — kept deliberately off this
+                        preview card per explicit request; still shown on
+                        the full saved rating card (SeasonRatingScreen/
+                        MovieRatingScreen's own "Your Mood" section). */}
                     <div className="flex items-center gap-1.5" style={{ marginTop: 2 }}>
                       {!isMovie && <span style={{ fontSize: 12, color: t.textDim }}>{seasonLabel(r.seasonNumber)}</span>}
-                      {moodMetas.length > 0 && <span style={{ fontSize: 12 }}>{moodMetas.map((m) => m.emoji).join(" ")}</span>}
                     </div>
                     {/* value is r.rating/2 — r.rating is the app's usual 0-10
                         scale, StarInput's own scale is 0-5 (maxStars

@@ -4,10 +4,13 @@ import { useEffect, useState } from "react";
 import Icon from "@/components/ui/Icon";
 import StarInput from "@/components/ui/StarInput";
 import PosterArt from "@/components/ui/PosterArt";
+import MiniDatePicker from "@/components/ui/MiniDatePicker";
 import { tmdbImage } from "@/lib/tmdb";
 import { SEASON_MOOD_LIST, moodIdsFromField, moodMetasFromField } from "@/components/SeasonBanner";
 import { themes, DEFAULT_ACCENT, initialsOf } from "@/lib/theme";
 import { useNavVisibility } from "@/lib/nav-visibility-context";
+import { bangkokNow } from "@/lib/bangkokDate";
+import { parseISODate } from "@/lib/watchDate";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -27,6 +30,14 @@ const accent = DEFAULT_ACCENT;
 // ratings aren't publicly shareable in this pass.
 
 const fmtDate = (d) => d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+const fmtISODate = (iso) => {
+  const p = parseISODate(iso);
+  return p ? fmtDate(new Date(p.year, p.month - 1, p.day)) : "";
+};
+const todayISO = () => {
+  const n = bangkokNow();
+  return `${n.year}-${String(n.month).padStart(2, "0")}-${String(n.day).padStart(2, "0")}`;
+};
 
 function extractEdgeColor(url) {
   return new Promise((resolve, reject) => {
@@ -93,6 +104,10 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
   const [draftCharacterId, setDraftCharacterId] = useState(manual?.characterId || null);
   const [draftCharacterName, setDraftCharacterName] = useState(manual?.characterName || null);
   const [draftText, setDraftText] = useState(manual?.text || "");
+  // Only ever surfaced when editing an already-saved rating (manual
+  // truthy) — see the hero header's own "Review date" row below.
+  const [draftReviewDate, setDraftReviewDate] = useState(manual?.reviewDate ?? todayISO());
+  const [dateEditorOpen, setDateEditorOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -111,6 +126,7 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
     setDraftCharacterId(manual?.characterId || null);
     setDraftCharacterName(manual?.characterName || null);
     setDraftText(manual?.text || "");
+    setDraftReviewDate(manual?.reviewDate ?? todayISO());
   };
 
   const startEdit = () => {
@@ -123,7 +139,13 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
     if (!canSave || saving) return;
     setSaving(true);
     try {
-      await onSave({ rating: draftRating, mood: draftMoods.join(","), characterId: draftCharacterId, characterName: draftCharacterName, text: draftText.trim() });
+      await onSave({
+        rating: draftRating, mood: draftMoods.join(","), characterId: draftCharacterId, characterName: draftCharacterName, text: draftText.trim(),
+        // Always explicit — same "caller merges this straight into local
+        // state, no refetch" reasoning as SeasonRatingScreen.jsx's
+        // identical save().
+        reviewDate: manual ? draftReviewDate : todayISO(),
+      });
       setEditing(false);
       setJustSaved(true);
     } finally {
@@ -193,7 +215,31 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
                   <Icon name="star" size={12} color={accent} />
                   <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{manual.rating.toFixed(1)}<span style={{ color: t.textDim, fontWeight: 500 }}>/10</span></span>
                 </div>
-                <span style={{ fontSize: 11.5, color: "rgba(255,255,255,0.7)" }}>{fmtDate(manual.savedAt)}</span>
+                <span style={{ fontSize: 11.5, color: "rgba(255,255,255,0.7)" }}>{fmtISODate(manual.reviewDate)}</span>
+              </div>
+            )}
+            {/* Review date, editable — under the genre row, same position
+                the read-only date sits, NOT inside the Rating card below.
+                Same reasoning as SeasonRatingScreen.jsx's identical row. */}
+            {editing && manual && (
+              <div className="relative mt-2" style={{ width: "fit-content" }}>
+                <button
+                  type="button"
+                  onClick={() => setDateEditorOpen((v) => !v)}
+                  className="flex items-center gap-1.5 rounded-full active:scale-95 transition"
+                  style={{ padding: "6px 12px", background: "rgba(255,255,255,0.1)", border: `1px solid ${t.glassBorder}` }}
+                >
+                  <Icon name="calendar" size={11} color="rgba(255,255,255,0.7)" />
+                  <span style={{ fontSize: 11.5, color: "rgba(255,255,255,0.7)" }}>Date</span>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: "#fff" }}>{fmtISODate(draftReviewDate)}</span>
+                </button>
+                {dateEditorOpen && (
+                  <MiniDatePicker
+                    value={draftReviewDate}
+                    onChange={setDraftReviewDate}
+                    onClose={() => setDateEditorOpen(false)}
+                  />
+                )}
               </div>
             )}
           </div>
@@ -324,7 +370,11 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
                   <textarea value={draftText} onChange={(e) => setDraftText(e.target.value)} placeholder="Share your thoughts..." rows={4} className="w-full bg-transparent outline-none" style={{ padding: "12px 14px 14px", fontSize: 13.5, color: "#fff", lineHeight: 1.5, resize: "none", textAlign: "left" }} />
                 </div>
               ) : (
-                <div style={{ fontSize: 14, lineHeight: 1.6, color: "rgba(255,255,255,0.85)", marginTop: 10, textAlign: "left" }}>{manual.text}</div>
+                // whiteSpace: pre-wrap — see SeasonRatingScreen.jsx's
+                // identical fix for the full reasoning (a plain div
+                // collapses the textarea's own newlines into one run-on
+                // paragraph otherwise).
+                <div style={{ fontSize: 14, lineHeight: 1.6, color: "rgba(255,255,255,0.85)", marginTop: 10, textAlign: "left", whiteSpace: "pre-wrap" }}>{manual.text}</div>
               )}
             </div>
           )}

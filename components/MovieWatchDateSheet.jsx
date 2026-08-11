@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import Icon from "@/components/ui/Icon";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 import { bangkokNow } from "@/lib/bangkokDate";
-import { MONTH_NAMES, parseISODate } from "@/lib/watchDate";
+import { MONTH_NAMES, parseISODate, selectedWatchDateOptionId } from "@/lib/watchDate";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -12,6 +12,7 @@ const SECONDARY_TEXT = "#9A9A9A";
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MIN_YEAR = 1970;
 const GLASS_CARD = { background: "rgba(255,255,255,0.05)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,255,255,0.07)" };
+const MONTHS_WITH_NONE = [null, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 function daysInMonth(year, month) {
   return new Date(year, month, 0).getDate();
@@ -20,36 +21,128 @@ function daysInMonth(year, month) {
 const OPTIONS = [
   { id: "day", label: "Exact date" },
   { id: "release_date", label: "Release date" },
+  { id: "release_month", label: "Release month" },
   { id: "unknown", label: "Don't remember" },
 ];
 
-// Trimmed fork of components/WatchDateSheet.jsx, not a parameterized
-// version of it — same visual chrome (bottom sheet, grabber, floating
-// circular Save button, calendar grid) copied verbatim, but the option
-// set and picker body are meaningfully simpler: user_movies.watched_on is
-// a single plain `date` column (see lib/userMovies.js), not the four
-// precision columns episode_watches has (watch_date_precision/
-// watched_year/watched_month/watch_date_source) — a movie's watch date is
-// always either a real exact date or nothing at all, so there's no
-// month-only/year-only "No date" checkbox+wheel mode to support the way
-// the show sheet has. "Release month" is dropped for the same reason —
-// nothing to store it as.
-//
-// props:
-//   current: { watchedOn: "YYYY-MM-DD" | null }
-//   movieReleaseDate: "YYYY-MM-DD" | null — backs the Release date option
-//   onClose: () => void
-//   onSave: (next: { watchedOn: "YYYY-MM-DD" | null }) => void
+// Verbatim copy of components/WatchDateSheet.jsx's own WheelColumn — see
+// that file for the full "why a fresh array literal per render breaks
+// re-centering" reasoning behind OPTIONS/MONTHS_WITH_NONE living at
+// module scope. Duplicated rather than shared: this component is already
+// a full fork of WatchDateSheet (movies vs. shows), not a parameterized
+// wrapper around it, matching the app's own movie/show fork convention.
+const ITEM_HEIGHT = 34;
+const VISIBLE_ROWS = 5;
+function WheelColumn({ options, value, onChange, renderLabel, width = 120 }) {
+  const containerRef = useRef(null);
+  const settleTimer = useRef(null);
+  const padding = Math.floor(VISIBLE_ROWS / 2) * ITEM_HEIGHT;
+
+  useEffect(() => {
+    const idx = options.findIndex((o) => o === value);
+    if (idx < 0 || !containerRef.current) return;
+    containerRef.current.scrollTop = idx * ITEM_HEIGHT;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-center on mount/options-identity change, not every value change (the user's own scroll already IS the value change)
+  }, [options]);
+
+  const commitFromScroll = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    const idx = Math.round(el.scrollTop / ITEM_HEIGHT);
+    const clamped = Math.max(0, Math.min(options.length - 1, idx));
+    if (options[clamped] !== value) onChange(options[clamped]);
+  };
+
+  const handleScroll = () => {
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    settleTimer.current = setTimeout(commitFromScroll, 120);
+  };
+
+  const jumpTo = (idx) => {
+    containerRef.current?.scrollTo({ top: idx * ITEM_HEIGHT, behavior: "smooth" });
+  };
+
+  return (
+    <div className="relative" style={{ width, height: ITEM_HEIGHT * VISIBLE_ROWS }}>
+      <div
+        ref={containerRef}
+        onScroll={handleScroll}
+        className="h-full overflow-y-auto"
+        style={{
+          scrollSnapType: "y mandatory",
+          scrollbarWidth: "none",
+          maskImage: "linear-gradient(180deg, transparent 0%, #000 28%, #000 72%, transparent 100%)",
+          WebkitMaskImage: "linear-gradient(180deg, transparent 0%, #000 28%, #000 72%, transparent 100%)",
+        }}
+      >
+        <div style={{ height: padding }} />
+        {options.map((opt, i) => {
+          const selected = opt === value;
+          return (
+            <div
+              key={String(opt)}
+              onClick={() => jumpTo(i)}
+              className="flex items-center justify-center"
+              style={{ height: ITEM_HEIGHT, scrollSnapAlign: "center", cursor: "pointer" }}
+            >
+              <span style={{ fontSize: selected ? 15.5 : 14, fontWeight: selected ? 500 : 400, color: selected ? "#fff" : "rgba(255,255,255,0.38)", transition: "color 150ms ease, font-size 150ms ease" }}>
+                {renderLabel(opt)}
+              </span>
+            </div>
+          );
+        })}
+        <div style={{ height: padding }} />
+      </div>
+      <div className="absolute left-0 right-0 pointer-events-none rounded-lg" style={{ top: padding, height: ITEM_HEIGHT, background: "rgba(255,255,255,0.05)" }} />
+    </div>
+  );
+}
+
+/**
+ * MovieWatchDateSheet — full precision parity with
+ * components/WatchDateSheet.jsx (see that file's own header comment for
+ * the complete behavioral spec: four options, "No date" checkbox
+ * collapsing the calendar to a month/year wheel, quick-jump month/year
+ * picker off the calendar header). Same visual chrome, same picker-body
+ * logic, adapted from "episode" to "movie" vocabulary — a real fork, not
+ * a parameterized wrapper, matching this app's established movie/show
+ * fork convention. Release date AND Release month both derive from the
+ * same single `movieReleaseDate` prop (a movie has one release date, no
+ * separate "release month" data point — its month is just that date's
+ * own month, exactly how the show sheet derives Release month from
+ * episodeAirDate).
+ *
+ * props:
+ *   current: { watchDatePrecision, watchedOn, watchedYear, watchedMonth,
+ *     watchDateSource } — same shape WatchDateSheet's own `current` uses.
+ *   movieReleaseDate: "YYYY-MM-DD" | null
+ *   onClose: () => void
+ *   onSave: (next: { precision, watchedOn, watchedYear, watchedMonth, source }) => void
+ */
 export default function MovieWatchDateSheet({ current, movieReleaseDate, onClose, onSave }) {
   const bkNow = bangkokNow();
   const releaseParts = useMemo(() => parseISODate(movieReleaseDate), [movieReleaseDate]);
   const hasReleaseDate = !!releaseParts;
 
-  const initialDay = current?.watchedOn ? parseISODate(current.watchedOn) : bkNow;
-  const [optionId, setOptionId] = useState(current?.watchedOn ? "day" : "unknown");
+  const initialOptionId = selectedWatchDateOptionId(current);
+  const [optionId, setOptionId] = useState(initialOptionId);
+
+  const initialDay = current?.watchDatePrecision === "day" && current.watchedOn ? parseISODate(current.watchedOn) : bkNow;
   const [draftDay, setDraftDay] = useState(initialDay);
   const [calendarViewYear, setCalendarViewYear] = useState(initialDay.year);
   const [calendarViewMonth, setCalendarViewMonth] = useState(initialDay.month);
+
+  const initialMonthYearMonth =
+    current?.watchDatePrecision === "month" && current.watchDateSource !== "release_month" ? current.watchedMonth :
+    current?.watchDatePrecision === "year" ? null :
+    bkNow.month;
+  const initialMonthYearYear = (current?.watchDatePrecision === "month" || current?.watchDatePrecision === "year") && current.watchDateSource !== "release_month" ? current.watchedYear : bkNow.year;
+  const [draftMonth, setDraftMonth] = useState(initialMonthYearMonth);
+  const [draftMonthYearYear, setDraftMonthYearYear] = useState(initialMonthYearYear);
+
+  const initialNoDateChecked = (current?.watchDatePrecision === "month" && current.watchDateSource !== "release_month") || current?.watchDatePrecision === "year";
+  const [noDateChecked, setNoDateChecked] = useState(initialNoDateChecked);
+  const [quickJumpOpen, setQuickJumpOpen] = useState(false);
 
   const YEARS = useMemo(() => {
     const out = [];
@@ -57,6 +150,21 @@ export default function MovieWatchDateSheet({ current, movieReleaseDate, onClose
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- bkNow is stable for the lifetime of one sheet session
   }, []);
+
+  const toggleNoDate = () => {
+    setQuickJumpOpen(false);
+    setNoDateChecked((prev) => {
+      const next = !prev;
+      if (next) {
+        setDraftMonth(draftDay.month);
+        setDraftMonthYearYear(draftDay.year);
+      } else if (draftMonth != null) {
+        setCalendarViewMonth(draftMonth);
+        setCalendarViewYear(draftMonthYearYear);
+      }
+      return next;
+    });
+  };
 
   const firstWeekday = new Date(calendarViewYear, calendarViewMonth - 1, 1).getDay();
   const totalCells = Math.ceil((firstWeekday + daysInMonth(calendarViewYear, calendarViewMonth)) / 7) * 7;
@@ -74,28 +182,49 @@ export default function MovieWatchDateSheet({ current, movieReleaseDate, onClose
   };
   const isDayDisabled = (day) => calendarViewYear === bkNow.year && calendarViewMonth === bkNow.month && day > bkNow.day;
 
-  // `source` travels alongside watchedOn so a bulk caller (Highlights'
-  // confirmBulkMovieDateChange) can tell "release_date" apart from a
-  // manually-picked exact date that just happens to equal it — a bulk
-  // "Release date" pick has to re-derive each selected movie's OWN
-  // release date, not stamp every movie with whichever one seeded this
-  // sheet, the same reasoning WatchDateSheet's own source field exists
-  // for on the TV side.
+  const setQuickJumpMonth = (m) => {
+    if (m == null) {
+      setDraftMonth(null);
+      setDraftMonthYearYear(calendarViewYear);
+      setNoDateChecked(true);
+      setQuickJumpOpen(false);
+      return;
+    }
+    if (calendarViewYear === bkNow.year && m > bkNow.month) return;
+    setCalendarViewMonth(m);
+  };
+  const setQuickJumpYear = (y) => {
+    setCalendarViewYear(y);
+    if (y === bkNow.year && calendarViewMonth > bkNow.month) setCalendarViewMonth(bkNow.month);
+  };
+
   const pendingResult = useMemo(() => {
     if (optionId === "day") {
+      if (noDateChecked) {
+        if (draftMonth == null) return { precision: "year", watchedOn: null, watchedYear: draftMonthYearYear, watchedMonth: null, source: "manual" };
+        return { precision: "month", watchedOn: null, watchedYear: draftMonthYearYear, watchedMonth: draftMonth, source: "manual" };
+      }
       const d = draftDay;
-      return { watchedOn: `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`, source: "manual" };
+      return { precision: "day", watchedOn: `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`, watchedYear: d.year, watchedMonth: d.month, source: "manual" };
     }
     if (optionId === "release_date" && hasReleaseDate) {
-      return { watchedOn: movieReleaseDate, source: "release_date" };
+      return { precision: "day", watchedOn: movieReleaseDate, watchedYear: releaseParts.year, watchedMonth: releaseParts.month, source: "release_date" };
     }
-    return { watchedOn: null, source: "unknown" };
-  }, [optionId, draftDay, hasReleaseDate, movieReleaseDate]);
+    if (optionId === "release_month" && hasReleaseDate) {
+      return { precision: "month", watchedOn: null, watchedYear: releaseParts.year, watchedMonth: releaseParts.month, source: "release_month" };
+    }
+    return { precision: "unknown", watchedOn: null, watchedYear: null, watchedMonth: null, source: null };
+  }, [optionId, noDateChecked, draftDay, draftMonth, draftMonthYearYear, hasReleaseDate, movieReleaseDate, releaseParts]);
 
-  const hasChanges = pendingResult.watchedOn !== (current?.watchedOn ?? null);
+  const hasChanges =
+    pendingResult.precision !== (current?.watchDatePrecision ?? "day") ||
+    pendingResult.watchedOn !== (current?.watchedOn ?? null) ||
+    pendingResult.watchedYear !== (current?.watchedYear ?? null) ||
+    pendingResult.watchedMonth !== (current?.watchedMonth ?? null) ||
+    pendingResult.source !== (current?.watchDateSource ?? null);
 
   const selectOption = (id) => {
-    if (id === "release_date" && !hasReleaseDate) return;
+    if ((id === "release_date" || id === "release_month") && !hasReleaseDate) return;
     setOptionId(id);
   };
 
@@ -156,7 +285,8 @@ export default function MovieWatchDateSheet({ current, movieReleaseDate, onClose
           <div className="rounded-2xl overflow-hidden" style={{ background: t.cardFill, border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" }}>
             {OPTIONS.map((opt, i) => {
               const selected = optionId === opt.id;
-              const disabled = opt.id === "release_date" && !hasReleaseDate;
+              const isReleaseOpt = opt.id === "release_date" || opt.id === "release_month";
+              const disabled = isReleaseOpt && !hasReleaseDate;
               return (
                 <button
                   key={opt.id}
@@ -188,55 +318,113 @@ export default function MovieWatchDateSheet({ current, movieReleaseDate, onClose
             {optionId === "day" && (
               <div className="rounded-2xl" style={{ padding: 12, ...GLASS_CARD }}>
                 <div className="flex items-center" style={{ height: 26, gap: 6 }}>
-                  <div className="flex-1 min-w-0 flex items-center justify-center" style={{ gap: 3 }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 600, color: "#fff" }}>{MONTH_NAMES[calendarViewMonth - 1]} {calendarViewYear}</span>
-                  </div>
-                  <div className="flex items-center justify-end flex-shrink-0" style={{ gap: 4 }}>
-                    <button onClick={goToPrevMonth} className="flex items-center justify-center rounded-full transition hover:bg-white/10 active:scale-95" style={{ width: 24, height: 24 }}>
-                      <Icon name="back" size={11} color="#fff" />
-                    </button>
-                    <button onClick={goToNextMonth} disabled={isFutureMonth} className="flex items-center justify-center rounded-full transition hover:bg-white/10 active:scale-95" style={{ width: 24, height: 24, opacity: isFutureMonth ? 0.3 : 1 }}>
-                      <Icon name="chevronRight" size={11} color="#fff" />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleNoDate}
+                    className="flex items-center gap-1.5 active:opacity-70 transition flex-shrink-0"
+                  >
+                    <div
+                      className="flex items-center justify-center rounded-md flex-shrink-0"
+                      style={{
+                        width: 17,
+                        height: 17,
+                        border: `1.5px solid ${noDateChecked ? accent : "rgba(255,255,255,0.35)"}`,
+                        background: noDateChecked ? accent : "transparent",
+                        transition: "background 120ms ease, border-color 120ms ease",
+                      }}
+                    >
+                      {noDateChecked && <Icon name="check" size={10} color="#1a1108" strokeWidth={3} />}
+                    </div>
+                    <span style={{ fontSize: 12.5, fontWeight: 500, color: "#fff", whiteSpace: "nowrap" }}>No date</span>
+                  </button>
+
+                  {!noDateChecked && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setQuickJumpOpen((v) => !v)}
+                        className="flex-1 min-w-0 flex items-center justify-center active:opacity-70 transition"
+                        style={{ gap: 3 }}
+                      >
+                        <span style={{ fontSize: 13.5, fontWeight: 600, color: "#fff" }}>{MONTH_NAMES[calendarViewMonth - 1]} {calendarViewYear}</span>
+                        <span style={{ display: "inline-flex", transform: quickJumpOpen ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 150ms ease" }}>
+                          <Icon name="chevronRight" size={9} color="rgba(255,255,255,0.4)" />
+                        </span>
+                      </button>
+                      <div className="flex items-center justify-end flex-shrink-0" style={{ gap: 4 }}>
+                        <button onClick={goToPrevMonth} disabled={quickJumpOpen} className="flex items-center justify-center rounded-full transition hover:bg-white/10 active:scale-95" style={{ width: 24, height: 24, opacity: quickJumpOpen ? 0.3 : 1 }}>
+                          <Icon name="back" size={11} color="#fff" />
+                        </button>
+                        <button onClick={goToNextMonth} disabled={isFutureMonth || quickJumpOpen} className="flex items-center justify-center rounded-full transition hover:bg-white/10 active:scale-95" style={{ width: 24, height: 24, opacity: (isFutureMonth || quickJumpOpen) ? 0.3 : 1 }}>
+                          <Icon name="chevronRight" size={11} color="#fff" />
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
 
-                <div className="grid grid-cols-7" style={{ marginTop: 8 }}>
-                  {WEEKDAY_LABELS.map((d, i) => (
-                    <div key={i} className="flex items-center justify-center" style={{ height: 18 }}>
-                      <span style={{ fontSize: 9, fontWeight: 500, color: SECONDARY_TEXT, textTransform: "uppercase" }}>{d}</span>
+                {noDateChecked ? (
+                  <div className="flex items-center justify-center gap-2" style={{ padding: "8px 0 2px" }}>
+                    <WheelColumn
+                      options={MONTHS_WITH_NONE}
+                      value={draftMonth}
+                      onChange={setDraftMonth}
+                      renderLabel={(m) => (m == null ? "None" : MONTH_NAMES[m - 1])}
+                      width={140}
+                    />
+                    <WheelColumn options={YEARS} value={draftMonthYearYear} onChange={setDraftMonthYearYear} renderLabel={(y) => String(y)} width={84} />
+                  </div>
+                ) : quickJumpOpen ? (
+                  <div className="flex items-center justify-center gap-2" style={{ padding: "8px 0 2px" }}>
+                    <WheelColumn
+                      options={MONTHS_WITH_NONE}
+                      value={calendarViewMonth}
+                      onChange={setQuickJumpMonth}
+                      renderLabel={(m) => (m == null ? "None" : MONTH_NAMES[m - 1])}
+                      width={140}
+                    />
+                    <WheelColumn options={YEARS} value={calendarViewYear} onChange={setQuickJumpYear} renderLabel={(y) => String(y)} width={84} />
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-7" style={{ marginTop: 8 }}>
+                      {WEEKDAY_LABELS.map((d, i) => (
+                        <div key={i} className="flex items-center justify-center" style={{ height: 18 }}>
+                          <span style={{ fontSize: 9, fontWeight: 500, color: SECONDARY_TEXT, textTransform: "uppercase" }}>{d}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-                <div className="grid grid-cols-7">
-                  {leadingDays.map((n, i) => (
-                    <div key={`lead-${i}`} className="flex items-center justify-center" style={{ height: 36 }}>
-                      <span style={{ fontSize: 15, color: "rgba(255,255,255,0.2)" }}>{n}</span>
+                    <div className="grid grid-cols-7">
+                      {leadingDays.map((n, i) => (
+                        <div key={`lead-${i}`} className="flex items-center justify-center" style={{ height: 36 }}>
+                          <span style={{ fontSize: 15, color: "rgba(255,255,255,0.2)" }}>{n}</span>
+                        </div>
+                      ))}
+                      {Array.from({ length: daysInMonth(calendarViewYear, calendarViewMonth) }, (_, i) => i + 1).map((day) => {
+                        const isSelected = draftDay.year === calendarViewYear && draftDay.month === calendarViewMonth && draftDay.day === day;
+                        const isToday = bkNow.year === calendarViewYear && bkNow.month === calendarViewMonth && bkNow.day === day;
+                        const disabled = isDayDisabled(day);
+                        return (
+                          <button
+                            key={day}
+                            disabled={disabled}
+                            onClick={() => setDraftDay({ year: calendarViewYear, month: calendarViewMonth, day })}
+                            className="relative flex items-center justify-center active:scale-95 transition"
+                            style={{ height: 36 }}
+                          >
+                            <div className="absolute rounded-full" style={{ width: 30, height: 30, left: "50%", top: "50%", transform: "translate(-50%, -50%)", background: isSelected ? accent : "transparent", border: isToday && !isSelected ? "1px solid rgba(255,255,255,0.3)" : "none" }} />
+                            <span style={{ position: "relative", fontSize: 15, fontWeight: isSelected ? 600 : 400, color: disabled ? "rgba(255,255,255,0.2)" : isSelected ? "#1a1108" : "#fff" }}>{day}</span>
+                          </button>
+                        );
+                      })}
+                      {trailingDays.map((n, i) => (
+                        <div key={`trail-${i}`} className="flex items-center justify-center" style={{ height: 36 }}>
+                          <span style={{ fontSize: 15, color: "rgba(255,255,255,0.2)" }}>{n}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                  {Array.from({ length: daysInMonth(calendarViewYear, calendarViewMonth) }, (_, i) => i + 1).map((day) => {
-                    const isSelected = draftDay.year === calendarViewYear && draftDay.month === calendarViewMonth && draftDay.day === day;
-                    const isToday = bkNow.year === calendarViewYear && bkNow.month === calendarViewMonth && bkNow.day === day;
-                    const disabled = isDayDisabled(day);
-                    return (
-                      <button
-                        key={day}
-                        disabled={disabled}
-                        onClick={() => setDraftDay({ year: calendarViewYear, month: calendarViewMonth, day })}
-                        className="relative flex items-center justify-center active:scale-95 transition"
-                        style={{ height: 36 }}
-                      >
-                        <div className="absolute rounded-full" style={{ width: 30, height: 30, left: "50%", top: "50%", transform: "translate(-50%, -50%)", background: isSelected ? accent : "transparent", border: isToday && !isSelected ? "1px solid rgba(255,255,255,0.3)" : "none" }} />
-                        <span style={{ position: "relative", fontSize: 15, fontWeight: isSelected ? 600 : 400, color: disabled ? "rgba(255,255,255,0.2)" : isSelected ? "#1a1108" : "#fff" }}>{day}</span>
-                      </button>
-                    );
-                  })}
-                  {trailingDays.map((n, i) => (
-                    <div key={`trail-${i}`} className="flex items-center justify-center" style={{ height: 36 }}>
-                      <span style={{ fontSize: 15, color: "rgba(255,255,255,0.2)" }}>{n}</span>
-                    </div>
-                  ))}
-                </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -246,9 +434,15 @@ export default function MovieWatchDateSheet({ current, movieReleaseDate, onClose
                 <div style={{ fontSize: 15.5, fontWeight: 600, color: "#fff", marginTop: 3 }}>{MONTH_NAMES[releaseParts.month - 1]} {releaseParts.day}, {releaseParts.year}</div>
               </div>
             )}
+            {optionId === "release_month" && hasReleaseDate && (
+              <div className="rounded-2xl text-center" style={{ padding: 14, ...GLASS_CARD }}>
+                <div style={{ fontSize: 11, color: SECONDARY_TEXT }}>Will be recorded as</div>
+                <div style={{ fontSize: 15.5, fontWeight: 600, color: "#fff", marginTop: 3 }}>{MONTH_NAMES[releaseParts.month - 1]} {releaseParts.year}</div>
+              </div>
+            )}
             {optionId === "unknown" && (
               <div className="rounded-2xl text-center" style={{ padding: 14, ...GLASS_CARD }}>
-                <div style={{ fontSize: 12, color: SECONDARY_TEXT, lineHeight: 1.45 }}>This movie stays marked watched — it just won&apos;t show a specific date in Watch History or count toward dated Highlights.</div>
+                <div style={{ fontSize: 12, color: SECONDARY_TEXT, lineHeight: 1.45 }}>This movie stays marked watched — it just won&apos;t appear anywhere in Watch History or count toward dated Highlights.</div>
               </div>
             )}
           </div>

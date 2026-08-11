@@ -4,15 +4,31 @@ import { useEffect, useState } from "react";
 import Icon from "@/components/ui/Icon";
 import StarInput from "@/components/ui/StarInput";
 import PosterArt from "@/components/ui/PosterArt";
+import MiniDatePicker from "@/components/ui/MiniDatePicker";
 import { tmdbImage } from "@/lib/tmdb";
 import { SEASON_MOOD_LIST, moodIdsFromField, moodMetasFromField } from "@/components/SeasonBanner";
 import { themes, DEFAULT_ACCENT, initialsOf } from "@/lib/theme";
 import { useNavVisibility } from "@/lib/nav-visibility-context";
+import { bangkokNow } from "@/lib/bangkokDate";
+import { parseISODate } from "@/lib/watchDate";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
 
 const fmtDate = (d) => d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+// Formats a "YYYY-MM-DD" review-date string the same way fmtDate formats
+// a Date object — reconstructed via local year/month/day (not `new
+// Date(iso)`, which parses as UTC midnight and can print a day early/late
+// depending on the viewer's timezone, same reasoning as
+// lib/watchDate.js's own parseISODate comment).
+const fmtISODate = (iso) => {
+  const p = parseISODate(iso);
+  return p ? fmtDate(new Date(p.year, p.month - 1, p.day)) : "";
+};
+const todayISO = () => {
+  const n = bangkokNow();
+  return `${n.year}-${String(n.month).padStart(2, "0")}-${String(n.day).padStart(2, "0")}`;
+};
 
 // Same technique as Home's own adaptive atmosphere (app/(tabs)/home/page.jsx's
 // extractEdgeColor) — samples the lower third of a small canvas-drawn copy
@@ -137,6 +153,12 @@ export default function SeasonRatingScreen({ showTitle, season, manual, auto, ca
   const [draftCharacterId, setDraftCharacterId] = useState(manual?.characterId || null);
   const [draftCharacterName, setDraftCharacterName] = useState(manual?.characterName || null);
   const [draftText, setDraftText] = useState(manual?.text || "");
+  // Only ever surfaced in the UI when `manual` already exists (editing a
+  // rating that's been saved before) — first creation never shows this
+  // field at all (see the hero header's own "Review date" row below), so
+  // its initial value only matters for that edit case.
+  const [draftReviewDate, setDraftReviewDate] = useState(manual?.reviewDate ?? todayISO());
+  const [dateEditorOpen, setDateEditorOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -159,6 +181,7 @@ export default function SeasonRatingScreen({ showTitle, season, manual, auto, ca
     setDraftCharacterId(manual?.characterId || null);
     setDraftCharacterName(manual?.characterName || null);
     setDraftText(manual?.text || "");
+    setDraftReviewDate(manual?.reviewDate ?? todayISO());
   };
 
   const startEdit = () => {
@@ -171,7 +194,19 @@ export default function SeasonRatingScreen({ showTitle, season, manual, auto, ca
     if (!canSave || saving) return;
     setSaving(true);
     try {
-      await onSave({ rating: draftRating, mood: draftMoods.join(","), characterId: draftCharacterId, characterName: draftCharacterName, text: draftText.trim() });
+      await onSave({
+        rating: draftRating, mood: draftMoods.join(","), characterId: draftCharacterId, characterName: draftCharacterName, text: draftText.trim(),
+        // Always explicit (never left for the DB column's own `default
+        // current_date` to decide) — the caller's onSave handler merges
+        // this straight into local state to show the just-saved card
+        // immediately, without a refetch, so the value shown here has to
+        // already be the real one. First creation never shows the date
+        // field at all, but still silently sends today under the hood;
+        // editing sends whatever draftReviewDate currently holds
+        // (untouched from manual.reviewDate unless the user picked a
+        // different one via the calendar).
+        reviewDate: manual ? draftReviewDate : todayISO(),
+      });
       setEditing(false);
       setJustSaved(true);
     } finally {
@@ -260,7 +295,37 @@ export default function SeasonRatingScreen({ showTitle, season, manual, auto, ca
                   <Icon name="star" size={12} color={accent} />
                   <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{(manual ? manual.rating : auto.avg10).toFixed(1)}<span style={{ color: t.textDim, fontWeight: 500 }}>/10</span></span>
                 </div>
-                <span style={{ fontSize: 11.5, color: "rgba(255,255,255,0.7)" }}>{manual ? fmtDate(manual.savedAt) : `${auto.ratedCount}/${auto.total} episodes rated`}</span>
+                <span style={{ fontSize: 11.5, color: "rgba(255,255,255,0.7)" }}>{manual ? fmtISODate(manual.reviewDate) : `${auto.ratedCount}/${auto.total} episodes rated`}</span>
+              </div>
+            )}
+            {/* Review date, editable — lives here under the genre row
+                (same position the read-only date sits, right above),
+                NOT inside the Rating card with the stars below. Only
+                exposed when editing an ALREADY-SAVED rating (manual
+                truthy) — first creation never shows this at all, it just
+                auto-saves today (the review_date column's own DB
+                default, see lib/seasonRatings.js), so this row only
+                appears once there's a real reason to change it:
+                backdating an existing review. */}
+            {editing && manual && (
+              <div className="relative mt-2" style={{ width: "fit-content" }}>
+                <button
+                  type="button"
+                  onClick={() => setDateEditorOpen((v) => !v)}
+                  className="flex items-center gap-1.5 rounded-full active:scale-95 transition"
+                  style={{ padding: "6px 12px", background: "rgba(255,255,255,0.1)", border: `1px solid ${t.glassBorder}` }}
+                >
+                  <Icon name="calendar" size={11} color="rgba(255,255,255,0.7)" />
+                  <span style={{ fontSize: 11.5, color: "rgba(255,255,255,0.7)" }}>Date</span>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: "#fff" }}>{fmtISODate(draftReviewDate)}</span>
+                </button>
+                {dateEditorOpen && (
+                  <MiniDatePicker
+                    value={draftReviewDate}
+                    onChange={setDraftReviewDate}
+                    onClose={() => setDateEditorOpen(false)}
+                  />
+                )}
               </div>
             )}
           </div>
@@ -479,7 +544,13 @@ export default function SeasonRatingScreen({ showTitle, season, manual, auto, ca
                   <textarea value={draftText} onChange={(e) => setDraftText(e.target.value)} placeholder="Share your thoughts..." rows={4} className="w-full bg-transparent outline-none" style={{ padding: "12px 14px 14px", fontSize: 13.5, color: "#fff", lineHeight: 1.5, resize: "none", textAlign: "left" }} />
                 </div>
               ) : (
-                <div style={{ fontSize: 14, lineHeight: 1.6, color: "rgba(255,255,255,0.85)", marginTop: 10, textAlign: "left" }}>{manual.text}</div>
+                // whiteSpace: pre-wrap — a plain div collapses every
+                // newline the textarea preserved, cramming multi-line
+                // reviews into one run-on paragraph. pre-wrap keeps every
+                // line break and blank line exactly as typed while still
+                // word-wrapping long lines normally (unlike plain `pre`,
+                // which never wraps at all).
+                <div style={{ fontSize: 14, lineHeight: 1.6, color: "rgba(255,255,255,0.85)", marginTop: 10, textAlign: "left", whiteSpace: "pre-wrap" }}>{manual.text}</div>
               )}
             </div>
           )}

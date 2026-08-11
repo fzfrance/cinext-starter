@@ -115,7 +115,7 @@ export default function Page() {
   // themselves. Caught independently wherever it's used (see the effect
   // below) so a still-missing user_movies table degrades to "no movie
   // data" instead of breaking the TV-only Highlights view it used to be.
-  const [yearMovieRows, setYearMovieRows] = useState([]); // [{movieId, watchedOn}]
+  const [yearMovieRows, setYearMovieRows] = useState([]); // [{movieId, watchedOn, watchDatePrecision, watchedYear, watchedMonth, watchDateSource}]
   // Overrides the TV-only "empty" verdict when movies alone have activity
   // this year — otherwise a movie-only year would show the false "No
   // highlights for {year}" empty state. Purely a render-time derivation
@@ -488,44 +488,56 @@ export default function Page() {
     }
   };
 
-  // Movie equivalent of confirmBulkDateChange above — meaningfully
-  // simpler: user_movies.watched_on is a single plain date column (no
-  // precision/source columns like episode_watches), so there's no
-  // per-field precision object to reassemble, just a date or null. Still
-  // needs the same "release date is per-entry, not the seed's" care as
-  // resolveBulkFields above though — MovieWatchDateSheet's own
-  // pendingResult carries `source` for exactly this (see that component),
-  // so a bulk "Release date" pick re-derives each selected movie's OWN
-  // releaseDate rather than stamping every selected movie with whichever
-  // movie the sheet happened to be seeded from.
+  // Movie equivalent of resolveBulkFields above — full precision parity
+  // now that user_movies carries the same watch_date_precision/
+  // watched_year/watched_month/watch_date_source columns episode_watches
+  // has. Same "release date/month is per-entry, not the seed's" care:
+  // re-derives each selected movie's OWN releaseDate rather than stamping
+  // every selected movie with whichever movie the sheet happened to be
+  // seeded from. Returns null when a release-based edit can't apply to a
+  // given entry (no release date on file for it), same as the TV version.
+  const resolveBulkMovieFields = (result, entry) => {
+    if (result.source !== "release_date" && result.source !== "release_month") return result;
+    const release = parseISODate(entry.releaseDate);
+    if (!release) return null;
+    return result.source === "release_date"
+      ? { precision: "day", watchedOn: entry.releaseDate, watchedYear: release.year, watchedMonth: release.month, source: "release_date" }
+      : { precision: "month", watchedOn: null, watchedYear: release.year, watchedMonth: release.month, source: "release_month" };
+  };
+
+  // Movie equivalent of confirmBulkDateChange above — same "patch
+  // yearMovieRows in place" pattern, same drop-if-moved-to-a-different-
+  // year rule.
   const confirmBulkMovieDateChange = async (result) => {
     if (!user || bulkBusy || bulkSelectedIds.size === 0) return;
     const entries = (activeDay?.entries ?? []).filter((e) => e.entryType === "movie" && bulkSelectedIds.has(e.movieId));
     setBulkBusy(true);
     try {
       const resolved = entries
-        .map((entry) => ({
-          entry,
-          watchedOn: result.source === "release_date" ? (entry.releaseDate ?? null) : result.watchedOn,
-        }))
-        // A release-date bulk pick skips any selected movie with no real
-        // release date on file, rather than clearing its watched_on —
-        // same "don't corrupt what wasn't part of the edit" reasoning as
-        // resolveBulkFields returning null above.
-        .filter((x) => result.source !== "release_date" || x.watchedOn);
-      await Promise.all(resolved.map(({ entry, watchedOn }) => setMovieWatchDate(user.id, entry.movieId, watchedOn)));
-      const watchedOnById = new Map(resolved.map(({ entry, watchedOn }) => [entry.movieId, watchedOn]));
+        .map((entry) => ({ entry, fields: resolveBulkMovieFields(result, entry) }))
+        .filter((x) => x.fields);
+      await Promise.all(resolved.map(({ entry, fields }) => setMovieWatchDate(user.id, entry.movieId, fields)));
+      const fieldsById = new Map(resolved.map(({ entry, fields }) => [entry.movieId, fields]));
       setYearMovieRows((prev) => prev
-        .map((r) => (watchedOnById.has(r.movieId) ? { ...r, watchedOn: watchedOnById.get(r.movieId) } : r))
-        // Same "drop it if the edit moved it out of the currently-viewed
-        // year (or cleared it entirely)" rule as the TV version above —
-        // yearMovieRows only ever holds rows genuinely belonging to `year`.
-        .filter((r) => {
-          if (!watchedOnById.has(r.movieId)) return true;
-          const newWatchedOn = watchedOnById.get(r.movieId);
-          return newWatchedOn ? Number(newWatchedOn.split("-")[0]) === year : false;
+        .map((r) => {
+          const fields = fieldsById.get(r.movieId);
+          if (!fields) return r;
+          return {
+            ...r,
+            watchDatePrecision: fields.precision,
+            watchedOn: fields.watchedOn,
+            watchedYear: fields.watchedYear,
+            watchedMonth: fields.watchedMonth,
+            watchDateSource: fields.source,
+          };
         })
+        // Same "drop it if the edit moved it out of the currently-viewed
+        // year" rule as the TV version above — yearMovieRows only ever
+        // holds rows genuinely belonging to `year`.
+        .filter((r) => r.watchedYear === year)
       );
+      const newYears = [...new Set(resolved.map(({ fields }) => fields.watchedYear).filter((y) => y != null))];
+      setAvailableYears((prev) => [...new Set([...prev, ...newYears])]);
       cancelBulkSelect();
     } catch (err) {
       console.error("Failed to update watch dates:", err);
@@ -574,7 +586,12 @@ export default function Page() {
     if (!user) return;
     let cancelled = false;
     getUserMoviesWatchedInYear(user.id, year)
-      .then((rows) => { if (!cancelled) setYearMovieRows(rows.filter((r) => r.watchedOn)); })
+      // No client-side filter needed anymore — getUserMoviesWatchedInYear
+      // already scopes server-side to rows whose watched_year is this
+      // year (day AND month precision alike), so every row returned
+      // genuinely belongs here even though watchedOn itself can now be
+      // null for a month-precision row.
+      .then((rows) => { if (!cancelled) setYearMovieRows(rows); })
       .catch((err) => { console.error(err); if (!cancelled) setYearMovieRows([]); });
     return () => { cancelled = true; };
   }, [user, year, retryToken]);
@@ -673,15 +690,17 @@ export default function Page() {
   }, [monthRows, monthRetryToken]);
 
   // Movies' own month-level slice — filtered client-side from the
-  // already-loaded yearMovieRows, same pattern as monthRows above.
-  // watched_on is a plain "YYYY-MM-DD" date column (no precision concept
-  // the way episode_watches has — a movie's watch date is always exact or
-  // absent), so a direct year/month match on the parsed parts is enough.
+  // already-loaded yearMovieRows, same precision-aware pattern monthRows
+  // above uses now that user_movies carries the same watch_date_precision/
+  // watched_year/watched_month columns episode_watches has: day/month
+  // precision match this month directly on those columns; year/unknown
+  // precision never appear in a specific month's view at all (same rule
+  // monthRows already applies to TV).
   const monthMovieRows = useMemo(
-    () => yearMovieRows.filter((r) => {
-      const [y, m] = r.watchedOn.split("-").map(Number);
-      return y === year && m === month;
-    }),
+    () => yearMovieRows.filter((r) =>
+      (r.watchDatePrecision === "day" || r.watchDatePrecision === "month") &&
+      r.watchedYear === year && r.watchedMonth === month
+    ),
     [yearMovieRows, year, month]
   );
 
@@ -710,6 +729,10 @@ export default function Page() {
                 movieId: r.movieId,
                 watchedOn: r.watchedOn,
                 watchedAt: r.watchedOn,
+                watchDatePrecision: r.watchDatePrecision,
+                watchedYear: r.watchedYear,
+                watchedMonth: r.watchedMonth,
+                watchDateSource: r.watchDateSource,
                 title: meta.title,
                 originalTitle: meta.originalTitle,
                 originalLanguage: meta.originalLanguage,
@@ -836,11 +859,13 @@ export default function Page() {
     [monthEntries]
   );
   const dayKeyed = useMemo(() => monthEntriesWithDayKey.filter((e) => e.dayKey), [monthEntriesWithDayKey]);
-  // Movies always have a real dayKey (their own watchedOn IS the day) or
-  // none at all (no watched_on stamped yet) — no coarser precision to
-  // filter out the way TV's month/year precision needs dayKeyed to.
+  // Same day/month precision split TV's own dayKey derivation uses now
+  // that movies carry the same precision columns — only real day-precision
+  // rows get a calendar dot; month-precision movies still count toward
+  // this month's totals (they're already in monthMovieEntries) but don't
+  // pin to one specific day.
   const movieDayKeyed = useMemo(
-    () => monthMovieEntries.map((e) => ({ ...e, dayKey: e.watchedOn, entryType: "movie" })),
+    () => monthMovieEntries.map((e) => ({ ...e, dayKey: e.watchDatePrecision === "day" ? e.watchedOn : null, entryType: "movie" })),
     [monthMovieEntries]
   );
   const totalMinutes = useMemo(() => monthEntries.reduce((sum, e) => sum + (e.runtimeMinutes || 0), 0), [monthEntries]);
@@ -863,7 +888,10 @@ export default function Page() {
   // display.
   const days = useMemo(() => {
     const byDay = new Map();
-    for (const e of [...dayKeyed, ...movieDayKeyed]) {
+    // movieDayKeyed isn't pre-filtered to day-precision the way dayKeyed
+    // already is (line above) — a month-precision movie has dayKey: null
+    // now, which would otherwise crash the .split("-") below.
+    for (const e of [...dayKeyed, ...movieDayKeyed.filter((m) => m.dayKey)]) {
       const day = Number(e.dayKey.split("-")[2]);
       if (!byDay.has(day)) byDay.set(day, []);
       byDay.get(day).push(e);
@@ -1919,21 +1947,18 @@ export default function Page() {
         </div>
       )}
 
-      {/* Bulk Watch Date sheet — the exact same component/logic the
-          single-episode rating flow uses (components/WatchDateSheet),
-          just opened from here with a neutral "today" seed instead of
-          one specific episode's stored value (see bulkSeedEntry above).
-          confirmBulkDateChange applies the result to every selected
-          entry, re-deriving Release date/Release month per entry from
-          its own real air date. Movies (bulkMediaType === "movie") get
-          the simpler MovieWatchDateSheet + confirmBulkMovieDateChange
-          instead — same "today" seed, same per-entry release-date
-          re-derivation, just without the precision options that only
-          make sense for episodes. */}
+      {/* Bulk Watch Date sheet — components/WatchDateSheet for TV,
+          components/MovieWatchDateSheet for movies (bulkMediaType ===
+          "movie") — full precision parity between the two now, both
+          opened from here with a neutral "today" seed instead of one
+          specific entry's stored value (see bulkSeedEntry above).
+          confirmBulkDateChange/confirmBulkMovieDateChange apply the
+          result to every selected entry, re-deriving Release date/Release
+          month per entry from its own real air/release date. */}
       {bulkDateSheetOpen && (
         bulkMediaType === "movie" ? (
           <MovieWatchDateSheet
-            current={{ watchedOn: bulkTodayStr }}
+            current={{ watchDatePrecision: "day", watchedOn: bulkTodayStr, watchedYear: bangkokNow.year, watchedMonth: bangkokNow.month, watchDateSource: null }}
             movieReleaseDate={bulkSeedEntry?.releaseDate ?? null}
             onClose={() => setBulkDateSheetOpen(false)}
             onSave={confirmBulkMovieDateChange}

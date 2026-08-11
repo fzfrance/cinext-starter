@@ -285,6 +285,34 @@ create table if not exists collection_movies (
 -- 'completed', only if not already set.
 alter table user_movies add column if not exists watched_on date;
 
+-- Precision parity with episode_watches' own four columns (see that
+-- table's schema comment above for the full reasoning) — lets a movie's
+-- "Change Watch Date" sheet offer the same Exact date / Release date /
+-- Release month / Don't remember options a show's own Watch Date sheet
+-- does, including month-only/year-only precision.
+alter table user_movies add column if not exists watch_date_precision text
+  check (watch_date_precision is null or watch_date_precision in ('day', 'month', 'year', 'unknown'));
+alter table user_movies add column if not exists watched_year integer;
+alter table user_movies add column if not exists watched_month integer;
+alter table user_movies add column if not exists watch_date_source text
+  check (watch_date_source is null or watch_date_source in ('manual', 'release_date', 'release_month'));
+update user_movies
+set watch_date_precision = 'day', watched_year = extract(year from watched_on)::int, watched_month = extract(month from watched_on)::int
+where watched_on is not null and watch_date_precision is null;
+
+-- Movie review date — mirrors season_ratings.review_date (see
+-- supabase/pending_migration.sql; season_ratings itself predates this
+-- schema file and isn't defined here). Separate from created_at/
+-- updated_at. No DB-level default — a `current_date` default here would
+-- be a real bug against a table with existing rows (STABLE, not
+-- IMMUTABLE, so Postgres backfills every pre-existing row with the
+-- single date the ALTER TABLE happened to run on, instead of leaving
+-- them alone — hit exactly this on season_ratings, see
+-- supabase/pending_migration.sql's own fix). The app itself always sends
+-- an explicit reviewDate on save (SeasonRatingScreen/MovieRatingScreen),
+-- so no default was ever actually needed here.
+alter table movie_ratings add column if not exists review_date date;
+
 -- ---------------------------------------------------------------------------
 -- Row Level Security — every table is per-user private by default.
 -- ---------------------------------------------------------------------------

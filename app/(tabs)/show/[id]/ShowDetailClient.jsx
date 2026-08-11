@@ -24,6 +24,7 @@ import { getSeasonRatings, saveSeasonRating, deleteSeasonRating, getAutoSeasonSc
 import { getProfile } from "@/lib/profile";
 import { tmdbImage } from "@/lib/tmdb";
 import { resolveShowStatus } from "@/lib/statusResolver";
+import { formatWatchDateLabel } from "@/lib/watchDate";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { themes, DEFAULT_ACCENT, collectionPalette, tintColorForShow } from "@/lib/theme";
 import { useNavTint } from "@/lib/nav-tint-context";
@@ -463,7 +464,17 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
         episodes: s.episodes.map((e) => {
           const hit = byEpisode[`${s.id}-${e.n}`];
           if (!hit) return e;
-          return { ...e, watched: true, watchCount: hit.watchCount, myRating: hit.rating != null ? hit.rating : e.myRating };
+          return {
+            ...e, watched: true, watchCount: hit.watchCount, myRating: hit.rating != null ? hit.rating : e.myRating,
+            // Latest watch's own date fields — feeds the row's "Watched:
+            // {date}" line below via formatWatchDateLabel, same
+            // convention EpisodeDetail.jsx's own display already uses.
+            watchDatePrecision: hit.watchDatePrecision,
+            watchedOn: hit.watchedOn,
+            watchedYear: hit.watchedYear,
+            watchedMonth: hit.watchedMonth,
+            watchDateSource: hit.watchDateSource,
+          };
         }),
       })));
     }).catch(console.error);
@@ -1297,6 +1308,19 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                               <div style={{ fontSize: 10.5, fontWeight: 600, color: t.textDim, letterSpacing: "0.06em" }}>EPISODE {e.n}</div>
                               <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginTop: 1 }}>{e.title}</div>
                               <div style={{ fontSize: 11, color: t.textDim, marginTop: 2 }}>{e.date}</div>
+                              {/* Watch date — same calendar-icon convention
+                                  components/EpisodeDetail.jsx's own
+                                  "Watched: {date}" line already uses,
+                                  matched here for the compact per-episode
+                                  row too (see getEpisodeWatches' extended
+                                  return shape above for where these fields
+                                  come from). */}
+                              {e.watched && (
+                                <div className="flex items-center gap-1" style={{ fontSize: 10.5, color: t.textDim, marginTop: 2 }}>
+                                  <Icon name="calendar" size={9} color={t.textDim} />
+                                  <span>Watched: {formatWatchDateLabel(e)}</span>
+                                </div>
+                              )}
                             </div>
                             {e.daysUntil != null ? (
                               <div className="flex-shrink-0 flex flex-col items-center justify-center" style={{ width: 44 }}>
