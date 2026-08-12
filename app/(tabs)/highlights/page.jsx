@@ -628,6 +628,22 @@ export default function Page() {
     };
   }, []);
 
+  // bfcache restore (back/swipe navigation into this page) — see
+  // app/(tabs)/home/page.jsx's identical listener for the full rationale;
+  // this page had the visibility/focus listener above but was missing
+  // this one. No staleness threshold: a persisted pageshow means nothing
+  // here re-ran at all, so it always needs a fresh fetch regardless of
+  // elapsed time.
+  useEffect(() => {
+    const onPageShow = (event) => {
+      if (!event.persisted) return;
+      silentRefetchRef.current = true;
+      setRetryToken((n) => n + 1);
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
+
   // Raw rows for just the selected month — filtered client-side from the
   // already-loaded year rows, no extra Supabase query. Kept separate from
   // monthEntries (which is the TMDB-enriched version) because rewatch
@@ -1237,7 +1253,7 @@ export default function Page() {
                     row (app/(tabs)/profile/page.jsx) is untouched — it has
                     its own independent ["Shows","Movies","Active Days",
                     "Rewatched"] tuple, not this one. */}
-                {[["episodes", monthEntries.length, "Episodes"], ["layers", uniqueShowCount, "Shows"], ["ticket", monthMovieEntries.length, "Movies"], ["refresh", rewatchCount, "Rewatched"]].map(([icon, n, l], i) => (
+                {[["episodes", monthEntries.length, "Episodes"], ["layers", uniqueShowCount, "Shows"], ["clapperboard", monthMovieEntries.length, "Movies"], ["refresh", rewatchCount, "Rewatched"]].map(([icon, n, l], i) => (
                   <div key={i} className="flex-shrink-0 flex flex-col items-center text-center" style={{ width: 86.36, padding: "12.70px 11.29px", background: statCardBg, border: "1px solid rgba(255,255,255,0.05)", borderRadius: 12.23 }}>
                     <div className="flex items-center justify-center rounded-full flex-shrink-0" style={{ width: 37.62, height: 37.62, background: `${statIconGold}12` }}>
                       <Icon name={icon} size={16.93} color={accent} strokeWidth={1.4} />

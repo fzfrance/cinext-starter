@@ -105,6 +105,22 @@ export default function Page() {
   const [libraryLoading, setLibraryLoading] = useState(true);
   const [longPress, setLongPress] = useState(null);
   const [libraryRefreshToken, setLibraryRefreshToken] = useState(0);
+  // Backgrounds-then-returns refetch, same reasoning and pattern as
+  // app/(tabs)/home/page.jsx's own two listener effects below (see their
+  // comments for the full rationale) — this page had NEITHER a
+  // visibility/focus listener NOR bfcache/pageshow handling at all before
+  // this, unlike Home. Every section here (library, month stats, "My
+  // Ratings" preview, Collections, Time Machine) fetched once on mount and
+  // then never again for as long as the page instance stayed alive, so
+  // e.g. finishing an episode on Show Detail and coming back to Profile
+  // (via a tab switch, the phone's app switcher, or a browser back/swipe
+  // that restores this page from bfcache) kept showing whatever library
+  // status/ratings/stats were true at the moment this page was first
+  // mounted, until something else forced a real remount. One shared token
+  // (not a separate one per section) since every section below reads the
+  // same underlying watch/rating data and should refresh together.
+  const [pageRefreshToken, setPageRefreshToken] = useState(0);
+  const lastPageFetchAtRef = useRef(0);
   const [collections, setCollections] = useState([]);
   const [profile, setProfile] = useState(null);
   const [monthStats, setMonthStats] = useState(null);
@@ -114,6 +130,44 @@ export default function Page() {
   // is built.
   const [timeMachineYears, setTimeMachineYears] = useState([]);
   const [timeMachineLoading, setTimeMachineLoading] = useState(true);
+
+  // 30s stale threshold — between Home's 20s (near-real-time hero) and
+  // Highlights' 60s (monthly aggregates); this page is a mix of both. The
+  // timestamp is stamped here, at trigger time, rather than inside each of
+  // the five effects below that key off pageRefreshToken — with several
+  // independent consumers of one token there's no single "the fetch
+  // started" moment to hang it on, and gating re-triggers by "time since
+  // we last decided to refresh" is an equally good defense against a
+  // refresh-storm from rapid tab-switching.
+  const PAGE_STALE_AFTER_MS = 30_000;
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastPageFetchAtRef.current < PAGE_STALE_AFTER_MS) return;
+      lastPageFetchAtRef.current = Date.now();
+      setPageRefreshToken((n) => n + 1);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, []);
+
+  // bfcache restore (back/swipe navigation into this page) — see
+  // app/(tabs)/home/page.jsx's identical listener for the full rationale.
+  // No staleness threshold: a persisted pageshow means nothing here re-ran
+  // at all, so it always needs a fresh fetch regardless of elapsed time.
+  useEffect(() => {
+    const onPageShow = (event) => {
+      if (!event.persisted) return;
+      lastPageFetchAtRef.current = Date.now();
+      setPageRefreshToken((n) => n + 1);
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
 
   // Display name/bio/avatar/background — null (not yet saved) falls back
   // to the account email + decorative gradient placeholders below.
@@ -165,7 +219,7 @@ export default function Page() {
       });
     }).catch(console.error);
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, pageRefreshToken]);
 
   // user_shows rows, joined against TMDB for title/poster/progress —
   // library-detail (not the lighter /api/shows/batch) because the
@@ -254,7 +308,7 @@ export default function Page() {
       setLibraryLoading(false);
     })().catch((err) => { console.error(err); if (!cancelled) setLibraryLoading(false); });
     return () => { cancelled = true; };
-  }, [user, libraryRefreshToken, readableLanguages]);
+  }, [user, libraryRefreshToken, pageRefreshToken, readableLanguages]);
 
   // Logos for `library` rows — same effect as app/(tabs)/library/page.jsx's
   // own (matched to the user's Readable Languages via lib/tmdb.js's
@@ -308,7 +362,7 @@ export default function Page() {
       }));
     }).catch(console.error);
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, pageRefreshToken]);
 
   // "My Ratings" preview — the first 10 of getMyRatingsForUser's full,
   // most-recent-activity-first list (see lib/myRatings.js, shared with
@@ -320,7 +374,7 @@ export default function Page() {
       .then((entries) => { if (!cancelled) setMyRatings(entries.slice(0, 10)); })
       .catch(console.error);
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, pageRefreshToken]);
 
   // "Favorite Movies" preview row — see movieFavorites' own declaration
   // comment for why this is a simple refetch-on-id-set-change rather than
@@ -431,7 +485,7 @@ export default function Page() {
       setTimeMachineLoading(false);
     })().catch((err) => { console.error(err); if (!cancelled) setTimeMachineLoading(false); });
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, pageRefreshToken]);
 
   if (!loading && !user) {
     return (
