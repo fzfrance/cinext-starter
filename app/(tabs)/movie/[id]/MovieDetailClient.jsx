@@ -23,6 +23,7 @@ import { tmdbImage } from "@/lib/tmdb";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { themes, DEFAULT_ACCENT, collectionPalette, tintColorForShow } from "@/lib/theme";
 import { useNavTint } from "@/lib/nav-tint-context";
+import { useNavVisibility } from "@/lib/nav-visibility-context";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -327,6 +328,16 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
   }, [searchParams, ratingLoaded, rating]);
 
   const [openVideo, setOpenVideo] = useState(null);
+
+  // See ShowDetailClient.jsx's identical effect — the shared bottom nav
+  // floats above these full-screen overlays and stays clickable on top
+  // of them otherwise.
+  const [, setNavHidden] = useNavVisibility();
+  useEffect(() => {
+    const hidden = collectionSheetOpen || newCollectionOpen || !!openVideo;
+    setNavHidden(hidden);
+    return () => setNavHidden(false);
+  }, [collectionSheetOpen, newCollectionOpen, openVideo, setNavHidden]);
 
   return (
     <div className="min-h-dvh" style={{ background: t.bg }}>

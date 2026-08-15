@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Icon from "@/components/ui/Icon";
 import GlassCircle from "@/components/ui/GlassCircle";
@@ -91,6 +91,7 @@ export default function Page() {
   const toggleMenu = (key) => setActiveMenu((prev) => (prev === key ? null : prev ? null : key));
   const [reorderMode, setReorderMode] = useState(false);
   const [dragId, setDragId] = useState(null);
+  const [dragPos, setDragPos] = useState(null);
   const [longPress, setLongPress] = useState(null);
   const handleDrop = (targetId) => {
     if (dragId == null || dragId === targetId) return;
@@ -107,6 +108,45 @@ export default function Page() {
       return arr;
     });
     setDragId(null);
+  };
+  // Pointer-based drag (not the HTML5 draggable/dragstart/dragover/drop
+  // API this used before) — the native Drag and Drop API is mouse-only,
+  // no touch equivalent, so "Reorder Items" silently did nothing at all
+  // on a touch device/PWA. Pointer events (down/move/up) fire uniformly
+  // for mouse, touch, and pen, so this one implementation covers both.
+  const itemNodesRef = useRef(new Map());
+  const dragStartRef = useRef(null);
+  const lastOverIdRef = useRef(null);
+  const onItemPointerDown = (id, e) => {
+    if (!reorderMode) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    dragStartRef.current = { x: e.clientX, y: e.clientY };
+    lastOverIdRef.current = null;
+    setDragId(id);
+    setDragPos({ x: 0, y: 0 });
+  };
+  const onItemPointerMove = (e) => {
+    if (dragId == null || !dragStartRef.current) return;
+    setDragPos({ x: e.clientX - dragStartRef.current.x, y: e.clientY - dragStartRef.current.y });
+    for (const [id, node] of itemNodesRef.current) {
+      if (id === dragId || !node) continue;
+      const r = node.getBoundingClientRect();
+      if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+        if (lastOverIdRef.current !== id) {
+          lastOverIdRef.current = id;
+          handleDrop(id);
+        }
+        return;
+      }
+    }
+    lastOverIdRef.current = null;
+  };
+  const onItemPointerEnd = (e) => {
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    dragStartRef.current = null;
+    lastOverIdRef.current = null;
+    setDragId(null);
+    setDragPos(null);
   };
   // Resolved at render time (not baked in when `favorites` is fetched) so
   // it's always current even if Readable Languages loads a beat after
@@ -167,11 +207,15 @@ export default function Page() {
         {displayedFavorites.map((s) => (
           <div
             key={s.id}
-            className="active:scale-95 transition"
-            draggable={reorderMode}
-            onDragStart={() => setDragId(s.id)}
-            onDragOver={(e) => reorderMode && e.preventDefault()}
-            onDrop={() => handleDrop(s.id)}
+            ref={(node) => {
+              if (node) itemNodesRef.current.set(s.id, node);
+              else itemNodesRef.current.delete(s.id);
+            }}
+            className={reorderMode ? undefined : "active:scale-95 transition"}
+            onPointerDown={reorderMode ? (e) => onItemPointerDown(s.id, e) : undefined}
+            onPointerMove={reorderMode ? onItemPointerMove : undefined}
+            onPointerUp={reorderMode ? onItemPointerEnd : undefined}
+            onPointerCancel={reorderMode ? onItemPointerEnd : undefined}
             // Explicit width — this div (not PosterCard) is the actual
             // grid item here, and PosterGrid's justifyItems: "center"
             // means a grid item with no explicit width shrinks to fit its
@@ -182,7 +226,15 @@ export default function Page() {
             // bug this caused. Giving this wrapper width: 100% restores a
             // definite width for PosterCard's percentage to resolve
             // against.
-            style={{ width: "100%", opacity: reorderMode && dragId === s.id ? 0.4 : 1 }}
+            style={{
+              width: "100%",
+              touchAction: reorderMode ? "none" : "auto",
+              position: "relative",
+              zIndex: dragId === s.id ? 10 : 1,
+              opacity: reorderMode && dragId != null && dragId !== s.id ? 0.6 : 1,
+              transform: dragId === s.id && dragPos ? `translate(${dragPos.x}px, ${dragPos.y}px) scale(1.08)` : undefined,
+              transition: dragId === s.id ? "none" : "transform 0.15s, opacity 0.15s",
+            }}
           >
             <PosterCard
               show={s}
@@ -195,10 +247,10 @@ export default function Page() {
               border={reorderMode ? `1.5px dashed ${t.glassBorder}` : undefined}
               favorite={!reorderMode}
               onToggleFavorite={() => unheart(s.id)}
-              // Disabled during reorder — a native HTML5 drag already
-              // owns the press gesture on this card then (see draggable
-              // above), and a long-press timer racing against a drag
-              // start is exactly the conflict this guard avoids.
+              // Disabled during reorder — the pointer-drag above already
+              // owns the press gesture on this card then, and a
+              // long-press timer racing against a drag start is exactly
+              // the conflict this guard avoids.
               onLongPress={!reorderMode ? (show, rect) => setLongPress({ show, rect }) : undefined}
               badge={
                 reorderMode ? (

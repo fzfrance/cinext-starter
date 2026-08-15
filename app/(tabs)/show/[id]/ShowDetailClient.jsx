@@ -27,6 +27,7 @@ import { resolveShowStatus } from "@/lib/statusResolver";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { themes, DEFAULT_ACCENT, collectionPalette, tintColorForShow } from "@/lib/theme";
 import { useNavTint } from "@/lib/nav-tint-context";
+import { useNavVisibility } from "@/lib/nav-visibility-context";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -291,6 +292,20 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   const [collections, setCollections] = useState([]);
   const [newCollectionOpen, setNewCollectionOpen] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
+
+  // The shared bottom nav (components/ui/FloatingNav.jsx) floats at
+  // zIndex 100 — above every one of this screen's own full-screen
+  // overlays below, which sit at z-50 — so without this it stayed
+  // visible AND clickable on top of them, most obviously blocking taps
+  // near the bottom of the Collections sheet. Hide it for as long as any
+  // of these are open, same pattern components/library/CaseOverlay.jsx
+  // already uses for its own full-screen overlay.
+  const [, setNavHidden] = useNavVisibility();
+  useEffect(() => {
+    const hidden = collectionSheetOpen || newCollectionOpen || !!openVideo;
+    setNavHidden(hidden);
+    return () => setNavHidden(false);
+  }, [collectionSheetOpen, newCollectionOpen, openVideo, setNavHidden]);
 
   // true/false — explicit "an episode/season mark or unmark action just
   // ran" trigger, set only inside setEpisodeWatchCount/markSeasonWatched/
