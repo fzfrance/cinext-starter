@@ -27,6 +27,14 @@ import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
 
+// Persists See All → In Progress's grid/gallery choice, same localStorage-
+// backed per-browser preference pattern as e.g. Library's own view-mode
+// toggle (LIBRARY_VIEW_MODE_KEY in app/(tabs)/library/LibraryClient.jsx) —
+// also read by Home's own In Progress row below, so picking "gallery" in
+// the full page carries back to the row instead of only affecting the
+// expanded view.
+const IN_PROGRESS_VIEW_MODE_KEY = "cinext:homeInProgressViewMode";
+
 // TMDB show.status values that mean "this show will not air anything else" —
 // Upcoming excludes these even if a stray next_episode_to_air slipped
 // through (shouldn't normally happen, but this is the one thing the UI
@@ -324,6 +332,64 @@ function InProgressGalleryCard({ item, onLongPress }) {
   );
 }
 
+// The Home row's own "gallery" card — a fixed-width, flex-shrink-0
+// sibling of InProgressGalleryCard above for the horizontal-scroll In
+// Progress row, not that component reused/resized. Deliberately drops
+// the small poster-thumbnail overlay InProgressGalleryCard pins over its
+// artwork: that overlay exists there to keep the show identifiable
+// alongside a POSTER-mode row elsewhere on the same page, but here the
+// row itself already commits fully to the backdrop-card look, so a
+// second, smaller poster competing for attention on an already-compact
+// card just reads as clutter — the show's own title in the footer below
+// already identifies it.
+function InProgressCompactCard({ item, onLongPress }) {
+  const router = useRouter();
+  const longPress = useLongPress((rect) => onLongPress(item.show, rect));
+  const epLabel = item.season != null && item.episode != null ? `S${String(item.season).padStart(2, "0")} · E${String(item.episode).padStart(2, "0")}` : null;
+  const moreLeft = item.episodesLeft != null ? item.episodesLeft - 1 : 0;
+  return (
+    <div
+      onClick={() => { if (longPress.consumeClick()) return; router.push(`/show/${item.id}`); }}
+      className="relative flex-shrink-0 rounded-[18px] overflow-hidden active:scale-[0.98] transition cursor-pointer"
+      style={{
+        width: 272,
+        // Taller than InProgressGalleryCard's own artwork-only ratio — no
+        // separate footer block here (title/episode sit directly on the
+        // image itself, gradient-scrimmed, below), so the card needs the
+        // extra height to give that text room without crowding the pills.
+        aspectRatio: "3 / 2.05",
+        border: "1px solid rgba(255,255,255,0.1)",
+        boxShadow: "0 12px 28px rgba(0,0,0,0.4)",
+        touchAction: "manipulation", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent",
+      }}
+      {...longPress.handlers}
+    >
+      <PosterArt posterPath={item.landscapeImage} base={item.show.base} glow={item.show.glow} alt={item.show.title} tmdbSize="w780" />
+      {/* Bottom scrim + title/episode directly on the artwork — matches
+          PosterCard's own titlePlacement="overlay" convention, no
+          separate solid-color footer block. */}
+      <div className="absolute left-0 right-0 bottom-0" style={{ padding: "28px 13px 10px", background: "linear-gradient(0deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.55) 55%, transparent 100%)" }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: "#fff", lineHeight: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.show.title}</div>
+        {item.episode != null && (
+          <div style={{ marginTop: 3, fontSize: 9.5, fontWeight: 600, letterSpacing: "0.08em", color: "rgba(255,255,255,0.7)", textTransform: "uppercase" }}>Episode {item.episode}</div>
+        )}
+      </div>
+      <div className="absolute flex items-center gap-1.5" style={{ left: 12, top: 12 }}>
+        {epLabel && <div style={{ ...PILL_STYLE, height: 25, padding: "0 10px", fontSize: 10.5 }}>{epLabel}</div>}
+        {moreLeft > 0 && <div style={{ ...PILL_STYLE, height: 25, padding: "0 10px", fontSize: 10.5 }}>+{moreLeft}</div>}
+      </div>
+      <div className="absolute flex items-center justify-center rounded-full" style={{ right: 10, top: 10, width: 30, height: 30, background: "rgba(255,255,255,0.10)" }}>
+        <Icon name="check" size={13} color="rgba(255,255,255,0.85)" strokeWidth={2.6} />
+      </div>
+      {item.progress != null && (
+        <div className="absolute left-0 right-0 bottom-0" style={{ height: 3, background: "rgba(255,255,255,0.15)" }}>
+          <div style={{ height: "100%", width: `${item.progress}%`, background: accent }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Same reasoning as InProgressGalleryCard above — its own component
 // instance per item so it can call useLongPress itself. item.show has no
 // `id` of its own (see upcomingEpisodes' mapping above), so onLongPress is
@@ -430,8 +496,21 @@ export default function Page() {
   // See All → In Progress's own display mode — "grid" (the existing
   // poster-with-progress-bar layout) or "gallery" (large landscape
   // episode-still banners). Defaults to "grid" so nothing changes for
-  // anyone who doesn't tap the new toggle.
-  const [inProgressViewMode, setInProgressViewMode] = useState("grid");
+  // anyone who doesn't tap the new toggle. Persisted (see
+  // IN_PROGRESS_VIEW_MODE_KEY above) — hydrated via effect, not
+  // useState's initializer, to avoid touching localStorage during SSR,
+  // same pattern as Library's own view-mode toggle.
+  const [inProgressViewMode, setInProgressViewModeState] = useState("grid");
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(IN_PROGRESS_VIEW_MODE_KEY);
+      if (saved) setInProgressViewModeState(saved);
+    } catch (err) { console.error("Failed to read In Progress view mode:", err); }
+  }, []);
+  const setInProgressViewMode = (mode) => {
+    setInProgressViewModeState(mode);
+    try { localStorage.setItem(IN_PROGRESS_VIEW_MODE_KEY, mode); } catch (err) { console.error("Failed to save In Progress view mode:", err); }
+  };
   const [menuOpen, setMenuOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
   // Header avatar — real avatar_url when the user has set one (same
@@ -1327,30 +1406,43 @@ export default function Page() {
             // this time.
             <div style={{ position: "relative", zIndex: 3, paddingTop: 15, background: "transparent" }}>
               <SectionHeader title="In Progress" onSeeAll={() => setView("inProgress")} />
-              {/* items-start — without it, flex's default align-items:
-                  stretch makes every card's outer box (which has no
-                  explicit height of its own) match the tallest sibling's
-                  natural height, e.g. a two-line subtitle on one card
-                  stretching the whole row. The poster itself already has
-                  a fixed 2:3 aspect-ratio (PosterCard) and object-fit:
-                  cover (PosterArt), but that outer stretch still made
-                  cards read as uneven overall. */}
-              <div className="mt-3 pl-6 flex items-start gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                {inProgressList.map((item) => (
-                  <PosterCard
-                    key={item.id}
-                    show={item.show}
-                    href={`/show/${item.id}`}
-                    titlePlacement="overlay"
-                    subtitle={`${item.code} · ${item.ep}`}
-                    progress={item.progress}
-                    favorite={isFavorite(item.id)}
-                    onToggleFavorite={() => toggleFavorite(item.id, "Home:inProgressRow")}
-                    onLongPress={handleLongPress}
-                  />
-                ))}
-                <div className="w-2 flex-shrink-0" />
-              </div>
+              {/* Mirrors whichever display mode See All → In Progress is
+                  set to (inProgressViewMode, persisted — see
+                  IN_PROGRESS_VIEW_MODE_KEY above), instead of always the
+                  poster layout regardless of what the user picked there. */}
+              {inProgressViewMode === "gallery" ? (
+                <div className="mt-3 pl-6 flex items-start gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                  {inProgressList.map((item) => (
+                    <InProgressCompactCard key={item.id} item={item} onLongPress={handleLongPress} />
+                  ))}
+                  <div className="w-2 flex-shrink-0" />
+                </div>
+              ) : (
+                // items-start — without it, flex's default align-items:
+                // stretch makes every card's outer box (which has no
+                // explicit height of its own) match the tallest sibling's
+                // natural height, e.g. a two-line subtitle on one card
+                // stretching the whole row. The poster itself already has
+                // a fixed 2:3 aspect-ratio (PosterCard) and object-fit:
+                // cover (PosterArt), but that outer stretch still made
+                // cards read as uneven overall.
+                <div className="mt-3 pl-6 flex items-start gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                  {inProgressList.map((item) => (
+                    <PosterCard
+                      key={item.id}
+                      show={item.show}
+                      href={`/show/${item.id}`}
+                      titlePlacement="overlay"
+                      subtitle={`${item.code} · ${item.ep}`}
+                      progress={item.progress}
+                      favorite={isFavorite(item.id)}
+                      onToggleFavorite={() => toggleFavorite(item.id, "Home:inProgressRow")}
+                      onLongPress={handleLongPress}
+                    />
+                  ))}
+                  <div className="w-2 flex-shrink-0" />
+                </div>
+              )}
             </div>
           )}
 
