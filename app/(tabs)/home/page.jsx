@@ -345,18 +345,17 @@ function InProgressGalleryCard({ item, onLongPress }) {
 function InProgressCompactCard({ item, onLongPress }) {
   const router = useRouter();
   const longPress = useLongPress((rect) => onLongPress(item.show, rect));
-  const epLabel = item.season != null && item.episode != null ? `S${String(item.season).padStart(2, "0")} · E${String(item.episode).padStart(2, "0")}` : null;
   const moreLeft = item.episodesLeft != null ? item.episodesLeft - 1 : 0;
   return (
     <div
       onClick={() => { if (longPress.consumeClick()) return; router.push(`/show/${item.id}`); }}
-      className="relative flex-shrink-0 rounded-[18px] overflow-hidden active:scale-[0.98] transition cursor-pointer"
+      className="relative flex-shrink-0 rounded-[16px] overflow-hidden active:scale-[0.98] transition cursor-pointer"
       style={{
-        width: 272,
+        width: 220,
         // Taller than InProgressGalleryCard's own artwork-only ratio — no
         // separate footer block here (title/episode sit directly on the
         // image itself, gradient-scrimmed, below), so the card needs the
-        // extra height to give that text room without crowding the pills.
+        // extra height to give that text room without crowding the mark.
         aspectRatio: "3 / 2.05",
         border: "1px solid rgba(255,255,255,0.1)",
         boxShadow: "0 12px 28px rgba(0,0,0,0.4)",
@@ -367,19 +366,23 @@ function InProgressCompactCard({ item, onLongPress }) {
       <PosterArt posterPath={item.landscapeImage} base={item.show.base} glow={item.show.glow} alt={item.show.title} tmdbSize="w780" />
       {/* Bottom scrim + title/episode directly on the artwork — matches
           PosterCard's own titlePlacement="overlay" convention, no
-          separate solid-color footer block. */}
-      <div className="absolute left-0 right-0 bottom-0" style={{ padding: "28px 13px 10px", background: "linear-gradient(0deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.55) 55%, transparent 100%)" }}>
-        <div style={{ fontSize: 15, fontWeight: 800, color: "#fff", lineHeight: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.show.title}</div>
+          separate solid-color footer block. Right padding clears the
+          complete mark pinned in this same corner below. */}
+      <div className="absolute left-0 right-0 bottom-0" style={{ padding: "26px 40px 9px 11px", background: "linear-gradient(0deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.55) 55%, transparent 100%)" }}>
+        <div className="flex items-center gap-1.5" style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 800, color: "#fff", lineHeight: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{item.show.title}</div>
+          {moreLeft > 0 && <div style={{ ...PILL_STYLE, height: 19, padding: "0 7px", fontSize: 9, flexShrink: 0 }}>+{moreLeft}</div>}
+        </div>
         {item.episode != null && (
-          <div style={{ marginTop: 3, fontSize: 9.5, fontWeight: 600, letterSpacing: "0.08em", color: "rgba(255,255,255,0.7)", textTransform: "uppercase" }}>Episode {item.episode}</div>
+          <div style={{ marginTop: 3, fontSize: 9, fontWeight: 600, letterSpacing: "0.08em", color: "rgba(255,255,255,0.7)", textTransform: "uppercase" }}>Episode {item.episode}</div>
         )}
       </div>
-      <div className="absolute flex items-center gap-1.5" style={{ left: 12, top: 12 }}>
-        {epLabel && <div style={{ ...PILL_STYLE, height: 25, padding: "0 10px", fontSize: 10.5 }}>{epLabel}</div>}
-        {moreLeft > 0 && <div style={{ ...PILL_STYLE, height: 25, padding: "0 10px", fontSize: 10.5 }}>+{moreLeft}</div>}
-      </div>
-      <div className="absolute flex items-center justify-center rounded-full" style={{ right: 10, top: 10, width: 30, height: 30, background: "rgba(255,255,255,0.10)" }}>
-        <Icon name="check" size={13} color="rgba(255,255,255,0.85)" strokeWidth={2.6} />
+      {/* Complete mark — bottom-right corner, a solid dark backing (not
+          the faint translucent-white fill used elsewhere) so the
+          checkmark stays legible against whatever the artwork/scrim
+          behind it happens to be. */}
+      <div className="absolute flex items-center justify-center rounded-full" style={{ right: 9, bottom: 9, width: 28, height: 28, background: "rgba(0,0,0,0.65)" }}>
+        <Icon name="check" size={13} color="#fff" strokeWidth={2.6} />
       </div>
       {item.progress != null && (
         <div className="absolute left-0 right-0 bottom-0" style={{ height: 3, background: "rgba(255,255,255,0.15)" }}>
