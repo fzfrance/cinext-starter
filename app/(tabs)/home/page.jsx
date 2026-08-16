@@ -837,6 +837,16 @@ export default function Page() {
     episodesLeft: s.episodesLeft,
   }));
 
+  // Home row, gallery mode only — the hero card above already gives the
+  // most-recently-watched show its own large, prominent spot, so
+  // repeating it as the very first backdrop card right below reads as a
+  // straight duplicate (same show, same art, twice in a row). The poster
+  // grid doesn't have this problem — those are small enough, and the
+  // full "See All" page is a genuine complete list — so this filtered
+  // list is only used for Home's own gallery row, not inProgressList
+  // itself (which both of those still read from unfiltered).
+  const inProgressRowList = heroShow ? inProgressList.filter((item) => item.id !== heroShow.showId) : inProgressList;
+
   const upcomingEpisodes = upcoming.map((s) => ({
     id: s.id,
     show: { title: resolveTitle(s, readableLanguages), posterPath: s.posterPath, glow: accent },
@@ -1402,7 +1412,7 @@ export default function Page() {
           )}
 
           {/* ---------- In Progress ---------- */}
-          {inProgressList.length > 0 && (
+          {(inProgressViewMode === "gallery" ? inProgressRowList : inProgressList).length > 0 && (
             // paddingTop reduced another 15% (18→15), together with the
             // wrapper's own paddingBottom reduction above — moving this
             // whole section (and everything below it) up more decisively
@@ -1412,10 +1422,15 @@ export default function Page() {
               {/* Mirrors whichever display mode See All → In Progress is
                   set to (inProgressViewMode, persisted — see
                   IN_PROGRESS_VIEW_MODE_KEY above), instead of always the
-                  poster layout regardless of what the user picked there. */}
+                  poster layout regardless of what the user picked there.
+                  Gallery mode also drops the hero's own show (see
+                  inProgressRowList above) — the poster grid stays
+                  unfiltered since those small cards don't read as a
+                  duplicate of the hero the way a second full backdrop
+                  card right underneath it does. */}
               {inProgressViewMode === "gallery" ? (
                 <div className="mt-3 pl-6 flex items-start gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                  {inProgressList.map((item) => (
+                  {inProgressRowList.map((item) => (
                     <InProgressCompactCard key={item.id} item={item} onLongPress={handleLongPress} />
                   ))}
                   <div className="w-2 flex-shrink-0" />
