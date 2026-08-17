@@ -182,9 +182,24 @@ export default function Page({ params }) {
   };
 
   const [showQuery, setShowQuery] = useState("");
-  const [showSelected, setShowSelected] = useState(new Set());
-  const toggleShowSelect = (id) => setShowSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
-  const closeAddShow = () => { setAddShowOpen(false); setShowQuery(""); setShowSelected(new Set()); };
+  // Map<id, show> — not a Set<id>. Selecting a show while searching "A",
+  // then searching "B" without committing, used to silently drop "A"
+  // from the actual add: catalog (the search RESULTS list) gets replaced
+  // wholesale on every new query, and commitAddShows used to re-derive
+  // the shows to add by filtering catalog for selected ids — so a show
+  // selected under a now-replaced search was still counted in the "Add N
+  // Shows" button's own count (showSelected itself did persist), but
+  // vanished from the actual write since it was no longer in catalog to
+  // filter from. Storing the real show object at selection time (not
+  // just its id) means every selection survives however many more
+  // searches happen before the user actually taps Add.
+  const [showSelected, setShowSelected] = useState(new Map());
+  const toggleShowSelect = (show) => setShowSelected((prev) => {
+    const next = new Map(prev);
+    next.has(show.id) ? next.delete(show.id) : next.set(show.id, show);
+    return next;
+  });
+  const closeAddShow = () => { setAddShowOpen(false); setShowQuery(""); setShowSelected(new Map()); };
 
   // Debounced live TMDB search, same pattern as Favorites' "Add to
   // Favorites" (app/(tabs)/profile/favorites/page.jsx).
@@ -199,6 +214,12 @@ export default function Page({ params }) {
           if (cancelled) return;
           setCatalog((data.results ?? []).map((show) => ({
             id: show.id,
+            // This overlay is TV-only (see /api/search/shows' own
+            // comment) — set explicitly, not left for the covers grid's
+            // mediaKey()/removeFromCollection to fall into the right
+            // branch by accident of `undefined !== "movie"` happening to
+            // take the show path anyway.
+            mediaType: "tv",
             title: show.name,
             originalTitle: show.original_name ?? null,
             originalLanguage: show.original_language ?? null,
@@ -214,7 +235,7 @@ export default function Page({ params }) {
 
   const commitAddShows = () => {
     if (!user || !detail.id) { router.push("/login"); return; }
-    const toAdd = catalog.filter((s) => showSelected.has(s.id) && !detail.covers.some((c) => c.id === s.id)).map((s) => ({ ...s, addedAt: Date.now() }));
+    const toAdd = [...showSelected.values()].filter((s) => !detail.covers.some((c) => c.id === s.id)).map((s) => ({ ...s, addedAt: Date.now() }));
     setDetail((prev) => ({ ...prev, covers: [...prev.covers, ...toAdd] }));
     closeAddShow();
     toAdd.forEach((s) => addShowToCollection(detail.id, s.id).catch(console.error));
@@ -438,7 +459,7 @@ export default function Page({ params }) {
                       <div style={{ fontSize: 13, color: t.textDim, marginTop: 2 }}>{s.year}</div>
                       <div style={{ fontSize: 13, color: t.textDim, marginTop: 1 }}>{s.type}</div>
                     </div>
-                    <button onClick={() => !already && toggleShowSelect(s.id)} disabled={already} className="flex-shrink-0 rounded-full flex items-center justify-center active:scale-90 transition" style={{ width: 34, height: 34, background: isSelected ? accent : t.cardFill, border: `1px solid ${t.cardBorder}` }}>
+                    <button onClick={() => !already && toggleShowSelect(s)} disabled={already} className="flex-shrink-0 rounded-full flex items-center justify-center active:scale-90 transition" style={{ width: 34, height: 34, background: isSelected ? accent : t.cardFill, border: `1px solid ${t.cardBorder}` }}>
                       <Icon name={isSelected ? "check" : "plus"} size={16} color={isSelected ? "#1a1108" : "#fff"} />
                     </button>
                   </div>
