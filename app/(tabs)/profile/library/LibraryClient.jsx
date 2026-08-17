@@ -159,14 +159,16 @@ export default function LibraryClient() {
           releasedEpisodes: result.releasedEpisodes ?? 0,
         });
         // title is the resolved (possibly original-language) display
-        // title — englishTitle is kept separately so searching still
-        // matches an international show by its English name (e.g. "Notes
-        // From the Last Row") even when it's currently *displaying* under
-        // its original-language title, same as Explore's own search does.
+        // title — englishTitle/originalTitle are kept separately so
+        // searching still matches an international show by either its
+        // English name (e.g. "Notes From the Last Row") or its original-
+        // language name, regardless of which one is currently
+        // *displaying*, same as Explore's own search does.
         return {
           id: result.id,
           title: resolveTitle(result, readableLanguages),
           englishTitle: result.title,
+          originalTitle: result.originalTitle,
           posterPath: result.posterPath,
           genre: result.genre,
           ...byShow[id],
@@ -216,6 +218,7 @@ export default function LibraryClient() {
           id: result.id,
           title: resolveTitle(result, readableLanguages),
           englishTitle: result.title,
+          originalTitle: result.originalTitle,
           posterPath: result.posterPath,
           genre: result.genre,
           ...byMovie[id],
@@ -254,7 +257,7 @@ export default function LibraryClient() {
   const filteredLibrary = activeLibrary.filter((s) => {
     if (libraryFilter !== "all" && s.status !== libraryFilter) return false;
     if (genreFilter && s.genre !== genreFilter) return false;
-    if (trimmedQuery && !s.title.toLowerCase().includes(trimmedQuery) && !s.englishTitle?.toLowerCase().includes(trimmedQuery)) return false;
+    if (trimmedQuery && !s.title.toLowerCase().includes(trimmedQuery) && !s.englishTitle?.toLowerCase().includes(trimmedQuery) && !s.originalTitle?.toLowerCase().includes(trimmedQuery)) return false;
     return true;
   });
   const counts = statusItems.reduce((acc, item) => ({ ...acc, [item.id]: activeLibrary.filter((s) => s.status === item.id).length }), {});

@@ -80,6 +80,30 @@ function SearchResultRow({ item, status, menuOpen, onToggleMenu, onSelectStatus 
   );
 }
 
+// Cast/crew result row — no status menu, no rating/date/favorite (none
+// of that applies to a person), just their photo, name, and a couple of
+// titles they're known for so the result reads as more than a bare
+// name. Tapping goes to /person/[id], same page Show/Movie Detail's own
+// cast rows already link to.
+function SearchPersonRow({ item }) {
+  return (
+    <Link href={`/person/${item.id}`} className="flex items-center gap-3 rounded-2xl" style={{ padding: 12, background: t.cardFill, border: `1px solid ${t.cardBorder}` }}>
+      <div className="relative flex-shrink-0 rounded-full overflow-hidden" style={{ width: 56, height: 56, background: t.cardFill }}>
+        <PosterArt posterPath={item.profilePath} alt={item.name} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <span style={{ fontSize: 11, fontWeight: 700, color: accent, letterSpacing: "0.04em" }}>CAST</span>
+        </div>
+        <div className="text-white font-bold mt-1" style={{ fontSize: 15, lineHeight: 1.25 }}>{item.name}</div>
+        {item.knownFor && (
+          <div className="text-[12px] mt-1" style={{ color: t.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.knownFor}</div>
+        )}
+      </div>
+    </Link>
+  );
+}
+
 export default function SearchClient({ trendingShows, trendingMovies, heroSlides }) {
   const router = useRouter();
   const readableLanguages = useReadableLanguages();
@@ -93,8 +117,10 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
   // Debounced live TMDB search — same pattern as Explore's own (waits for
   // a pause in typing, drops stale responses if the query changed
   // mid-flight). /search/multi (movies-as-content-type plan) returns
-  // movies, TV shows, and people in one call, each tagged with its own
-  // media_type — people are dropped server-side (app/api/search/multi).
+  // movies, TV shows, AND people in one call, each tagged with its own
+  // media_type — cast results get their own shape here (name/profilePath/
+  // knownFor, no title/date/rating, none of which a person has), rendered
+  // via SearchPersonRow below instead of SearchResultRow.
   useEffect(() => {
     const trimmed = query.trim();
     if (trimmed === "") { setResults([]); setLoading(false); return; }
@@ -106,6 +132,18 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
         .then((data) => {
           if (cancelled) return;
           setResults((data.results ?? []).map((item) => {
+            if (item.media_type === "person") {
+              return {
+                id: item.id,
+                mediaType: "person",
+                name: item.name,
+                profilePath: item.profile_path,
+                // A couple of titles, not the raw known_for objects — same
+                // "just enough context to recognize them" role the movie/
+                // show rows' date+rating line plays.
+                knownFor: (item.known_for ?? []).map((k) => k.title ?? k.name).filter(Boolean).slice(0, 3).join(", "),
+              };
+            }
             const isMovie = item.media_type === "movie";
             return {
               id: item.id,
@@ -126,7 +164,10 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
     return () => { cancelled = true; clearTimeout(handle); };
   }, [query]);
 
-  const resolvedResults = results.map((s) => ({ ...s, title: resolveTitle(s, readableLanguages) }));
+  // resolveTitle needs a title/originalTitle/originalLanguage shape a
+  // person result doesn't have — left untouched (mediaType stays
+  // "person", nothing to resolve) rather than resolving into undefined.
+  const resolvedResults = results.map((s) => (s.mediaType === "person" ? s : { ...s, title: resolveTitle(s, readableLanguages) }));
   const trimmed = query.trim();
 
   return (
@@ -150,16 +191,20 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
             <div style={{ fontSize: 22, fontWeight: 800, color: "#fff" }}>Search Results</div>
           </div>
           <div className="px-6 flex flex-col gap-2.5" style={{ marginTop: 16 }}>
-            {resolvedResults.map((item) => (
-              <SearchResultRow
-                key={mediaKey(item)}
-                item={item}
-                status={resolvedStatusMap[mediaKey(item)]}
-                menuOpen={menuOpenFor === mediaKey(item)}
-                onToggleMenu={() => setMenuOpenFor((v) => (v === mediaKey(item) ? null : mediaKey(item)))}
-                onSelectStatus={(statusId) => { selectStatus(item, statusId); setMenuOpenFor(null); }}
-              />
-            ))}
+            {resolvedResults.map((item) =>
+              item.mediaType === "person" ? (
+                <SearchPersonRow key={`person-${item.id}`} item={item} />
+              ) : (
+                <SearchResultRow
+                  key={mediaKey(item)}
+                  item={item}
+                  status={resolvedStatusMap[mediaKey(item)]}
+                  menuOpen={menuOpenFor === mediaKey(item)}
+                  onToggleMenu={() => setMenuOpenFor((v) => (v === mediaKey(item) ? null : mediaKey(item)))}
+                  onSelectStatus={(statusId) => { selectStatus(item, statusId); setMenuOpenFor(null); }}
+                />
+              )
+            )}
             {loading && results.length === 0 && (
               <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: t.textDim }}>Searching…</div>
             )}

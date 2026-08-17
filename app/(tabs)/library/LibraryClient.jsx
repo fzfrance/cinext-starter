@@ -201,8 +201,13 @@ export default function LibraryClient() {
           title: resolveTitle(detail, readableLanguages),
           // Kept separately so the inline search below still matches an
           // international show by its English name even when it's
-          // currently displaying under its original-language title.
+          // currently displaying under its original-language title, OR
+          // by its original-language name when it's currently displaying
+          // under English (the reverse case — resolveTitle picks ONE of
+          // these to show, but search needs to match either regardless
+          // of which one won).
           englishTitle: detail.title,
+          originalTitle: detail.originalTitle,
           year: detail.year,
           meta: detail.meta,
           posterPath: detail.posterPath,
@@ -306,6 +311,7 @@ export default function LibraryClient() {
           id,
           title: resolveTitle(detail, readableLanguages),
           englishTitle: detail.title,
+          originalTitle: detail.originalTitle,
           year: detail.year,
           meta: detail.meta,
           posterPath: detail.posterPath,
@@ -382,7 +388,7 @@ export default function LibraryClient() {
   // separate results screen. It narrows whatever the status filter above
   // already produced down to title matches only.
   const trimmedQuery = searchQuery.trim().toLowerCase();
-  const filtered = trimmedQuery ? statusFiltered.filter((s) => s.title.toLowerCase().includes(trimmedQuery) || s.englishTitle?.toLowerCase().includes(trimmedQuery)) : statusFiltered;
+  const filtered = trimmedQuery ? statusFiltered.filter((s) => s.title.toLowerCase().includes(trimmedQuery) || s.englishTitle?.toLowerCase().includes(trimmedQuery) || s.originalTitle?.toLowerCase().includes(trimmedQuery)) : statusFiltered;
   // Live per-status counts for the StatusFilterRow's expanded pill label
   // (e.g. "Watchlist · 22") — always over every tracked show, independent
   // of whichever filter is currently active.
@@ -421,7 +427,7 @@ export default function LibraryClient() {
   // of statusFilter, otherwise identical).
   const trackedMovies = movies.filter((s) => s.status);
   const movieStatusFiltered = movieStatusFilter === "all" ? trackedMovies : trackedMovies.filter((s) => s.status === movieStatusFilter);
-  const movieFiltered = trimmedQuery ? movieStatusFiltered.filter((s) => s.title.toLowerCase().includes(trimmedQuery) || s.englishTitle?.toLowerCase().includes(trimmedQuery)) : movieStatusFiltered;
+  const movieFiltered = trimmedQuery ? movieStatusFiltered.filter((s) => s.title.toLowerCase().includes(trimmedQuery) || s.englishTitle?.toLowerCase().includes(trimmedQuery) || s.originalTitle?.toLowerCase().includes(trimmedQuery)) : movieStatusFiltered;
   // Only watchlist/completed("Watched") — movies use the simplified
   // 2-status vocabulary (see components/StatusMenu.jsx's
   // movieStatusMenuOptions). A stray watching/paused/drop row from before
