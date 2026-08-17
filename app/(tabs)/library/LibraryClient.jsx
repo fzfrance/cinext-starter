@@ -405,8 +405,20 @@ export default function LibraryClient() {
   const recommended = trackedShows.filter((s) => s.status === "watchlist" && s.tmdbRating != null).sort((a, b) => b.tmdbRating - a.tmdbRating).slice(0, 3);
   const genreGroups = Object.entries(
     filtered.reduce((acc, s) => {
-      const g = primaryGenre(s.genres);
-      if (!g) return acc; // Drama-only (or no genre-list match) — no aisle for this show
+      let g = primaryGenre(s.genres);
+      if (!g) {
+        // Casual, fully-unfiltered browsing keeps Drama-only shows off
+        // the shelf entirely (primaryGenre's own comment — a giant
+        // catch-all Drama aisle was explicitly not wanted there). But
+        // once the user has picked a specific status or is actively
+        // searching, every matching show must actually be reachable
+        // somewhere — a Drama-only show (common for e.g. Korean dramas
+        // on TMDB) silently missing from its own Watchlist filter, or
+        // from a search for its own title, reads as the show never got
+        // added at all, not as "no aisle for it by design".
+        if (statusFilter === "all" && !trimmedQuery) return acc;
+        g = s.genres?.includes("Drama") ? "Drama" : "Other";
+      }
       (acc[g] ||= []).push(s);
       return acc;
     }, {})
@@ -442,8 +454,14 @@ export default function LibraryClient() {
   const movieRecommended = trackedMovies.filter((s) => s.status === "watchlist" && s.tmdbRating != null).sort((a, b) => b.tmdbRating - a.tmdbRating).slice(0, 3);
   const movieGenreGroups = Object.entries(
     movieFiltered.reduce((acc, s) => {
-      const g = primaryGenreMovie(s.genres);
-      if (!g) return acc;
+      let g = primaryGenreMovie(s.genres);
+      if (!g) {
+        // Same reasoning as the shows block above — Drama-only movies
+        // stay off the casual unfiltered shelf, but must still be
+        // reachable once the user filters by status or searches.
+        if (movieStatusFilter === "all" && !trimmedQuery) return acc;
+        g = s.genres?.includes("Drama") ? "Drama" : "Other";
+      }
       (acc[g] ||= []).push(s);
       return acc;
     }, {})
