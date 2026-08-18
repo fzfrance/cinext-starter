@@ -7,6 +7,7 @@ import EpisodeRatingFlow from "@/components/EpisodeRatingFlow";
 import FloatingNav from "@/components/ui/FloatingNav";
 import { useAuth } from "@/lib/auth-context";
 import { getEpisodeWatches, syncEpisodeWatchCount, rateLatestWatch, getLatestWatchDate } from "@/lib/episodeWatches";
+import { getEpisodeSkips, setEpisodeSkipped } from "@/lib/episodeSkips";
 import { reconcileShowStatusAfterWatchChange } from "@/lib/userShows";
 import { formatWatchDateLabel } from "@/lib/watchDate";
 import { themes, tintColorForShow } from "@/lib/theme";
@@ -26,7 +27,7 @@ const HAS_EARLIER_UNWATCHED = false;
 export default function EpisodeDetailClient({ showId, showTitle, seasonNumber, episode: initialEpisode, cast }) {
   const router = useRouter();
   const { user } = useAuth();
-  const [episode, setEpisode] = useState({ ...initialEpisode, watched: false, watchCount: 0, myRating: null });
+  const [episode, setEpisode] = useState({ ...initialEpisode, watched: false, watchCount: 0, skipped: false, myRating: null });
   const [ratingOpen, setRatingOpen] = useState(false);
   const [watchedDateLabel, setWatchedDateLabel] = useState(null);
 
@@ -37,6 +38,20 @@ export default function EpisodeDetailClient({ showId, showTitle, seasonNumber, e
       if (cancelled) return;
       const hit = byEpisode[`${seasonNumber}-${initialEpisode.n}`];
       if (hit) setEpisode((e) => ({ ...e, watched: true, watchCount: hit.watchCount, myRating: hit.rating != null ? hit.rating : e.myRating }));
+    }).catch(console.error);
+    return () => { cancelled = true; };
+  }, [user, showId, seasonNumber, initialEpisode.n]);
+
+  // Same seed pattern as the watches effect above, one table over — see
+  // ShowDetailClient's identical two-effect setup for why watched and
+  // skipped are fetched independently (episode_skips is its own table,
+  // mutually exclusive with episode_watches).
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    getEpisodeSkips(user.id, showId).then((skippedKeys) => {
+      if (cancelled) return;
+      if (skippedKeys.has(`${seasonNumber}-${initialEpisode.n}`)) setEpisode((e) => ({ ...e, skipped: true }));
     }).catch(console.error);
     return () => { cancelled = true; };
   }, [user, showId, seasonNumber, initialEpisode.n]);
@@ -69,15 +84,44 @@ export default function EpisodeDetailClient({ showId, showTitle, seasonNumber, e
   const writeChainRef = useRef(Promise.resolve());
   const setWatchCount = (count) => {
     const prevCount = episode.watchCount;
-    setEpisode((e) => ({ ...e, watched: count > 0, watchCount: count }));
+    const prevSkipped = episode.skipped;
+    setEpisode((e) => ({ ...e, watched: count > 0, watchCount: count, skipped: false }));
     if (!user) return;
     writeChainRef.current = writeChainRef.current
       .catch(() => {})
-      .then(() => syncEpisodeWatchCount(user.id, showId, seasonNumber, episode.n, count))
+      // Watched and Skipped are mutually exclusive — clear any prior skip
+      // before/alongside writing the new watch count, same rule
+      // ShowDetailClient's own setEpisodeWatchCount follows.
+      .then(() => Promise.all([
+        syncEpisodeWatchCount(user.id, showId, seasonNumber, episode.n, count),
+        prevSkipped ? setEpisodeSkipped(user.id, showId, seasonNumber, episode.n, false) : Promise.resolve(),
+      ]))
       .then(() => reconcileShowStatusAfterWatchChange(user.id, showId, "EpisodeDetailClient:setWatchCount"))
       .catch((err) => {
         console.error(err);
-        setEpisode((e) => ({ ...e, watched: prevCount > 0, watchCount: prevCount }));
+        setEpisode((e) => ({ ...e, watched: prevCount > 0, watchCount: prevCount, skipped: prevSkipped }));
+      });
+  };
+
+  // Skip's own write, same shape as setWatchCount above — mutually
+  // exclusive with it, so marking Skipped clears any real watch count
+  // first (and vice versa, in setWatchCount above).
+  const setSkipped = (skipped) => {
+    const prevSkipped = episode.skipped;
+    const prevWatched = episode.watched;
+    const prevCount = episode.watchCount;
+    setEpisode((e) => ({ ...e, skipped, watched: skipped ? false : e.watched, watchCount: skipped ? 0 : e.watchCount }));
+    if (!user) { router.push("/login"); return; }
+    writeChainRef.current = writeChainRef.current
+      .catch(() => {})
+      .then(() => Promise.all([
+        skipped && prevCount > 0 ? syncEpisodeWatchCount(user.id, showId, seasonNumber, episode.n, 0) : Promise.resolve(),
+        setEpisodeSkipped(user.id, showId, seasonNumber, episode.n, skipped),
+      ]))
+      .then(() => reconcileShowStatusAfterWatchChange(user.id, showId, "EpisodeDetailClient:setSkipped"))
+      .catch((err) => {
+        console.error(err);
+        setEpisode((e) => ({ ...e, skipped: prevSkipped, watched: prevWatched, watchCount: prevCount }));
       });
   };
 
@@ -86,6 +130,7 @@ export default function EpisodeDetailClient({ showId, showTitle, seasonNumber, e
     setWatchCount(1);
     setRatingOpen(true);
   };
+  const markSkipped = () => setSkipped(true);
 
   return (
     <div className="min-h-dvh" style={{ background: t.bg }}>
@@ -104,6 +149,7 @@ export default function EpisodeDetailClient({ showId, showTitle, seasonNumber, e
           onMarkOnlyThis={markWatched}
           onMarkWithPrevious={markWatched}
           onMarkNotWatched={() => setWatchCount(0)}
+          onMarkSkipped={markSkipped}
           onMarkRewatched={() => setWatchCount((episode.watchCount || 1) + 1)}
           onMarkWatchedOnce={() => setWatchCount(1)}
         />

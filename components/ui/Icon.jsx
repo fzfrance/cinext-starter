@@ -417,6 +417,16 @@ export default function Icon({ name, size = 18, color = "#fff", strokeWidth = 1.
           <path d="M10 11l4 4.5M14 11l-4 4.5" />
         </svg>
       );
+    // "Skipped" episode status — classic skip-forward media glyph
+    // (triangle + bar), distinct from "eyeOff" (Not Watched) and "check"
+    // (Watched).
+    case "skip":
+      return (
+        <svg {...p} fill={color} stroke="none">
+          <path d="M6 5.5a1 1 0 0 1 1.53-.85l9 5.5a1 1 0 0 1 0 1.7l-9 5.5A1 1 0 0 1 6 16.5v-11z" />
+          <rect x="16.5" y="5" width="2.3" height="14" rx="1" />
+        </svg>
+      );
     case "infinity":
       return (
         <svg {...p}>

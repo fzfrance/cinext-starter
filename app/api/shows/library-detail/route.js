@@ -34,11 +34,14 @@ async function withRetry(fn, retries = 1, delayMs = 500) {
 // Home needs a queued episode for). Watchlist/Upcoming-only shows never
 // pay for it.
 //
-// POST body: { shows: [{ id, needsProgress: boolean, watched?: string[] }] }
+// POST body: { shows: [{ id, needsProgress: boolean, watched?: string[], skipped?: string[] }] }
 // watched: "season-episode" keys already watched, from
 // lib/episodeWatches.js's getShowWatchSummary — only meaningful (and only
-// needed) when needsProgress is true.
-async function resolveShow({ id, needsProgress, watched }) {
+// needed) when needsProgress is true. skipped: same key shape, from
+// lib/episodeSkips.js's getShowSkipSummary — optional, omit/empty if the
+// caller doesn't track skips (every field below still works, a skipped
+// episode just isn't distinguished from a not-watched one).
+async function resolveShow({ id, needsProgress, watched, skipped }) {
   const show = await getShowDetails(id);
 
   const seasonCount = show.number_of_seasons ?? 0;
@@ -84,15 +87,25 @@ async function resolveShow({ id, needsProgress, watched }) {
   if (!needsProgress) return base;
 
   const watchedSet = new Set(watched ?? []);
-  const aired = await getAiredEpisodesForShow(id, show);
+  const skippedSet = new Set(skipped ?? []);
+  // Regular episodes only — season 0 (Specials) never counts toward
+  // completion (progress, "caught up", episodesLeft, or the "next
+  // episode" pointer below), matching Show Detail's own rule: Specials
+  // stay independently trackable but never gate/represent the main
+  // show's progress. getAiredEpisodesForShow still returns them (some
+  // other caller might need the full list), this just filters them back
+  // out here, at the one place completion math for this response happens.
+  const aired = (await getAiredEpisodesForShow(id, show)).filter((e) => e.season !== 0);
 
-  const nextUp = aired.find((e) => !watchedSet.has(`${e.season}-${e.episode}`));
+  const isResolved = (e) => { const key = `${e.season}-${e.episode}`; return watchedSet.has(key) || skippedSet.has(key); };
+  const nextUp = aired.find((e) => !isResolved(e));
   const watchedAiredCount = aired.filter((e) => watchedSet.has(`${e.season}-${e.episode}`)).length;
+  const resolvedAiredCount = aired.filter(isResolved).length;
   const caughtUp = !nextUp;
   // Caught up: reference the most recent aired episode instead of leaving
   // the card pointing at nothing. Still mid-season with a gap: point at the
-  // first unwatched one, matching Show Detail's own "earlier unwatched"
-  // ordering (app/show/[id]/ShowDetailClient.jsx).
+  // first unwatched/unskipped one, matching Show Detail's own "earlier
+  // unwatched" ordering (app/show/[id]/ShowDetailClient.jsx).
   const current = nextUp ?? aired[aired.length - 1] ?? null;
 
   return {
@@ -109,15 +122,19 @@ async function resolveShow({ id, needsProgress, watched }) {
     // season-details fetch, just not previously threaded through here.
     epRuntime: current?.runtime ?? null,
     epAirDate: current?.airDate ?? null,
-    episodesLeft: caughtUp ? 0 : aired.length - watchedAiredCount,
-    progressPct: aired.length > 0 ? Math.round((watchedAiredCount / aired.length) * 100) : 0,
+    episodesLeft: caughtUp ? 0 : aired.length - resolvedAiredCount,
+    progressPct: aired.length > 0 ? Math.round((resolvedAiredCount / aired.length) * 100) : 0,
     caughtUp,
     // Raw counts, not just the derived episodesLeft/progressPct above —
     // lib/statusResolver.js's resolveShowStatus takes these directly, so
     // every caller resolves status the same way instead of each
-    // reverse-engineering it from a percentage.
+    // reverse-engineering it from a percentage. watchedReleasedEpisodes
+    // is real watches only (for "X watched" stats/labels);
+    // resolvedReleasedEpisodes additionally counts skips (for the actual
+    // completion decision) — see resolveShowStatus's own doc comment.
     releasedEpisodes: aired.length,
     watchedReleasedEpisodes: watchedAiredCount,
+    resolvedReleasedEpisodes: resolvedAiredCount,
   };
 }
 

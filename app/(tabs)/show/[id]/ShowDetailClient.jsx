@@ -18,6 +18,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useFavorites } from "@/lib/favorites-context";
 import { useShowCustomizations } from "@/lib/show-customizations-context";
 import { getEpisodeWatches, addEpisodeWatches, clearEpisodeWatches, syncEpisodeWatchCount, rateLatestWatch, getShowWatchSummary } from "@/lib/episodeWatches";
+import { getEpisodeSkips, setEpisodeSkipped as persistEpisodeSkipped } from "@/lib/episodeSkips";
 import { getUserShow, getUserShows, setShowStatus, removeUserShow, setWatchlistAndClearProgress, removeImplicitLibraryRow } from "@/lib/userShows";
 import { getCollections, createCollection, addShowToCollection, removeShowFromCollection } from "@/lib/collections";
 import { getSeasonRatings, saveSeasonRating, deleteSeasonRating, getAutoSeasonScore } from "@/lib/seasonRatings";
@@ -35,6 +36,11 @@ const accent = DEFAULT_ACCENT;
 // site's comment) — fixed radius for a 24x24 circle at strokeWidth 2.5.
 const SEASON_RING_RADIUS = 10;
 const SEASON_RING_CIRCUMFERENCE = 2 * Math.PI * SEASON_RING_RADIUS;
+// A skipped episode's own mark-button fill — a clear, solid grey, distinct
+// from both the "not started" translucent-white fill and the amber/green
+// watched fills, so Skipped reads as its own real status at a glance
+// instead of a barely-there tint of the empty state.
+const SKIPPED_GREY = "#6B7280";
 
 // catches render errors in a subtree and shows a recoverable message
 // instead of a blank/broken screen — used by the Cast tab / cast profile
@@ -292,20 +298,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   const [collections, setCollections] = useState([]);
   const [newCollectionOpen, setNewCollectionOpen] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
-
-  // The shared bottom nav (components/ui/FloatingNav.jsx) floats at
-  // zIndex 100 — above every one of this screen's own full-screen
-  // overlays below, which sit at z-50 — so without this it stayed
-  // visible AND clickable on top of them, most obviously blocking taps
-  // near the bottom of the Collections sheet. Hide it for as long as any
-  // of these are open, same pattern components/library/CaseOverlay.jsx
-  // already uses for its own full-screen overlay.
   const [, setNavHidden] = useNavVisibility();
-  useEffect(() => {
-    const hidden = collectionSheetOpen || newCollectionOpen || !!openVideo;
-    setNavHidden(hidden);
-    return () => setNavHidden(false);
-  }, [collectionSheetOpen, newCollectionOpen, openVideo, setNavHidden]);
 
   // true/false — explicit "an episode/season mark or unmark action just
   // ran" trigger, set only inside setEpisodeWatchCount/markSeasonWatched/
@@ -350,6 +343,26 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   // why it only ever showed up as "doesn't work in the installed app".
   const [watchNextMenuAnchor, setWatchNextMenuAnchor] = useState(null); // { rect, seasonId, epNumber, watchCount } | null
   const [skipSeasonMenuFor, setSkipSeasonMenuFor] = useState(null); // seasonId, shown when marking a season watched out of order
+
+  // The shared bottom nav (components/ui/FloatingNav.jsx) floats at
+  // zIndex 100 — above every one of this screen's own overlays below
+  // (the full-screen ones at z-50, and these "Mark As…"/"Set Watch
+  // Status" dropdowns at z-30) — so without this it stayed visible AND
+  // clickable on top of all of them. Most obviously wrong for the
+  // Collections sheet, but the dropdowns are just as real a problem:
+  // whenever one opens low enough on the screen (any season/episode
+  // further down the list — routine on a real phone viewport, not an
+  // edge case), the nav sits on top and silently eats taps meant for
+  // whichever menu item falls in its footprint — confirmed directly, a
+  // tap on "Skipped" landing in that zone did nothing at all. Hidden for
+  // as long as any of these are open, same pattern
+  // components/library/CaseOverlay.jsx already uses for its own overlay.
+  useEffect(() => {
+    const hidden = collectionSheetOpen || newCollectionOpen || !!openVideo
+      || watchMenuFor != null || skipMenuFor != null || skipSeasonMenuFor != null || watchNextMenuAnchor != null;
+    setNavHidden(hidden);
+    return () => setNavHidden(false);
+  }, [collectionSheetOpen, newCollectionOpen, openVideo, watchMenuFor, skipMenuFor, skipSeasonMenuFor, watchNextMenuAnchor, setNavHidden]);
 
   // Season ratings (0-10, mood/character/review — reference/
   // season_rating_prototype.jsx), keyed by season number:
@@ -460,9 +473,19 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   // from local seasons state, never trusted from the stored `status` alone,
   // so the status pill/StatusMenu can never show something that
   // contradicts the season progress rendered right below them.
-  const releasedEpisodes = seasons.reduce((sum, s) => sum + s.episodes.filter((e) => e.daysUntil == null).length, 0);
-  const watchedReleasedEpisodes = seasons.reduce((sum, s) => sum + s.episodes.filter((e) => e.daysUntil == null && e.watched).length, 0);
-  const resolvedStatus = resolveShowStatus({ explicitStatus: status, watchedReleasedEpisodes, releasedEpisodes });
+  //
+  // Season 0 (Specials) is excluded from every sum here — Specials are
+  // independently trackable (their own season card still shows/marks
+  // watched/skipped normally) but never required for, or counted toward,
+  // the show's own completion. resolvedReleasedEpisodes additionally
+  // counts Skipped episodes as done without counting them as watched —
+  // watchedReleasedEpisodes stays real-watches-only, for anything that
+  // needs an actual watch count/stat rather than a completion signal.
+  const isRegularSeason = (s) => s.id !== 0;
+  const releasedEpisodes = seasons.filter(isRegularSeason).reduce((sum, s) => sum + s.episodes.filter((e) => e.daysUntil == null).length, 0);
+  const watchedReleasedEpisodes = seasons.filter(isRegularSeason).reduce((sum, s) => sum + s.episodes.filter((e) => e.daysUntil == null && e.watched).length, 0);
+  const resolvedReleasedEpisodes = seasons.filter(isRegularSeason).reduce((sum, s) => sum + s.episodes.filter((e) => e.daysUntil == null && (e.watched || e.skipped)).length, 0);
+  const resolvedStatus = resolveShowStatus({ explicitStatus: status, watchedReleasedEpisodes, releasedEpisodes, resolvedReleasedEpisodes });
 
   // initialSeasons is TMDB-only (no per-user data in it) — seed real
   // watched/watchCount/rating state from Supabase once the signed-in user
@@ -480,6 +503,26 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
           if (!hit) return e;
           return { ...e, watched: true, watchCount: hit.watchCount, myRating: hit.rating != null ? hit.rating : e.myRating };
         }),
+      })));
+    }).catch(console.error);
+    return () => { cancelled = true; };
+  }, [user, showId]);
+
+  // Same seed pattern as the watches effect above, one table over —
+  // episode_skips is a plain toggle (no count/rating), so this just flips
+  // `skipped: true` on a match. Watched and Skipped are mutually
+  // exclusive per episode; a row can only exist in one of the two tables
+  // at a time (every write path that sets one clears the other — see
+  // markSkipped/markNotWatched/toggleEp below), so there's no ordering
+  // dependency between this effect and the watches one above.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    getEpisodeSkips(user.id, showId).then((skippedKeys) => {
+      if (cancelled) return;
+      setSeasons((ss) => ss.map((s) => ({
+        ...s,
+        episodes: s.episodes.map((e) => (skippedKeys.has(`${s.id}-${e.n}`) ? { ...e, skipped: true } : e)),
       })));
     }).catch(console.error);
     return () => { cancelled = true; };
@@ -569,7 +612,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     setPendingStatusSync(false);
     if (!user) return;
 
-    if (inLibrary && !statusExplicit && watchedReleasedEpisodes === 0) {
+    if (inLibrary && !statusExplicit && resolvedReleasedEpisodes === 0) {
       setInLibrary(false);
       setStatus("watching");
       setStatusExplicit(true);
@@ -602,7 +645,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
         .then(() => setShowStatus(user.id, showId, resolvedStatus, "ShowDetailClient:episodeMarked"))
         .catch(console.error);
     }
-  }, [pendingStatusSync, resolvedStatus, status, user, showId, inLibrary, statusExplicit, watchedReleasedEpisodes]);
+  }, [pendingStatusSync, resolvedStatus, status, user, showId, inLibrary, statusExplicit, resolvedReleasedEpisodes]);
 
   // Collections sheet — which of the user's collections this show is
   // already in, so the "Add to a Collection" sheet reflects real state
@@ -630,8 +673,16 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   const setEpisodeWatchCount = (seasonId, n, count) => {
     if (!user) { router.push("/login"); return false; }
     const prevSeason = seasons.find((s) => s.id === seasonId);
-    const prevCount = prevSeason?.episodes.find((e) => e.n === n)?.watchCount || 0;
-    setSeasons((ss) => ss.map((s) => s.id !== seasonId ? s : { ...s, episodes: s.episodes.map((e) => e.n === n ? { ...e, watchCount: count, watched: count > 0 } : e) }));
+    const prevEp = prevSeason?.episodes.find((e) => e.n === n);
+    const prevCount = prevEp?.watchCount || 0;
+    // Watched and Skipped are mutually exclusive — marking any real watch
+    // count (including back to Not Watched, count 0, which still means
+    // "not skipped either") clears a prior skip both locally and in
+    // Supabase. Fire-and-forget, same as every other write here — a
+    // failure just leaves the skip row in place, which self-heals next
+    // time this episode's watch state changes again.
+    if (prevEp?.skipped) persistEpisodeSkipped(user.id, showId, seasonId, n, false).catch(console.error);
+    setSeasons((ss) => ss.map((s) => s.id !== seasonId ? s : { ...s, episodes: s.episodes.map((e) => e.n === n ? { ...e, watchCount: count, watched: count > 0, skipped: false } : e) }));
 
     // Same-episode writes are chained, not fired independently — rapid
     // mark/unmark/mark taps on the same episode (exactly what testing a
@@ -653,12 +704,48 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
       // episode — a newer toggle already superseded it, so reverting now
       // would stomp intent the user expressed after this one.
       if (episodeWriteChainsRef.current[key] !== chain) return;
-      setSeasons((ss) => ss.map((s) => s.id !== seasonId ? s : { ...s, episodes: s.episodes.map((e) => e.n === n ? { ...e, watchCount: prevCount, watched: prevCount > 0 } : e) }));
+      setSeasons((ss) => ss.map((s) => s.id !== seasonId ? s : { ...s, episodes: s.episodes.map((e) => e.n === n ? { ...e, watchCount: prevCount, watched: prevCount > 0, skipped: prevEp?.skipped ?? false } : e) }));
     });
 
     setPendingStatusSync(true);
     return true;
   };
+
+  // Skip's own write chain, same reasoning as setEpisodeWatchCount above
+  // (rapid taps on the same episode must land in call order, not network-
+  // response order) — a separate, simpler chain map since skip writes
+  // never race watch writes for the SAME episode (setEpisodeWatchCount
+  // already clears skipped locally+remotely before this could ever fire
+  // concurrently with it, and vice versa: this clears any watch first).
+  const setEpisodeSkippedState = (seasonId, n, skipped) => {
+    if (!user) { router.push("/login"); return false; }
+    const prevSeason = seasons.find((s) => s.id === seasonId);
+    const prevEp = prevSeason?.episodes.find((e) => e.n === n);
+    const prevWatched = !!prevEp?.watched;
+    const prevWatchCount = prevEp?.watchCount || 0;
+    setSeasons((ss) => ss.map((s) => s.id !== seasonId ? s : { ...s, episodes: s.episodes.map((e) => e.n === n ? { ...e, skipped, watched: skipped ? false : e.watched, watchCount: skipped ? 0 : e.watchCount } : e) }));
+
+    const key = `${seasonId}-${n}`;
+    const chain = (episodeWriteChainsRef.current[key] ?? Promise.resolve())
+      .catch(() => {})
+      .then(async () => {
+        // Marking Skipped clears any real watch rows first — the two are
+        // mutually exclusive per episode, same as the reverse direction
+        // in setEpisodeWatchCount above.
+        if (skipped && prevWatchCount > 0) await clearEpisodeWatches(user.id, showId, seasonId, n);
+        await persistEpisodeSkipped(user.id, showId, seasonId, n, skipped);
+      });
+    episodeWriteChainsRef.current[key] = chain;
+    chain.catch((err) => {
+      console.error(err);
+      if (episodeWriteChainsRef.current[key] !== chain) return;
+      setSeasons((ss) => ss.map((s) => s.id !== seasonId ? s : { ...s, episodes: s.episodes.map((e) => e.n === n ? { ...e, skipped: prevEp?.skipped ?? false, watched: prevWatched, watchCount: prevWatchCount } : e) }));
+    });
+
+    setPendingStatusSync(true);
+    return true;
+  };
+  const markSkipped = (seasonId, n) => { setEpisodeSkippedState(seasonId, n, true); setWatchMenuFor(null); setSkipMenuFor(null); };
 
   const toggleEp = (seasonId, n) => {
     const season = seasons.find((s) => s.id === seasonId);
@@ -680,13 +767,22 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     }
   };
 
-  const hasEarlierSeasonUnwatched = (seasonId) => seasons.some((s) => s.id < seasonId && s.episodes.some((e) => e.daysUntil == null && !e.watched));
+  // s.id !== 0 excludes Specials from ever being swept in as "an earlier
+  // season" — Specials sorts as season_number 0, which numerically is
+  // "before" every real season, but it isn't actually earlier in the
+  // show's own chronology and must never gate/be gated by regular-season
+  // completion. !e.skipped: a skipped episode is resolved, not an
+  // "unwatched" gap the user needs a warning about.
+  const hasEarlierSeasonUnwatched = (seasonId) => seasons.some((s) => s.id !== 0 && s.id < seasonId && s.episodes.some((e) => e.daysUntil == null && !e.watched && !e.skipped));
 
   const markSeasonWatched = (seasonId) => {
     if (!user) { router.push("/login"); return; }
     const season = seasons.find((s) => s.id === seasonId);
-    const newlyWatched = season.episodes.filter((e) => e.daysUntil == null && (e.watchCount || 0) === 0).map((e) => ({ seasonNumber: seasonId, episodeNumber: e.n }));
-    setSeasons((ss) => ss.map((s) => s.id !== seasonId ? s : { ...s, episodes: s.episodes.map((e) => e.daysUntil != null ? e : { ...e, watched: true, watchCount: Math.max(e.watchCount || 0, 1) }) }));
+    // !e.skipped — an already-Skipped episode is already resolved; bulk-
+    // marking the season watched must not silently overwrite a
+    // deliberate skip with a forced watch.
+    const newlyWatched = season.episodes.filter((e) => e.daysUntil == null && (e.watchCount || 0) === 0 && !e.skipped).map((e) => ({ seasonNumber: seasonId, episodeNumber: e.n }));
+    setSeasons((ss) => ss.map((s) => s.id !== seasonId ? s : { ...s, episodes: s.episodes.map((e) => e.daysUntil != null || e.skipped ? e : { ...e, watched: true, watchCount: Math.max(e.watchCount || 0, 1) }) }));
     setSkipSeasonMenuFor(null);
     addEpisodeWatches(user.id, showId, newlyWatched).catch(console.error);
     setPendingStatusSync(true);
@@ -694,10 +790,13 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
 
   const markSeasonWithPreviousSeasons = (seasonId) => {
     if (!user) { router.push("/login"); return; }
-    const newlyWatched = seasons.filter((s) => s.id <= seasonId).flatMap((s) =>
-      s.episodes.filter((e) => e.daysUntil == null && (e.watchCount || 0) === 0).map((e) => ({ seasonNumber: s.id, episodeNumber: e.n }))
+    // s.id !== 0 — same reasoning as hasEarlierSeasonUnwatched above:
+    // Specials must never get swept in just because 0 <= seasonId is
+    // numerically true for every real season.
+    const newlyWatched = seasons.filter((s) => s.id !== 0 && s.id <= seasonId).flatMap((s) =>
+      s.episodes.filter((e) => e.daysUntil == null && (e.watchCount || 0) === 0 && !e.skipped).map((e) => ({ seasonNumber: s.id, episodeNumber: e.n }))
     );
-    setSeasons((ss) => ss.map((s) => s.id <= seasonId ? { ...s, episodes: s.episodes.map((e) => e.daysUntil != null ? e : { ...e, watched: true, watchCount: Math.max(e.watchCount || 0, 1) }) } : s));
+    setSeasons((ss) => ss.map((s) => s.id !== 0 && s.id <= seasonId ? { ...s, episodes: s.episodes.map((e) => e.daysUntil != null || e.skipped ? e : { ...e, watched: true, watchCount: Math.max(e.watchCount || 0, 1) }) } : s));
     setSkipSeasonMenuFor(null);
     addEpisodeWatches(user.id, showId, newlyWatched).catch(console.error);
     setPendingStatusSync(true);
@@ -706,21 +805,35 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   const unmarkSeasonWatched = (seasonId) => {
     if (!user) { router.push("/login"); return; }
     const season = seasons.find((s) => s.id === seasonId);
+    // A full reset of this season's resolution state — clears Skipped
+    // too, not just real watches, so "unmark season" genuinely undoes
+    // everything the season-level ring/allWatched check considers
+    // resolved (see the season-card render below).
     const toClear = season.episodes.filter((e) => e.daysUntil == null && (e.watchCount || 0) > 0).map((e) => e.n);
-    setSeasons((ss) => ss.map((s) => s.id !== seasonId ? s : { ...s, episodes: s.episodes.map((e) => e.daysUntil != null ? e : { ...e, watched: false, watchCount: 0 }) }));
+    const toUnskip = season.episodes.filter((e) => e.daysUntil == null && e.skipped).map((e) => e.n);
+    setSeasons((ss) => ss.map((s) => s.id !== seasonId ? s : { ...s, episodes: s.episodes.map((e) => e.daysUntil != null ? e : { ...e, watched: false, watchCount: 0, skipped: false }) }));
     Promise.all(toClear.map((n) => clearEpisodeWatches(user.id, showId, seasonId, n))).catch(console.error);
+    Promise.all(toUnskip.map((n) => persistEpisodeSkipped(user.id, showId, seasonId, n, false))).catch(console.error);
     setPendingStatusSync(true);
   };
 
+  // Only ever fired by picking "Completed" from the top-level status menu
+  // (selectStatus) — the one truly *automatic* whole-show completion
+  // action, as opposed to markSeasonWatched/markSeasonWithPreviousSeasons
+  // above (explicit, scoped, user-picked-this-season actions). Excludes
+  // Specials (s.id !== 0) entirely and leaves already-Skipped episodes
+  // alone, same reasoning as markSeasonWatched: Specials must never be
+  // automatically marked watched, and a deliberate skip is already
+  // resolved, not something to silently overwrite.
   const markAllSeasonsWatched = () => {
     if (!user) { router.push("/login"); return; }
-    const newlyWatched = seasons.flatMap((s) =>
-      s.episodes.filter((e) => e.daysUntil == null && (e.watchCount || 0) === 0).map((e) => ({ seasonNumber: s.id, episodeNumber: e.n }))
+    const newlyWatched = seasons.filter((s) => s.id !== 0).flatMap((s) =>
+      s.episodes.filter((e) => e.daysUntil == null && (e.watchCount || 0) === 0 && !e.skipped).map((e) => ({ seasonNumber: s.id, episodeNumber: e.n }))
     );
-    setSeasons((ss) => ss.map((s) => ({
+    setSeasons((ss) => ss.map((s) => s.id === 0 ? s : {
       ...s,
-      episodes: s.episodes.map((e) => e.daysUntil != null ? e : { ...e, watched: true, watchCount: Math.max(e.watchCount || 0, 1) }),
-    })));
+      episodes: s.episodes.map((e) => e.daysUntil != null || e.skipped ? e : { ...e, watched: true, watchCount: Math.max(e.watchCount || 0, 1) }),
+    }));
     addEpisodeWatches(user.id, showId, newlyWatched).catch(console.error);
   };
 
@@ -744,7 +857,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
           setStatusExplicit(true);
           setSeasons((ss) => ss.map((s) => ({
             ...s,
-            episodes: s.episodes.map((e) => ({ ...e, watched: false, watchCount: 0, myRating: null })),
+            episodes: s.episodes.map((e) => ({ ...e, watched: false, watchCount: 0, skipped: false, myRating: null })),
           })));
           setWatchedShowIds((prev) => { const next = new Set(prev); next.delete(showId); return next; });
         })
@@ -755,9 +868,9 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
       setStatusOpen(false);
       return;
     }
-    if (id === "watchlist" && watchedReleasedEpisodes > 0) {
-      // Watchlist is definitionally zero watched episodes (see
-      // lib/statusResolver.js) — landing here with progress already
+    if (id === "watchlist" && (watchedReleasedEpisodes > 0 || resolvedReleasedEpisodes > 0)) {
+      // Watchlist is definitionally zero watched (or skipped) episodes
+      // (see lib/statusResolver.js) — landing here with progress already
       // recorded would recreate the exact contradiction this file's
       // status logic exists to prevent. Confirm before clearing rather
       // than either silently keeping the stale "10/10 watched" progress
@@ -770,7 +883,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
       setStatusExplicit(true);
       setSeasons((ss) => ss.map((s) => ({
         ...s,
-        episodes: s.episodes.map((e) => ({ ...e, watched: false, watchCount: 0, myRating: null })),
+        episodes: s.episodes.map((e) => ({ ...e, watched: false, watchCount: 0, skipped: false, myRating: null })),
       })));
       setWatchlistAndClearProgress(user.id, showId, "ShowDetailClient:selectStatus:watchlist-confirm").catch(console.error);
       setStatusOpen(false);
@@ -816,12 +929,18 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   };
   const markRewatched = (seasonId, n, currentCount) => { setEpisodeWatchCount(seasonId, n, (currentCount || 1) + 1); setWatchMenuFor(null); };
 
-  // true if any earlier, already-aired episode (this season before n, or an earlier season) is still unwatched
+  // true if any earlier, already-aired episode (this season before n, or an
+  // earlier season) is still unresolved (neither watched nor skipped).
+  // Specials naturally never trip this: `seasons`' own array order already
+  // places it last (see app/(tabs)/show/[id]/page.jsx's seasonNumbers —
+  // Specials appended after every real season, not sorted to the front by
+  // its literal season_number 0), so nothing in this loop ever reaches it
+  // before the target episode.
   const hasEarlierUnwatched = (seasonId, n) => {
     for (const s of seasons) {
       for (const e of s.episodes) {
         if (s.id === seasonId && e.n === n) return false;
-        if (e.daysUntil == null && !e.watched) return true;
+        if (e.daysUntil == null && !e.watched && !e.skipped) return true;
       }
     }
     return false;
@@ -846,13 +965,18 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   // exactly like episode `n` does, not just the one that got a rating card.
   const markWithPrevious = (seasonId, n) => {
     if (!user) { router.push("/login"); return; }
-    const isBefore = (s, e) => s.id < seasonId || (s.id === seasonId && e.n < n);
+    // s.id !== 0 — Specials never counts as "before" a regular episode
+    // just because 0 < seasonId is numerically true, same reasoning as
+    // hasEarlierSeasonUnwatched/markSeasonWithPreviousSeasons above.
+    // !e.skipped — an already-Skipped episode is already resolved, not
+    // something this sweep should overwrite with a forced watch.
+    const isBefore = (s, e) => s.id !== 0 && (s.id < seasonId || (s.id === seasonId && e.n < n));
     const newlyWatched = seasons.flatMap((s) =>
-      s.episodes.filter((e) => isBefore(s, e) && e.daysUntil == null && !e.watched).map((e) => ({ seasonNumber: s.id, episodeNumber: e.n }))
+      s.episodes.filter((e) => isBefore(s, e) && e.daysUntil == null && !e.watched && !e.skipped).map((e) => ({ seasonNumber: s.id, episodeNumber: e.n }))
     );
     setSeasons((ss) => ss.map((s) => ({
       ...s,
-      episodes: s.episodes.map((e) => (isBefore(s, e) && e.daysUntil == null && !e.watched ? { ...e, watched: true, watchCount: Math.max(e.watchCount || 0, 1) } : e)),
+      episodes: s.episodes.map((e) => (isBefore(s, e) && e.daysUntil == null && !e.watched && !e.skipped ? { ...e, watched: true, watchCount: Math.max(e.watchCount || 0, 1) } : e)),
     })));
     setSkipMenuFor(null);
     if (newlyWatched.length > 0) {
@@ -898,14 +1022,15 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   // permanently — marking one watched doesn't remove its card, it just
   // stops being the auto-scroll target, so it's "pushed left" out of the
   // immediately-visible area rather than disappearing.
-  const watchNextSeason = seasons.find((s) => s.episodes.some((e) => e.daysUntil == null && !e.watched));
+  const watchNextSeason = seasons.find((s) => s.episodes.some((e) => e.daysUntil == null && !e.watched && !e.skipped));
   const watchNextEpisodes = watchNextSeason ? watchNextSeason.episodes.filter((e) => e.daysUntil == null) : [];
   // Gates the whole row on real progress existing — without this, a show
   // the user just added (zero episodes watched) shows a full unwatched
   // season row immediately, reading as premature clutter on an otherwise
-  // completely empty show. Once at least one episode anywhere is watched,
-  // Watch Next earns its place.
-  const hasAnyWatchedEpisode = seasons.some((s) => s.episodes.some((e) => e.watched));
+  // completely empty show. Once at least one episode anywhere is watched
+  // (or skipped — either one is real activity on this show), Watch Next
+  // earns its place.
+  const hasAnyWatchedEpisode = seasons.some((s) => s.episodes.some((e) => e.watched || e.skipped));
   const watchNextRowRef = useRef(null);
   const watchedFingerprint = watchNextEpisodes.map((e) => (e.watched ? "1" : "0")).join("");
   useEffect(() => {
@@ -1127,15 +1252,17 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                             onClick={(ev) => {
                               ev.stopPropagation();
                               const rect = ev.currentTarget.getBoundingClientRect();
-                              if (e.watched) { setSkipMenuFor(null); setWatchMenuFor(`${watchNextSeason.id}-${e.n}`); setWatchNextMenuAnchor({ rect, seasonId: watchNextSeason.id, epNumber: e.n, watchCount: e.watchCount }); return; }
+                              if (e.watched || e.skipped) { setSkipMenuFor(null); setWatchMenuFor(`${watchNextSeason.id}-${e.n}`); setWatchNextMenuAnchor({ rect, seasonId: watchNextSeason.id, epNumber: e.n, watchCount: e.watchCount }); return; }
                               if (hasEarlierUnwatched(watchNextSeason.id, e.n)) { setWatchMenuFor(null); setSkipMenuFor(`${watchNextSeason.id}-${e.n}`); setWatchNextMenuAnchor({ rect, seasonId: watchNextSeason.id, epNumber: e.n }); return; }
                               toggleEp(watchNextSeason.id, e.n);
                             }}
                             className="active:scale-90 transition flex items-center justify-center"
-                            style={{ width: 32, height: 32, borderRadius: "50%", background: e.watched ? ((e.watchCount || 1) >= 2 ? "#7CC950" : accent) : "rgba(255,255,255,0.10)" }}
+                            style={{ width: 32, height: 32, borderRadius: "50%", background: e.watched ? ((e.watchCount || 1) >= 2 ? "#7CC950" : accent) : e.skipped ? SKIPPED_GREY : "rgba(255,255,255,0.10)" }}
                           >
                             {e.watched && (e.watchCount || 1) >= 2
                               ? <span style={{ fontSize: 11, fontWeight: 700, color: "#0d1a06" }}>×{e.watchCount}</span>
+                              : e.skipped
+                              ? <Icon name="skip" size={13} color="#fff" />
                               : <Icon name="check" size={14} color={e.watched ? "#1a1108" : "rgba(255,255,255,0.4)"} strokeWidth={2.4} />}
                           </button>
                         </div>
@@ -1156,7 +1283,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                 const { rect, seasonId, epNumber, watchCount } = watchNextMenuAnchor;
                 const isMarkAs = watchMenuFor === `${seasonId}-${epNumber}`;
                 const width = isMarkAs ? 200 : 220;
-                const estHeight = isMarkAs ? 160 : 110;
+                const estHeight = isMarkAs ? 200 : 110;
                 const fitsBelow = window.innerHeight - rect.bottom >= estHeight + 8;
                 const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
                 const positionStyle = fitsBelow ? { top: rect.bottom + 8 } : { bottom: window.innerHeight - rect.top + 8 };
@@ -1173,6 +1300,10 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                           <button onClick={() => markNotWatched(seasonId, epNumber)} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
                             <Icon name="eyeOff" size={15} color="#fff" />
                             <span style={{ fontSize: 13, color: "#fff", fontWeight: 500 }}>Not Watched</span>
+                          </button>
+                          <button onClick={() => markSkipped(seasonId, epNumber)} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
+                            <Icon name="skip" size={15} color="#fff" />
+                            <span style={{ fontSize: 13, color: "#fff", fontWeight: 500 }}>Skipped</span>
                           </button>
                           <button onClick={() => markRewatched(seasonId, epNumber, watchCount)} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
                             <div style={{ width: 18, height: 18, borderRadius: 5, border: "1.5px solid #fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1206,14 +1337,25 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
               })()}
 
               {seasons.map((season) => {
+                // watchedCount: real watches only — feeds the "X/Y watched"
+                // text label below, which must keep meaning literally
+                // "watched," not "resolved" (a Skipped episode counting
+                // toward that label would misreport actual watch stats).
+                // resolvedCount (watched OR skipped) drives the ring/
+                // allWatched/percentage instead — completion, not a watch
+                // count. Both apply the same within any single season,
+                // Specials included: Specials' own card still tracks and
+                // completes normally, it just never feeds the OVERALL
+                // show's resolvedReleasedEpisodes sum above.
                 const watchedCount = season.episodes.filter((e) => e.watched).length;
+                const resolvedCount = season.episodes.filter((e) => e.watched || e.skipped).length;
                 const total = season.episodes.length;
                 const airedTotal = season.episodes.filter((e) => e.daysUntil == null).length;
-                const allWatched = airedTotal > 0 && watchedCount === airedTotal;
+                const allWatched = airedTotal > 0 && resolvedCount === airedTotal;
                 // Same airedTotal denominator as allWatched, so the pie
                 // reaches a full circle at exactly the same point allWatched
                 // flips true — not a separate, possibly-disagreeing measure.
-                const seasonProgressPct = airedTotal > 0 ? Math.round((watchedCount / airedTotal) * 100) : 0;
+                const seasonProgressPct = airedTotal > 0 ? Math.round((resolvedCount / airedTotal) * 100) : 0;
                 const isOpen = expandedSeason === season.id;
                 return (
                   <div key={season.id} className="rounded-2xl" style={{ background: t.cardFill, border: `1px solid ${t.cardBorder}`, overflow: (isOpen || skipSeasonMenuFor === season.id) ? "visible" : "hidden" }}>
@@ -1315,21 +1457,29 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                             </div>
                             {e.daysUntil != null ? (
                               <div className="flex-shrink-0 flex flex-col items-center justify-center" style={{ width: 44 }}>
-                                <span style={{ fontSize: 16, fontWeight: 700, color: "#fff" }}>{e.daysUntil === 0 ? "•" : e.daysUntil}</span>
-                                <span style={{ fontSize: 9, color: t.textDim, letterSpacing: "0.06em", marginTop: 1 }}>{e.daysUntil === 0 ? "TODAY" : e.daysUntil === 1 ? "TOMORROW" : "DAYS"}</span>
+                                {e.daysUntil === Infinity ? (
+                                  <span style={{ fontSize: 10.5, fontWeight: 700, color: t.textDim, letterSpacing: "0.04em" }}>TBA</span>
+                                ) : (
+                                  <>
+                                    <span style={{ fontSize: 16, fontWeight: 700, color: "#fff" }}>{e.daysUntil === 0 ? "•" : e.daysUntil}</span>
+                                    <span style={{ fontSize: 9, color: t.textDim, letterSpacing: "0.06em", marginTop: 1 }}>{e.daysUntil === 0 ? "TODAY" : e.daysUntil === 1 ? "TOMORROW" : "DAYS"}</span>
+                                  </>
+                                )}
                               </div>
                             ) : (
                               <div className="relative flex-shrink-0">
                                 <button onClick={() => {
-                                  if (e.watched) { setSkipMenuFor(null); setWatchMenuFor(`${season.id}-${e.n}`); return; }
+                                  if (e.watched || e.skipped) { setSkipMenuFor(null); setWatchMenuFor(`${season.id}-${e.n}`); return; }
                                   if (hasEarlierUnwatched(season.id, e.n)) { setWatchMenuFor(null); setSkipMenuFor(`${season.id}-${e.n}`); return; }
                                   toggleEp(season.id, e.n);
                                 }} className="active:scale-90 transition flex items-center justify-center" style={{
                                   width: 32, height: 32, borderRadius: "50%",
-                                  background: e.watched ? ((e.watchCount || 1) >= 2 ? "#7CC950" : accent) : "rgba(255,255,255,0.10)",
+                                  background: e.watched ? ((e.watchCount || 1) >= 2 ? "#7CC950" : accent) : e.skipped ? SKIPPED_GREY : "rgba(255,255,255,0.10)",
                                 }}>
                                   {e.watched && (e.watchCount || 1) >= 2
                                     ? <span style={{ fontSize: 11, fontWeight: 700, color: "#0d1a06" }}>×{e.watchCount}</span>
+                                    : e.skipped
+                                    ? <Icon name="skip" size={13} color="#fff" />
                                     : <Icon name="check" size={14} color={e.watched ? "#1a1108" : "rgba(255,255,255,0.4)"} strokeWidth={2.4} />}
                                 </button>
                                 {watchMenuFor === `${season.id}-${e.n}` && (
@@ -1338,6 +1488,10 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                                     <button onClick={() => markNotWatched(season.id, e.n)} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
                                       <Icon name="eyeOff" size={15} color="#fff" />
                                       <span style={{ fontSize: 13, color: "#fff", fontWeight: 500 }}>Not Watched</span>
+                                    </button>
+                                    <button onClick={() => markSkipped(season.id, e.n)} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
+                                      <Icon name="skip" size={15} color="#fff" />
+                                      <span style={{ fontSize: 13, color: "#fff", fontWeight: 500 }}>Skipped</span>
                                     </button>
                                     <button onClick={() => markRewatched(season.id, e.n, e.watchCount)} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
                                       <div style={{ width: 18, height: 18, borderRadius: 5, border: "1.5px solid #fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1670,6 +1824,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
               onMarkOnlyThis={markOnlyThisFromDetail}
               onMarkWithPrevious={markWithPreviousFromDetail}
               onMarkNotWatched={() => markNotWatched(seasonId, ep.n)}
+              onMarkSkipped={() => markSkipped(seasonId, ep.n)}
               onMarkRewatched={() => markRewatched(seasonId, ep.n, ep.watchCount)}
               onMarkWatchedOnce={() => markWatchedOnce(seasonId, ep.n)}
             />

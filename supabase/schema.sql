@@ -107,6 +107,28 @@ set
   watched_month = extract(month from (watched_at at time zone 'Asia/Bangkok'))::int
 where watched_on is null and watch_date_precision = 'day';
 
+-- Per-episode "Skipped" state — a toggle flag, not an event log like
+-- episode_watches (skipping has no rewatch-style count concept, one
+-- episode is just skipped or it isn't), so this is its own small table
+-- rather than a new column/status value on episode_watches itself:
+-- watched and skipped are mutually exclusive per episode, and keeping
+-- them as separate tables means neither can accidentally leak the
+-- other's semantics (a skip is never a "watch event" — Highlights/
+-- Activity/rewatch-count/etc. must never see it, which is automatic as
+-- long as it lives outside episode_watches entirely). A skipped regular
+-- (non-Specials) episode counts as *resolved* for season/show completion
+-- purposes (lib/statusResolver.js) without counting as *watched* for any
+-- real watch statistic — see lib/episodeSkips.js.
+create table if not exists episode_skips (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  tmdb_show_id integer not null,
+  season_number integer not null,
+  episode_number integer not null,
+  skipped_at timestamptz not null default now(),
+  unique (user_id, tmdb_show_id, season_number, episode_number)
+);
+
 -- Season-level reviews (matches season_review.jsx).
 create table if not exists season_reviews (
   id uuid primary key default gen_random_uuid(),
@@ -319,6 +341,7 @@ alter table movie_ratings add column if not exists review_date date;
 alter table profiles enable row level security;
 alter table user_shows enable row level security;
 alter table episode_watches enable row level security;
+alter table episode_skips enable row level security;
 alter table season_reviews enable row level security;
 alter table collections enable row level security;
 alter table collection_shows enable row level security;
@@ -346,6 +369,10 @@ create policy "own rows only" on user_shows
 
 drop policy if exists "own rows only" on episode_watches;
 create policy "own rows only" on episode_watches
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "own rows only" on episode_skips;
+create policy "own rows only" on episode_skips
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 drop policy if exists "own rows only" on season_reviews;

@@ -99,11 +99,31 @@ async function getShowData(showId) {
         synopsis: ep.overview,
         posterPath: ep.still_path,
         // watched/watchCount/myRating are seeded client-side from
-        // episode_watches once the signed-in user is known.
+        // episode_watches once the signed-in user is known; skipped from
+        // episode_skips the same way.
         watched: false,
         watchCount: 0,
+        skipped: false,
         myRating: null,
-        daysUntil: daysUntil != null && daysUntil > 0 ? daysUntil : null,
+        // Infinity, not null, for an episode with NO air_date at all —
+        // TMDB creates a placeholder ("Season N, Episode 1", null
+        // air_date) the moment a show is renewed for a season that
+        // hasn't actually been scheduled yet (confirmed against the API
+        // for show 233347/"Moving", renewed for a still-unscheduled
+        // Season 2). Every consumer of daysUntil in this app (this
+        // file's own render, ShowDetailClient's completion math/gap
+        // detection/bulk-mark-watched, EpisodeDetail's disabled-button
+        // check) treats `daysUntil == null` as "this has genuinely
+        // aired, go mark it watched" — that must never be true for a
+        // stub with no real date, or the show could never reach
+        // "completed" even after every actually-released episode is
+        // watched, since this phantom episode can never be marked done.
+        // Infinity satisfies every `!= null` check the same way a real
+        // future daysUntil already does, without a second "and does it
+        // actually have a date" condition needed at each call site — the
+        // one place that DOES need to tell the two apart (the "N DAYS"
+        // countdown chip below) special-cases it directly.
+        daysUntil: !ep.air_date ? Infinity : (daysUntil != null && daysUntil > 0 ? daysUntil : null),
       };
     }),
   }));

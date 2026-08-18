@@ -29,7 +29,15 @@ async function getEpisodeData(showId, seasonNumber, episodeNumber) {
       runtime: episode.runtime ?? show.episode_run_time?.[0] ?? "",
       synopsis: episode.overview ?? "",
       posterPath: episode.still_path ?? show.backdrop_path,
-      daysUntil: daysUntil != null && daysUntil > 0 ? daysUntil : null,
+      // Infinity, not null, when there's no air_date at all — see
+      // app/(tabs)/show/[id]/page.jsx's identical comment (same
+      // TMDB-placeholder-episode reasoning). Not expected to actually be
+      // hit on this route today (only reachable via Home's Continue
+      // Watching hero, which never queues an unaired episode), but this
+      // stays consistent with every other daysUntil computation in the
+      // app rather than being the one place still treating "no date at
+      // all" as "already aired."
+      daysUntil: !episode.air_date ? Infinity : (daysUntil != null && daysUntil > 0 ? daysUntil : null),
     },
     cast,
   };

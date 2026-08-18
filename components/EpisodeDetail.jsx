@@ -38,20 +38,20 @@ function GlassButton({ children, onClick, style }) {
  *   showTitle: string — header eyebrow label (only shown when no breadcrumb)
  *   seasonNumber: number
  *   episode: { n, title, date, runtime, synopsis, posterPath, base, glow,
- *     watched, watchCount, myRating, daysUntil }
+ *     watched, watchCount, skipped, myRating, daysUntil }
  *   watchedDateLabel: string | null — optional, e.g. "Jul 15, 2026" (already
  *     formatted via lib/watchDate.js's formatWatchDateLabel). Only rendered
  *     when the episode is watched and this is provided — omit it (as
  *     ShowDetailClient's overlay usage does) and nothing changes.
  *   cast: [{ id, name, role, initials, grad, profilePath }] — optional, omit/empty hides the row
  *   hasEarlierUnwatched: boolean — whether an earlier aired episode (this
- *     show, any season) is still unwatched; gates the "only this / previous
- *     episodes too" menu when marking watched
+ *     show, any season) is still unwatched/unskipped; gates the "only this /
+ *     previous episodes too" menu when marking watched
  *   onClose: () => void — top-left back button
  *   onCastClick: (id) => void — optional
  *   onMarkWatched: () => void — no earlier-unwatched conflict, mark watched
  *   onMarkOnlyThis / onMarkWithPrevious: () => void — skip-ahead menu choices
- *   onMarkNotWatched / onMarkRewatched / onMarkWatchedOnce: () => void — already-watched menu choices
+ *   onMarkNotWatched / onMarkSkipped / onMarkRewatched / onMarkWatchedOnce: () => void — already-watched/skipped menu choices
  *   breadcrumb: { label, onClick } — optional top-right TV-icon button that
  *     opens the show's detail page, for the standalone page (Show Detail's
  *     own overlay is already on the show, so it never passes this). `label`
@@ -71,6 +71,7 @@ export default function EpisodeDetail({
   onMarkOnlyThis,
   onMarkWithPrevious,
   onMarkNotWatched,
+  onMarkSkipped,
   onMarkRewatched,
   onMarkWatchedOnce,
   breadcrumb,
@@ -78,8 +79,12 @@ export default function EpisodeDetail({
   const [skipMenuOpen, setSkipMenuOpen] = useState(false);
   const [watchMenuOpen, setWatchMenuOpen] = useState(false);
 
+  // Skipped behaves like watched for the purposes of "does tapping the
+  // check button open the Mark As… menu" — both are a *resolved* status
+  // the user has to explicitly change via that menu, as opposed to the
+  // blank not-started state where a tap directly marks it watched.
   const handleTopButtonClick = () => {
-    if (ep.watched) { setSkipMenuOpen(false); setWatchMenuOpen(true); return; }
+    if (ep.watched || ep.skipped) { setSkipMenuOpen(false); setWatchMenuOpen(true); return; }
     setWatchMenuOpen(false);
     if (hasEarlierUnwatched) { setSkipMenuOpen(true); return; }
     onMarkWatched?.();
@@ -123,6 +128,11 @@ export default function EpisodeDetail({
             <button onClick={ep.daysUntil != null ? undefined : handleTopButtonClick} disabled={ep.daysUntil != null} className="flex items-center justify-center active:scale-90 transition" style={{ width: 34, height: 34, opacity: ep.daysUntil != null ? 0.4 : 1 }}>
               {ep.watched && (ep.watchCount || 1) >= 2
                 ? <div style={{ width: 30, height: 30, borderRadius: "50%", background: "#7CC950", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: 12, fontWeight: 700, color: "#0d1a06" }}>×{ep.watchCount}</span></div>
+                : ep.skipped
+                // Solid grey fill, matching Show Detail's own skip mark
+                // (SKIPPED_GREY) — distinct from the plain outline "not
+                // watched" circle and the accent-filled watched one.
+                ? <div style={{ width: 30, height: 30, borderRadius: "50%", background: "#6B7280", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon name="skip" size={15} color="#fff" /></div>
                 : <Icon name={ep.watched ? "checkCircle" : "circle"} size={30} color={ep.watched ? accent : "rgba(255,255,255,0.3)"} />}
             </button>
             {skipMenuOpen && (
@@ -144,6 +154,10 @@ export default function EpisodeDetail({
                 <button onClick={() => { setWatchMenuOpen(false); onMarkNotWatched?.(); }} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
                   <Icon name="eyeOff" size={15} color="#fff" />
                   <span style={{ fontSize: 13, color: "#fff", fontWeight: 500 }}>Not Watched</span>
+                </button>
+                <button onClick={() => { setWatchMenuOpen(false); onMarkSkipped?.(); }} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
+                  <Icon name="skip" size={15} color="#fff" />
+                  <span style={{ fontSize: 13, color: "#fff", fontWeight: 500 }}>Skipped</span>
                 </button>
                 <button onClick={() => { setWatchMenuOpen(false); onMarkRewatched?.(); }} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
                   <div style={{ width: 18, height: 18, borderRadius: 5, border: "1.5px solid #fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -194,7 +208,7 @@ export default function EpisodeDetail({
         )}
 
         <button onClick={ep.daysUntil != null ? undefined : handleBottomButtonClick} disabled={ep.daysUntil != null} className="w-full active:scale-95 transition" style={{ marginTop: 28, padding: "13px", borderRadius: 999, background: ep.daysUntil != null ? "rgba(255,255,255,0.06)" : ep.watched ? t.cardFill : "#fff", color: ep.daysUntil != null ? t.textDim : ep.watched ? "#fff" : "#111", border: (ep.watched || ep.daysUntil != null) ? `1px solid ${t.glassBorder}` : "none", fontSize: 14.5, fontWeight: 600 }}>
-          {ep.daysUntil != null ? `Airs in ${ep.daysUntil} day${ep.daysUntil === 1 ? "" : "s"}` : ep.watched ? "Mark as Unwatched" : "Mark as Watched"}
+          {ep.daysUntil === Infinity ? "Release date TBA" : ep.daysUntil != null ? `Airs in ${ep.daysUntil} day${ep.daysUntil === 1 ? "" : "s"}` : ep.watched ? "Mark as Unwatched" : "Mark as Watched"}
         </button>
       </div>
     </div>
