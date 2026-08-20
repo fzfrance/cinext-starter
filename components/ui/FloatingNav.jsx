@@ -2,10 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import Icon from "@/components/ui/Icon";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
-import { pushWithTransition } from "@/lib/viewTransition";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -43,7 +42,6 @@ const tabs = [
  */
 export default function FloatingNav({ tintColor }) {
   const pathname = usePathname();
-  const router = useRouter();
   const tint = tintColor || accent;
 
   const activeIndex = Math.max(0, tabs.findIndex((tb) => pathname?.startsWith(tb.href)));
@@ -245,14 +243,12 @@ export default function FloatingNav({ tintColor }) {
           above) so it stays put at the right edge regardless of scroll.
           Opens the full-screen search overlay (app/search) as a real
           route, not local component state, so it's reachable identically
-          from every screen this nav appears on. Still a real <Link>
-          (prefetchable, right-clickable, etc.) but onClick intercepts the
-          actual navigation to run it through pushWithTransition instead of
-          Link's own default push, so the collapse-left/slide-in-right
-          motion applies. */}
+          from every screen this nav appears on. A plain Link keeps Next's
+          prefetched navigation immediate; wrapping router.push in the
+          native View Transitions API produced duplicate page snapshots on
+          mobile while React was committing the route asynchronously. */}
       <Link
         href="/search"
-        onClick={(e) => { e.preventDefault(); pushWithTransition(router, "/search"); }}
         className="flex items-center justify-center active:scale-90 transition flex-shrink-0"
         style={{ ...glassStyle, width: SEARCH_SIZE, height: SEARCH_SIZE, borderRadius: "50%", boxSizing: "border-box" }}
       >

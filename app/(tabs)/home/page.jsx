@@ -17,7 +17,7 @@ import { useShowCustomizations } from "@/lib/show-customizations-context";
 import { useLongPress } from "@/lib/useLongPress";
 import { getUserShows } from "@/lib/userShows";
 import { getUserMovies } from "@/lib/userMovies";
-import { getShowWatchSummary, addEpisodeWatches, rateLatestWatch } from "@/lib/episodeWatches";
+import { getRecentWatchedShowIds, getShowWatchSummary, addEpisodeWatches, rateLatestWatch } from "@/lib/episodeWatches";
 import { getProfile } from "@/lib/profile";
 import { resolveShowStatus } from "@/lib/statusResolver";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
@@ -26,6 +26,11 @@ import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
+// Keeps the last rendered Home payload for this browser session. A tab
+// revisit paints it immediately, then the normal live fetch below refreshes
+// it in the background; nothing here survives a reload or replaces Supabase
+// as the source of truth.
+const homeSessionCache = new Map();
 
 // Persists See All → In Progress's grid/gallery choice, same localStorage-
 // backed per-browser preference pattern as e.g. Library's own view-mode
@@ -495,6 +500,7 @@ export default function Page() {
   const { isFavorite, toggleFavorite } = useFavorites();
   const { getCustomPoster } = useShowCustomizations();
   const readableLanguages = useReadableLanguages();
+  const initialHome = user ? homeSessionCache.get(user.id) : null;
   const [view, setView] = useState("home"); // "home" | "inProgress"
   // See All → In Progress's own display mode — "grid" (the existing
   // poster-with-progress-bar layout) or "gallery" (large landscape
@@ -515,7 +521,7 @@ export default function Page() {
     try { localStorage.setItem(IN_PROGRESS_VIEW_MODE_KEY, mode); } catch (err) { console.error("Failed to save In Progress view mode:", err); }
   };
   const [menuOpen, setMenuOpen] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(() => Boolean(initialHome));
   // Header avatar — real avatar_url when the user has set one (same
   // source Profile/Edit Profile read), gradient placeholder otherwise;
   // never a fake stand-in photo.
@@ -542,15 +548,15 @@ export default function Page() {
   //   (null if no "watching" show has ever actually been watched).
   // inProgress: every other "watching" show, sorted the same way.
   // upcoming: any library show with a real future TMDB next_episode_to_air.
-  const [hero, setHero] = useState(null);
-  const [inProgress, setInProgress] = useState([]);
-  const [upcoming, setUpcoming] = useState([]);
+  const [hero, setHero] = useState(() => initialHome?.hero ?? null);
+  const [inProgress, setInProgress] = useState(() => initialHome?.inProgress ?? []);
+  const [upcoming, setUpcoming] = useState(() => initialHome?.upcoming ?? []);
   // Movies in the user's library (any status — same status-agnostic
   // scoping as `upcoming` above) whose real-world release hasn't
   // happened yet. Already shaped for UpcomingMovieRow directly (title/
   // posterPath/releaseDate/tmdbStatus), no separate derivation step
   // needed the way upcomingEpisodes exists for TV.
-  const [upcomingMovies, setUpcomingMovies] = useState([]);
+  const [upcomingMovies, setUpcomingMovies] = useState(() => initialHome?.upcomingMovies ?? []);
   // Bumped after the hero card's Watch button marks an episode watched —
   // that write happens without navigating away, so nothing else would
   // otherwise prompt this page's cached hero/progress data (fetched once
@@ -564,9 +570,22 @@ export default function Page() {
   const silentRefetchRef = useRef(false);
 
   useEffect(() => {
+    if (!user || !loaded) return;
+    homeSessionCache.set(user.id, { hero, inProgress, upcoming, upcomingMovies });
+  }, [user, loaded, hero, inProgress, upcoming, upcomingMovies]);
+
+  useEffect(() => {
     if (!user) { setHero(null); setInProgress([]); setUpcoming([]); setLoaded(true); return; }
     let cancelled = false;
-    const silent = silentRefetchRef.current;
+    const cached = homeSessionCache.get(user.id);
+    if (cached) {
+      setHero(cached.hero ?? null);
+      setInProgress(cached.inProgress ?? []);
+      setUpcoming(cached.upcoming ?? []);
+      setUpcomingMovies(cached.upcomingMovies ?? []);
+      setLoaded(true);
+    }
+    const silent = silentRefetchRef.current || Boolean(cached);
     silentRefetchRef.current = false;
     if (!silent) setLoaded(false);
     lastFetchAtRef.current = Date.now();
@@ -580,35 +599,58 @@ export default function Page() {
       // never happen. If a stored record needs correcting, that has to be
       // wired to an explicit action (e.g. a "Fix my library" button)
       // instead of running automatically on navigation.
-      const byShow = await getUserShows(user.id);
+      // The small recent-id query selects a likely hero without waiting for
+      // the user's complete, paginated watch history.
+      const [byShow, recentWatchedShowIds] = await Promise.all([
+        getUserShows(user.id),
+        getRecentWatchedShowIds(user.id),
+      ]);
       const allIds = Object.keys(byShow).map(Number);
-      if (allIds.length === 0) return { hero: null, inProgress: [], upcoming: [] };
+      if (allIds.length === 0) {
+        if (!cancelled) {
+          setHero(null);
+          setInProgress([]);
+          setUpcoming([]);
+          setLoaded(true);
+        }
+        return;
+      }
 
-      // Every non-paused/dropped show needs real progress data — status
-      // must be resolved the same way everywhere (lib/statusResolver.js),
-      // and that requires knowing released/watched episode counts, not
-      // just the stored label. Paused/dropped are exempt: the resolver
-      // returns those unconditionally regardless of progress.
-      const resolvableIds = allIds.filter((id) => byShow[id].status !== "paused" && byShow[id].status !== "drop");
+      // Paused/dropped/completed are explicit overrides in statusResolver,
+      // so none of them need the expensive episode-progress path.
+      const resolvableIds = allIds.filter((id) => !["paused", "drop", "completed"].includes(byShow[id].status));
+      const resolvableIdSet = new Set(resolvableIds);
 
-      // Viewing activity (source of truth for "most recently watched")
-      // — also doubles as the "watched" episode keys fed into
-      // /api/shows/library-detail's progress resolution below.
-      const summary = await getShowWatchSummary(user.id, resolvableIds);
-
-      const res = await fetch("/api/shows/library-detail", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          shows: allIds.map((id) => ({
-            id,
-            needsProgress: resolvableIds.includes(id),
-            watched: summary[id]?.watchedKeys ?? [],
-          })),
-        }),
+      // Start the complete history load now, but do not block the likely
+      // hero on it. The focused one-show query below is much smaller and
+      // supplies the exact watched keys needed for that card.
+      let fullSummaryError = null;
+      const fullSummaryPromise = getShowWatchSummary(user.id, resolvableIds).catch((err) => {
+        fullSummaryError = err;
+        return null;
       });
-      const { results } = await res.json();
-      const byId = Object.fromEntries(results.map((r) => [r.id, r]));
+      const primaryId = recentWatchedShowIds.find((id) => resolvableIdSet.has(id))
+        ?? resolvableIds.find((id) => byShow[id].status === "watching")
+        ?? null;
+      const byId = {};
+
+      const fetchDetails = async (ids, needsProgress, watchSummary = {}) => {
+        if (ids.length === 0) return [];
+        const res = await fetch("/api/shows/library-detail", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            shows: ids.map((id) => ({
+              id,
+              needsProgress,
+              watched: needsProgress ? (watchSummary[id]?.watchedKeys ?? []) : [],
+            })),
+          }),
+        });
+        if (!res.ok) throw new Error(`Home library detail failed (${res.status})`);
+        const data = await res.json();
+        return data.results ?? [];
+      };
 
       // The single resolved status every section below buckets by — same
       // function, same inputs, as Show Detail/Profile/Explore.
@@ -618,28 +660,79 @@ export default function Page() {
         releasedEpisodes: byId[id]?.releasedEpisodes ?? 0,
       });
 
-      const watchingIds = allIds.filter((id) => byId[id] && resolvedStatusOf(id) === "watching");
+      const progressState = (ids, summary) => {
+        const watchingIds = ids.filter((id) => byId[id] && resolvedStatusOf(id) === "watching");
 
-      // Hero: only a "watching" show with at least one watched episode is
-      // eligible — a show that was merely added or marked watching must
-      // never win, no matter how recently its status changed.
-      const heroCandidates = watchingIds.filter((id) => summary[id]?.lastWatchedAt != null);
-      const heroId = heroCandidates.length === 0 ? null : heroCandidates.reduce((best, id) =>
-        summary[id].lastWatchedAt > summary[best].lastWatchedAt ? id : best
+        // Hero: only a "watching" show with at least one watched episode is
+        // eligible — a show that was merely added or marked watching must
+        // never win, no matter how recently its status changed.
+        const heroCandidates = watchingIds.filter((id) => summary[id]?.lastWatchedAt != null);
+        const heroId = heroCandidates.length === 0 ? null : heroCandidates.reduce((best, id) =>
+          summary[id].lastWatchedAt > summary[best].lastWatchedAt ? id : best
+        );
+
+        // Every "watching" show, hero included — the hero card is a
+        // separate, additional highlight of whichever one was watched most
+        // recently, not a replacement for it in this list.
+        const inProgressIds = watchingIds
+          .sort((a, b) => (summary[b]?.lastWatchedAt ?? 0) - (summary[a]?.lastWatchedAt ?? 0));
+
+        return {
+          hero: heroId != null ? byId[heroId] : null,
+          inProgress: inProgressIds.map((id) => byId[id]).filter(Boolean),
+        };
+      };
+
+      if (primaryId != null) {
+        try {
+          const primarySummary = await getShowWatchSummary(user.id, [primaryId]);
+          const primaryResults = await fetchDetails([primaryId], true, primarySummary);
+          for (const result of primaryResults) byId[result.id] = result;
+          const primaryState = progressState([primaryId], primarySummary);
+          if (!cancelled) {
+            setHero(primaryState.hero);
+            setInProgress(primaryState.inProgress);
+          }
+        } catch (err) {
+          // Keep the full background resolution alive if this one priority
+          // show hits a transient TMDB/Supabase failure.
+          console.error(err);
+        }
+      }
+
+      if (cancelled) return;
+      setLoaded(true);
+
+      const summary = await fullSummaryPromise;
+      if (!summary) throw fullSummaryError;
+      // A watchlist row with real watch history belongs here too because the
+      // shared resolver correctly promotes it to Watching.
+      const progressIds = resolvableIds.filter((id) =>
+        byShow[id].status === "watching" || (summary[id]?.watchedKeys?.length ?? 0) > 0
       );
+      const unresolvedProgressIds = progressIds.filter((id) => !byId[id]);
+      const progressResults = await fetchDetails(unresolvedProgressIds, true, summary).catch((err) => {
+        console.error(err);
+        return [];
+      });
+      for (const result of progressResults) byId[result.id] = result;
 
-      // Every "watching" show, hero included — the hero card is a
-      // separate, additional highlight of whichever one was watched most
-      // recently, not a replacement for it in this list. Previously
-      // excluded the hero (`id !== heroId`), which is exactly why it
-      // could go missing from here entirely: with only two shows in
-      // progress, one always became hero and the row showed just the
-      // other one, reading as if it had been dropped.
-      const inProgressIds = watchingIds
-        .sort((a, b) => (summary[b]?.lastWatchedAt ?? 0) - (summary[a]?.lastWatchedAt ?? 0));
+      if (!cancelled) {
+        const fullState = progressState(progressIds, summary);
+        setHero(fullState.hero);
+        setInProgress(fullState.inProgress);
+      }
 
-      const heroResult = heroId != null ? byId[heroId] : null;
-      const inProgressResults = inProgressIds.map((id) => byId[id]).filter(Boolean);
+      const progressIdSet = new Set(progressIds);
+      const remainingIds = allIds.filter((id) => !progressIdSet.has(id));
+      const remainingResults = await fetchDetails(remainingIds, false).catch((err) => {
+        // Upcoming is secondary content. A transient metadata failure here
+        // must not tear down Hero/In Progress after they already loaded.
+        console.error(err);
+        return [];
+      });
+      for (const result of remainingResults) byId[result.id] = result;
+
       const upcomingResults = allIds
         // A show marked Completed must stay off this row even when TMDB
         // reports a future episode for it (a newly announced/renewed
@@ -654,14 +747,8 @@ export default function Page() {
         // already chronological order, with no timezone parsing involved.
         .sort((a, b) => a.nextEpisodeToAir.airDate.localeCompare(b.nextEpisodeToAir.airDate));
 
-      return { hero: heroResult, inProgress: inProgressResults, upcoming: upcomingResults };
+      if (!cancelled) setUpcoming(upcomingResults);
     })()
-      .then((data) => {
-        if (cancelled) return;
-        setHero(data.hero);
-        setInProgress(data.inProgress);
-        setUpcoming(data.upcoming);
-      })
       .catch((err) => {
         console.error(err);
         if (!cancelled) { setHero(null); setInProgress([]); setUpcoming([]); }

@@ -23,6 +23,7 @@ import { themes, DEFAULT_ACCENT, statIconGold, statCardBg } from "@/lib/theme";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
+const highlightsSessionCache = new Map();
 
 const MONTH_ABBRS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -69,6 +70,8 @@ export default function Page() {
   // yesterday as the selected day. bangkokParts(new Date()) is cheap
   // (no I/O), so recomputing it per render costs nothing and can't drift.
   const bangkokNow = getBangkokNow();
+  const initialHighlightsKey = user ? `${user.id}|${bangkokNow.year}|${bangkokNow.month}` : null;
+  const initialHighlights = initialHighlightsKey ? highlightsSessionCache.get(initialHighlightsKey) : null;
   // Real years with actual watch data, not a fixed "current year back 3"
   // rolling window — that used to silently make any year outside it
   // unreachable from this picker even when it genuinely had entries (e.g.
@@ -76,7 +79,7 @@ export default function Page() {
   // bangkokNow.year is always included even with zero data yet, so
   // switching to the actual current year (to start tracking it) is
   // always possible regardless of what's been fetched.
-  const [availableYears, setAvailableYears] = useState([]);
+  const [availableYears, setAvailableYears] = useState(() => initialHighlights?.availableYears ?? []);
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -100,8 +103,8 @@ export default function Page() {
   // opposed to the whole year) happens to be empty — that's monthStatus/
   // monthEntries below, with its own "No watch activity this month yet"
   // copy, distinct from this year-wide state.
-  const [yearStatus, setYearStatus] = useState("loading");
-  const [yearRows, setYearRows] = useState([]); // raw episode_watches rows for the whole year
+  const [yearStatus, setYearStatus] = useState(() => initialHighlights?.yearStatus ?? "loading");
+  const [yearRows, setYearRows] = useState(() => initialHighlights?.yearRows ?? []); // raw episode_watches rows for the whole year
   const [retryToken, setRetryToken] = useState(0);
   // Backing refs for the visibility-triggered background refresh below —
   // not state, since none of them should ever themselves cause a render.
@@ -115,7 +118,7 @@ export default function Page() {
   // themselves. Caught independently wherever it's used (see the effect
   // below) so a still-missing user_movies table degrades to "no movie
   // data" instead of breaking the TV-only Highlights view it used to be.
-  const [yearMovieRows, setYearMovieRows] = useState([]); // [{movieId, watchedOn, watchDatePrecision, watchedYear, watchedMonth, watchDateSource}]
+  const [yearMovieRows, setYearMovieRows] = useState(() => initialHighlights?.yearMovieRows ?? []); // [{movieId, watchedOn, watchDatePrecision, watchedYear, watchedMonth, watchDateSource}]
   // Overrides the TV-only "empty" verdict when movies alone have activity
   // this year — otherwise a movie-only year would show the false "No
   // highlights for {year}" empty state. Purely a render-time derivation
@@ -198,9 +201,9 @@ export default function Page() {
   // snap logic itself was always correct, it just never got a chance to
   // run against a real row element.
   }, [month, year, effectiveYearStatus]);
-  const [monthStatus, setMonthStatus] = useState("loading"); // loading | ready | error — the month-level enrichment fetch
+  const [monthStatus, setMonthStatus] = useState(() => initialHighlights?.monthStatus ?? "loading"); // loading | ready | error — the month-level enrichment fetch
   const [monthRetryToken, setMonthRetryToken] = useState(0);
-  const [monthEntries, setMonthEntries] = useState([]); // one entry per watch EVENT this month (rewatches included as their own entries), enriched via /api/shows/watch-entries
+  const [monthEntries, setMonthEntries] = useState(() => initialHighlights?.monthEntries ?? []); // one entry per watch EVENT this month (rewatches included as their own entries), enriched via /api/shows/watch-entries
   const [selectedDay, setSelectedDay] = useState(null);
   // Show ids currently collapsed in the selected day's episode list —
   // reset whenever the selected day changes (see the effect below) so a
@@ -556,7 +559,16 @@ export default function Page() {
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    const silent = silentRefetchRef.current;
+    const cached = highlightsSessionCache.get(`${user.id}|${year}|${month}`);
+    if (cached) {
+      setAvailableYears(cached.availableYears ?? []);
+      setYearRows(cached.yearRows ?? []);
+      setYearMovieRows(cached.yearMovieRows ?? []);
+      setYearStatus(cached.yearStatus ?? "loading");
+      setMonthEntries(cached.monthEntries ?? []);
+      setMonthStatus(cached.monthStatus ?? "loading");
+    }
+    const silent = silentRefetchRef.current || Boolean(cached);
     silentRefetchRef.current = false;
     if (!silent) {
       setYearStatus("loading");
@@ -673,7 +685,8 @@ export default function Page() {
   // too, for the same reason — a genuine month switch by the user still
   // shows it normally.
   useEffect(() => {
-    const silent = silentMonthRefetchRef.current;
+    const cached = user ? highlightsSessionCache.get(`${user.id}|${year}|${month}`) : null;
+    const silent = silentMonthRefetchRef.current || Boolean(cached?.monthEntries);
     silentMonthRefetchRef.current = false;
     if (monthRows.length === 0) { setMonthEntries([]); setMonthStatus("ready"); return; }
 
@@ -727,7 +740,19 @@ export default function Page() {
   // "runtime") so the day-detail panel's shared duration sum
   // (dayMinutes, further down) can treat TV and movie entries identically
   // without a type check.
-  const [monthMovieEntries, setMonthMovieEntries] = useState([]);
+  const [monthMovieEntries, setMonthMovieEntries] = useState(() => initialHighlights?.monthMovieEntries ?? []);
+  useEffect(() => {
+    if (!user || (yearStatus === "loading" && monthStatus === "loading")) return;
+    highlightsSessionCache.set(`${user.id}|${year}|${month}`, {
+      availableYears,
+      yearStatus,
+      yearRows,
+      yearMovieRows,
+      monthStatus,
+      monthEntries,
+      monthMovieEntries,
+    });
+  }, [user, year, month, availableYears, yearStatus, yearRows, yearMovieRows, monthStatus, monthEntries, monthMovieEntries]);
   useEffect(() => {
     if (monthMovieRows.length === 0) { setMonthMovieEntries([]); return; }
     let cancelled = false;

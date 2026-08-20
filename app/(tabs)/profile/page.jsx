@@ -14,11 +14,9 @@ import TimeMachineSection from "@/components/profile/TimeMachineSection";
 import { useAuth } from "@/lib/auth-context";
 import { useFavorites } from "@/lib/favorites-context";
 import { useMovieFavorites } from "@/lib/movie-favorites-context";
-import { getUserShows } from "@/lib/userShows";
 import { getUserMoviesWatchedInYear, getAllUserMoviesWatched } from "@/lib/userMovies";
-import { getShowWatchSummary, getWatchedEpisodesForYear, getWatchedYears } from "@/lib/episodeWatches";
+import { getWatchedEpisodesForYear, getWatchedYears } from "@/lib/episodeWatches";
 import { getMyRatingsForUser } from "@/lib/myRatings";
-import { resolveShowStatus } from "@/lib/statusResolver";
 import { getCollections } from "@/lib/collections";
 import { getProfile } from "@/lib/profile";
 import { fallbackPalette, seasonLabel } from "@/lib/library";
@@ -35,6 +33,7 @@ import {
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
+const profileFavoritesSessionCache = new Map();
 
 // Two-cover blended backdrop for collection cards — distinct from
 // PosterArt's single-cover gradient, no shared equivalent.
@@ -75,17 +74,19 @@ function AtmosBackdrop({ imageUrl }) {
 export default function Page() {
   const router = useRouter();
   const { user, loading } = useAuth();
-  const { isFavorite, toggleFavorite, loading: favoritesCtxLoading } = useFavorites();
+  const { isFavorite, toggleFavorite, favoriteEntries, loading: favoritesCtxLoading } = useFavorites();
   const { isFavorite: isMovieFavorite, toggleFavorite: toggleMovieFavorite, favoriteEntries: movieFavoriteEntries, loading: movieFavoritesCtxLoading } = useMovieFavorites();
   const readableLanguages = useReadableLanguages();
-  const [library, setLibrary] = useState([]);
+  const initialFavoriteRows = user ? profileFavoritesSessionCache.get(user.id) : null;
+  const [showFavorites, setShowFavorites] = useState(() => initialFavoriteRows?.shows ?? []);
+  const [showFavoritesLoading, setShowFavoritesLoading] = useState(() => !initialFavoriteRows);
   // "Favorite Movies" preview row — a lightweight one-shot fetch keyed on
   // the favorited-id set's own identity, unlike the dedicated Favorites
   // Movies page's incremental sync-diff (app/(tabs)/profile/favorites/
   // movies/page.jsx): this row only ever shows 6 items, so refetching the
   // small batch whenever the set of favorited movie ids changes is simpler
   // and cheap enough not to need that page's more careful diffing.
-  const [movieFavorites, setMovieFavorites] = useState([]);
+  const [movieFavorites, setMovieFavorites] = useState(() => initialFavoriteRows?.movies ?? []);
   // Same sort mode + hand-arranged order the full Favorites list pages
   // (app/(tabs)/profile/favorites, .../favorites/movies) read and write —
   // see lib/favoritesOrder.js. Hydrated on mount (this page remounts on
@@ -102,14 +103,12 @@ export default function Page() {
     setMovieFavSort(loadFavoriteSort(FAVORITE_MOVIES_SORT_KEY));
     setMovieFavOrder(loadFavoriteOrder(FAVORITE_MOVIES_ORDER_KEY));
   }, []);
-  const [libraryLoading, setLibraryLoading] = useState(true);
   const [longPress, setLongPress] = useState(null);
-  const [libraryRefreshToken, setLibraryRefreshToken] = useState(0);
   // Backgrounds-then-returns refetch, same reasoning and pattern as
   // app/(tabs)/home/page.jsx's own two listener effects below (see their
   // comments for the full rationale) — this page had NEITHER a
   // visibility/focus listener NOR bfcache/pageshow handling at all before
-  // this, unlike Home. Every section here (library, month stats, "My
+  // this, unlike Home. Every section here (favorites, month stats, "My
   // Ratings" preview, Collections, Time Machine) fetched once on mount and
   // then never again for as long as the page instance stayed alive, so
   // e.g. finishing an episode on Show Detail and coming back to Profile
@@ -221,120 +220,43 @@ export default function Page() {
     return () => { cancelled = true; };
   }, [user, pageRefreshToken]);
 
-  // user_shows rows, joined against TMDB for title/poster/progress —
-  // library-detail (not the lighter /api/shows/batch) because the
-  // *displayed* status must be resolved from real released/watched episode
-  // counts (lib/statusResolver.js), the same way Home/Explore/Show Detail
-  // all do it — a show can't show "Watchlist" here while its Show Detail
-  // page shows "Watched" for the same watch history.
+  // Favorite Shows preview — this row only needs title/poster metadata for
+  // the actual favorite ids. It previously waited for every show in the
+  // library to resolve every season's progress and then fetched every logo,
+  // which made this small row consistently finish last on Profile.
   useEffect(() => {
-    if (!user) return;
+    if (!user) { setShowFavorites([]); setShowFavoritesLoading(false); return; }
+    const cached = profileFavoritesSessionCache.get(user.id);
+    if (cached?.shows) {
+      setShowFavorites(cached.shows);
+      setShowFavoritesLoading(false);
+    }
+    if (favoritesCtxLoading) { if (!cached?.shows) setShowFavoritesLoading(true); return; }
+    const ids = favoriteEntries.map((entry) => entry.id);
+    if (ids.length === 0) {
+      setShowFavorites([]);
+      setShowFavoritesLoading(false);
+      profileFavoritesSessionCache.set(user.id, { ...profileFavoritesSessionCache.get(user.id), shows: [] });
+      return;
+    }
     let cancelled = false;
-    setLibraryLoading(true);
-    (async () => {
-      // repairContradictoryStatuses is intentionally NOT called here — see
-      // app/(tabs)/home/page.jsx's identical note. Status is already
-      // resolved live below (resolveShowStatus), so this page displays
-      // correctly without needing to rewrite the stored value, and a
-      // page-load effect must never write to user_shows.
-      const byShow = await getUserShows(user.id);
-      const ids = Object.keys(byShow).map(Number);
-      if (ids.length === 0) { if (!cancelled) { setLibrary([]); setLibraryLoading(false); } return; }
-
-      // Paused/dropped are exempt — resolveShowStatus returns those
-      // unconditionally, so there's no need to pay for their progress data.
-      const resolvableIds = ids.filter((id) => byShow[id].status !== "paused" && byShow[id].status !== "drop");
-      const summary = await getShowWatchSummary(user.id, resolvableIds);
-
-      const res = await fetch("/api/shows/library-detail", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          shows: ids.map((id) => ({
-            id,
-            needsProgress: resolvableIds.includes(id),
-            watched: summary[id]?.watchedKeys ?? [],
-          })),
-        }),
-      });
-      const { results } = await res.json();
-      const byId = Object.fromEntries(results.map((r) => [r.id, r]));
-
-      if (cancelled) return;
-      const merged = ids.map((id) => {
-        const result = byId[id];
-        if (!result) return null;
-        const resolvedStatus = resolveShowStatus({
-          explicitStatus: byShow[id].status,
-          watchedReleasedEpisodes: result.watchedReleasedEpisodes ?? 0,
-          releasedEpisodes: result.releasedEpisodes ?? 0,
-        });
-        // Spread byShow[id] first so its raw `status` is overridden by the
-        // resolved one below — every downstream filter/count in this file
-        // reads `s.status` and must see the resolved value, not the stored one.
-        // Full field set — same exact shape as app/(tabs)/library/page.jsx's
-        // own shows merge (englishTitle/backdropPath/genres/tmdbRating/
-        // tagline/base/glow/logoPath), not a trimmed-down subset — kept this
-        // way even though Favorite Shows (the only remaining consumer here)
-        // doesn't need every field, so this stays a drop-in match if another
-        // section ever needs the same richly-shaped rows.
-        const { base, glow } = fallbackPalette(id);
-        return {
-          id: result.id,
-          title: resolveTitle(result, readableLanguages),
-          englishTitle: result.title,
-          year: result.year,
-          meta: result.meta,
-          posterPath: result.posterPath,
-          backdropPath: result.backdropPath,
-          genres: result.genres ?? [],
-          logoPath: null, // filled in by the separate logo-fetch effect below
-          tmdbRating: result.tmdbRating,
-          tagline: result.tagline,
-          base, glow,
-          ...byShow[id],
-          status: resolvedStatus,
-        };
-      }).filter(Boolean);
-      // Preserve any logoPath the logo-fetch effect below already resolved
-      // — see app/(tabs)/library/LibraryClient.jsx's identical comment for
-      // why (this effect re-running after that one succeeded used to
-      // permanently blank every spine's logo back to null instead of
-      // leaving it alone).
-      setLibrary((prev) => {
-        const prevLogoById = Object.fromEntries(prev.filter((s) => s.logoPath != null).map((s) => [s.id, s.logoPath]));
-        return merged.map((s) => (s.id in prevLogoById ? { ...s, logoPath: prevLogoById[s.id] } : s));
-      });
-      setLibraryLoading(false);
-    })().catch((err) => { console.error(err); if (!cancelled) setLibraryLoading(false); });
-    return () => { cancelled = true; };
-  }, [user, libraryRefreshToken, pageRefreshToken, readableLanguages]);
-
-  // Logos for `library` rows — same effect as app/(tabs)/library/page.jsx's
-  // own (matched to the user's Readable Languages via lib/tmdb.js's
-  // pickBestLogo). Runs once per distinct (ids, readableLanguages) pair.
-  const libraryLogoIdsRef = useRef("");
-  useEffect(() => {
-    if (library.length === 0) return;
-    const ids = library.map((s) => s.id);
-    const key = `${ids.join(",")}|${readableLanguages.join(",")}`;
-    if (libraryLogoIdsRef.current === key) return;
-    libraryLogoIdsRef.current = key;
-    let cancelled = false;
-    fetch("/api/shows/logos", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids, readableLanguages }),
-    })
-      .then((res) => res.json())
+    setShowFavoritesLoading(true);
+    fetch(`/api/shows/batch?ids=${ids.join(",")}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`Favorite shows failed (${res.status})`);
+        return res.json();
+      })
       .then(({ results }) => {
         if (cancelled) return;
-        const logoById = Object.fromEntries((results ?? []).map((r) => [r.id, r.logoPath]));
-        setLibrary((prev) => prev.map((s) => (s.id in logoById ? { ...s, logoPath: logoById[s.id] } : s)));
+        const addedAtById = Object.fromEntries(favoriteEntries.map((entry) => [entry.id, entry.addedAt]));
+        const shows = (results ?? []).map((show) => ({ ...show, addedAt: addedAtById[show.id] }));
+        setShowFavorites(shows);
+        profileFavoritesSessionCache.set(user.id, { ...profileFavoritesSessionCache.get(user.id), shows });
       })
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => { if (!cancelled) setShowFavoritesLoading(false); });
     return () => { cancelled = true; };
-  }, [library, readableLanguages]);
+  }, [user, favoriteEntries, favoritesCtxLoading]);
 
   useEffect(() => {
     if (!user) return;
@@ -381,15 +303,23 @@ export default function Page() {
   // the dedicated Favorites Movies page's more careful incremental sync.
   useEffect(() => {
     if (!user) { setMovieFavorites([]); return; }
+    const cached = profileFavoritesSessionCache.get(user.id);
+    if (cached?.movies) setMovieFavorites(cached.movies);
     const ids = movieFavoriteEntries.slice(0, 6).map((e) => e.id);
-    if (ids.length === 0) { setMovieFavorites([]); return; }
+    if (ids.length === 0) {
+      setMovieFavorites([]);
+      profileFavoritesSessionCache.set(user.id, { ...profileFavoritesSessionCache.get(user.id), movies: [] });
+      return;
+    }
     let cancelled = false;
     fetch(`/api/movies/batch?ids=${ids.join(",")}`)
       .then((res) => res.json())
       .then(({ results }) => {
         if (cancelled) return;
         const addedAtById = Object.fromEntries(movieFavoriteEntries.map((e) => [e.id, e.addedAt]));
-        setMovieFavorites(results.map((movie) => ({ ...movie, addedAt: addedAtById[movie.id] })));
+        const movies = results.map((movie) => ({ ...movie, addedAt: addedAtById[movie.id] }));
+        setMovieFavorites(movies);
+        profileFavoritesSessionCache.set(user.id, { ...profileFavoritesSessionCache.get(user.id), movies });
       })
       .catch(console.error);
     return () => { cancelled = true; };
@@ -503,22 +433,15 @@ export default function Page() {
   const displayName = profile?.displayName || user?.email || "";
   const bio = profile?.bio ?? "";
 
-  // isFavorite (shared favorites-context), not s.favorite from this page's
-  // own getUserShows call — so a toggle made anywhere else in the app
-  // (Explore, Collections, the dedicated Favorites screen) is reflected
-  // here immediately without this page needing its own refetch.
-  const favorites = library.filter((s) => isFavorite(s.id));
   // Same sort/order the full Favorites list pages apply — see
   // lib/favoritesOrder.js and this file's own hydration effect above.
-  const displayedFavorites = sortFavorites(favorites, showFavSort, showFavOrder);
-  const displayedMovieFavorites = sortFavorites(movieFavorites, movieFavSort, movieFavOrder);
-  // This row depends on TWO independent fetches resolving — this page's
-  // own (heavier, status-resolving) library load and favorites-context's
-  // own separate getUserShows call — so it was the one section that stayed
-  // visibly empty noticeably longer than My Ratings/Collections (each just
-  // their own single fetch) before popping in. A real loading placeholder
-  // instead of silently rendering zero cards while waiting on both.
-  const favoritesRowLoading = libraryLoading || favoritesCtxLoading;
+  const resolvedShowFavorites = showFavorites.filter((show) => isFavorite(show.id)).map((show) => ({
+    ...show,
+    title: resolveTitle(show, readableLanguages),
+  }));
+  const displayedFavorites = sortFavorites(resolvedShowFavorites, showFavSort, showFavOrder);
+  const displayedMovieFavorites = sortFavorites(movieFavorites.filter((movie) => isMovieFavorite(movie.id)), movieFavSort, movieFavOrder);
+  const favoritesRowLoading = showFavoritesLoading;
   const movieFavoritesRowLoading = movieFavoritesCtxLoading;
 
   return (
@@ -745,7 +668,6 @@ export default function Page() {
         userId={user?.id}
         source="Profile:posterLongPress"
         onClose={() => setLongPress(null)}
-        onStatusChange={() => setLibraryRefreshToken((n) => n + 1)}
       />
     </>
   );

@@ -24,6 +24,7 @@ import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
+const librarySessionCache = new Map();
 
 
 // Library — Shows/Movies/Collections, wired to the signed-in user's real
@@ -54,22 +55,24 @@ export default function LibraryClient() {
   const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
   const readableLanguages = useReadableLanguages();
+  const sessionCacheKey = user ? `${user.id}|${readableLanguages.join(",")}` : null;
+  const initialLibrary = sessionCacheKey ? librarySessionCache.get(sessionCacheKey) : null;
 
   // Every show touched by this screen — tracked shows AND any show that
   // only appears inside a collection without being tracked at all. `status`/
   // `favorite` are null/false for the latter until the user actually sets
   // one (which is also how they'd get added to the library — same as
   // everywhere else in the app).
-  const [shows, setShows] = useState([]);
-  const [collectionsRaw, setCollectionsRaw] = useState([]); // [{id, name, shared, showIds, movieIds}]
-  const [loaded, setLoaded] = useState(false);
+  const [shows, setShows] = useState(() => initialLibrary?.shows ?? []);
+  const [collectionsRaw, setCollectionsRaw] = useState(() => initialLibrary?.collectionsRaw ?? []); // [{id, name, shared, showIds, movieIds}]
+  const [loaded, setLoaded] = useState(() => Boolean(initialLibrary?.loaded));
   // Every movie touched by this screen — tracked movies AND any movie that
   // only appears inside a collection without being tracked, same rule as
   // `shows` above. Kept in its own array (not merged into `shows`) since
   // the two use entirely different overlay/data-layer components
   // downstream.
-  const [movies, setMovies] = useState([]);
-  const [moviesLoaded, setMoviesLoaded] = useState(false);
+  const [movies, setMovies] = useState(() => initialLibrary?.movies ?? []);
+  const [moviesLoaded, setMoviesLoaded] = useState(() => Boolean(initialLibrary?.moviesLoaded));
 
   const [openShow, setOpenShow] = useState(null);
   const [openOrigin, setOpenOrigin] = useState(null);
@@ -114,6 +117,26 @@ export default function LibraryClient() {
   const [movieStatusFilter, setMovieStatusFilter] = useState("all");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Preserve the fully rendered tab payload across route unmounts. A revisit
+  // paints this snapshot immediately while the normal effects below refresh
+  // Supabase/TMDB in the background.
+  useEffect(() => {
+    if (!sessionCacheKey) return;
+    const cached = librarySessionCache.get(sessionCacheKey);
+    if (cached) {
+      setShows(cached.shows ?? []);
+      setCollectionsRaw(cached.collectionsRaw ?? []);
+      setMovies(cached.movies ?? []);
+      setLoaded(Boolean(cached.loaded));
+      setMoviesLoaded(Boolean(cached.moviesLoaded));
+    }
+  }, [sessionCacheKey]);
+
+  useEffect(() => {
+    if (!sessionCacheKey || (!loaded && !moviesLoaded)) return;
+    librarySessionCache.set(sessionCacheKey, { shows, collectionsRaw, loaded, movies, moviesLoaded });
+  }, [sessionCacheKey, shows, collectionsRaw, loaded, movies, moviesLoaded]);
 
   // DVD Case / Poster display mode — deliberately independent of `tab`
   // (Shows/Movies/Collections): switching tabs must never reset this, and

@@ -349,13 +349,12 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
   // for how these get populated, and combinedHeroSlides for the mix.
   const [recommendedShows, setRecommendedShows] = useState([]);
   const [recommendedMovies, setRecommendedMovies] = useState([]);
-  // Shuffled once per (heroSlidesRaw, recommendedShows, recommendedMovies)
-  // identity change — not on every render — so an unrelated re-render
-  // elsewhere on this page (e.g. toggling a status) can't reshuffle the
-  // hero mid-browse. The hero stays mixed-type even though the rows below
-  // it split by type (a separate, later request) — only the first 5
-  // (across both types combined) are mixed in, the rest are only reachable
-  // via the rows/grids below.
+  // Keep the server-provided hero order fixed for this mount. Personalized
+  // recommendations arrive after first paint; reshuffling the entire array
+  // at that moment used to replace the poster already on screen and looked
+  // like an accidental auto-advance. Recommendations are shuffled only
+  // within their own appended group, so index 0 never changes underneath
+  // the user.
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `shuffled` is a pure module-level helper, stable across renders
   const combinedHeroSlides = useMemo(() => {
     // The hero renders a full-bleed landscape background — swap in each
@@ -363,7 +362,7 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
     // this hero-only copy. The row/grid version below keeps the real
     // portrait poster untouched.
     const recommendedForHero = [...recommendedShows, ...recommendedMovies].slice(0, 5).map((item) => ({ ...item, posterPath: item.backdropPath }));
-    return shuffled([...heroSlidesRaw, ...recommendedForHero]);
+    return [...heroSlidesRaw, ...shuffled(recommendedForHero)];
   }, [heroSlidesRaw, recommendedShows, recommendedMovies]);
   const heroSlides = combinedHeroSlides.map((item) => ({ ...item, title: resolveTitle(item, readableLanguages) }));
   // "For You" — mixed shows+movies in one row (per explicit request,
@@ -589,13 +588,11 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
 
   const watchlist = new Set(Object.entries(resolvedStatusMap).filter(([, s]) => s === "watchlist").map(([key]) => key));
   const libraryKeys = new Set(Object.keys(resolvedStatusMap));
-  // Once an item is in the library under any status (watchlist through
-  // completed), it's done being "recommended" — rather than just showing
-  // an already-saved checkmark while it kept cycling through the hero
-  // forever, drop it from the rotation entirely. Filtered here (not baked
-  // into combinedHeroSlides) so it reacts live to resolvedStatusMap,
-  // including the hero's own toggleWatchlist shortcut.
-  const visibleHeroSlides = heroSlides.filter((s) => !libraryKeys.has(mediaKey(s)));
+  // Do not remove slides when the async library map arrives. That response
+  // previously changed the array under ExploreHero and could replace its
+  // first poster immediately on open. Saved items remain stable and simply
+  // render the existing saved/checkmark state.
+  const visibleHeroSlides = heroSlides;
 
   return (
     <>
