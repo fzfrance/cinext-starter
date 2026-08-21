@@ -1,6 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   images: {
+    // TMDB already serves appropriately sized poster/backdrop variants.
+    // Load them directly so the app does not depend on Vercel's finite
+    // Image Optimization allowance (which otherwise returns 402s when used up).
+    unoptimized: true,
     remotePatterns: [
       {
         protocol: "https",
