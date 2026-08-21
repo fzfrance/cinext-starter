@@ -97,7 +97,10 @@ async function getShowData(showId) {
         date: ep.air_date ?? "TBA",
         runtime: ep.runtime ?? show.episode_run_time?.[0] ?? "",
         synopsis: ep.overview,
-        posterPath: ep.still_path,
+        // Older or sparsely maintained TMDB records often have no
+        // episode-specific stills. Keep episode cards, quick view, and the
+        // rating flow visually useful by falling back to the show's backdrop.
+        posterPath: ep.still_path ?? show.backdrop_path,
         // watched/watchCount/myRating are seeded client-side from
         // episode_watches once the signed-in user is known; skipped from
         // episode_skips the same way.
