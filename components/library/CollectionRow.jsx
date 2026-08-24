@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import Icon from "@/components/ui/Icon";
 import CoverArt from "@/components/library/art/CoverArt";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
@@ -14,9 +15,10 @@ const POSTER_W = 140; // matches RecommendedRow's poster size, same aspect ratio
 // /profile/collections/[id] page this app already has, and a plain flat
 // scrollable row of front-facing posters underneath (no overlap, no fan, no
 // 3D — deliberately a simpler "gallery" treatment than the genre Aisle's DVD
-// spines). Tapping a poster still opens the shared CaseOverlay, same as
-// everywhere else in Library.
-export default function CollectionRow({ id, name, shared, items, onOpen }) {
+// spines). Collections are always a poster-only view, so tapping artwork
+// follows the app's standard poster behavior and navigates directly to the
+// show detail page; the DVD CaseOverlay belongs only to DVD Case view.
+export default function CollectionRow({ id, name, shared, items }) {
   const router = useRouter();
   if (!items.length) return null;
   return (
@@ -36,9 +38,9 @@ export default function CollectionRow({ id, name, shared, items, onOpen }) {
       <div className="no-scrollbar" style={{ overflowX: "auto", overflowY: "hidden", WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}>
         <div className="flex" style={{ gap: 12, padding: "0 20px", width: "max-content" }}>
           {items.map((s) => (
-            <button
+            <Link
               key={s.id}
-              onClick={(e) => onOpen(s, e.currentTarget.getBoundingClientRect())}
+              href={`/show/${s.id}`}
               className="flex-shrink-0"
               style={{
                 width: POSTER_W,
@@ -56,7 +58,7 @@ export default function CollectionRow({ id, name, shared, items, onOpen }) {
               <div style={{ position: "relative", width: POSTER_W, aspectRatio: "140 / 202", borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)", boxShadow: "0 8px 18px rgba(0,0,0,0.4)" }}>
                 <CoverArt show={s} />
               </div>
-            </button>
+            </Link>
           ))}
           <div style={{ width: 8, flexShrink: 0 }} />
         </div>

@@ -647,7 +647,7 @@ export default function LibraryClient() {
             collectionsRaw.map((c) => {
               const byId = Object.fromEntries(shows.map((s) => [s.id, s]));
               const items = c.showIds.map((id) => byId[id]).filter(Boolean);
-              return <CollectionRow key={c.id} id={c.id} name={c.name} shared={c.shared} items={items} onOpen={handleOpen} />;
+              return <CollectionRow key={c.id} id={c.id} name={c.name} shared={c.shared} items={items} />;
             })
           )}
         </div>
