@@ -33,10 +33,26 @@ export default function CollectionRow({ id, name, shared, items, onOpen }) {
           </span>
         )}
       </div>
-      <div className="no-scrollbar" style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}>
+      <div className="no-scrollbar" style={{ overflowX: "auto", overflowY: "hidden", WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}>
         <div className="flex" style={{ gap: 12, padding: "0 20px", width: "max-content" }}>
           {items.map((s) => (
-            <button key={s.id} onClick={(e) => onOpen(s, e.currentTarget.getBoundingClientRect())} className="flex-shrink-0 active:scale-95 transition" style={{ width: POSTER_W }}>
+            <button
+              key={s.id}
+              onClick={(e) => onOpen(s, e.currentTarget.getBoundingClientRect())}
+              className="flex-shrink-0"
+              style={{
+                width: POSTER_W,
+                // Keep Safari's touch-down state compositor-neutral while
+                // it decides whether this is a horizontal pan or a tap.
+                // The old active scale transform caused the same intermittent
+                // stuck gesture as Library's Shows/Movies poster rows.
+                touchAction: "manipulation",
+                WebkitTouchCallout: "none",
+                WebkitTapHighlightColor: "transparent",
+                WebkitUserSelect: "none",
+                userSelect: "none",
+              }}
+            >
               <div style={{ position: "relative", width: POSTER_W, aspectRatio: "140 / 202", borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)", boxShadow: "0 8px 18px rgba(0,0,0,0.4)" }}>
                 <CoverArt show={s} />
               </div>
