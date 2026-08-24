@@ -47,6 +47,10 @@ const accent = DEFAULT_ACCENT;
  *   progress: 0–100 — renders a thin progress bar under the poster.
  *   border: optional CSS border override on the poster box (e.g. a dashed
  *     outline while a grid is in drag-reorder mode).
+ *   pressScale: set false for cards inside native horizontal scrollers.
+ *     Mobile Safari can let the transform started by :active compete with
+ *     its pan gesture recognition, making the same row intermittently feel
+ *     unresponsive. Defaults true for existing standalone/grid cards.
  *   onLongPress: fn(show, rect) — holding the card (500ms, same mechanics
  *     as Highlights' own episode-row long press, see lib/useLongPress.js)
  *     fires this instead of the card's own href/onClick navigation. `rect`
@@ -94,6 +98,7 @@ export default function PosterCard({
   border,
   tmdbSize,
   sizes,
+  pressScale = true,
   onLongPress,
 }) {
   const { getCustomPoster } = useShowCustomizations();
@@ -113,12 +118,12 @@ export default function PosterCard({
       <Wrapper
         {...wrapperProps}
         {...longPressHandlers}
-        className="relative block w-full rounded-2xl overflow-hidden active:scale-95 transition text-left"
+        className={`relative block w-full rounded-2xl overflow-hidden text-left${pressScale ? " active:scale-95 transition" : ""}`}
         style={{
           aspectRatio: "2 / 3",
           boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
           border: border || "none",
-          ...(onLongPress ? { touchAction: "manipulation", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" } : null),
+          ...(!pressScale || onLongPress ? { touchAction: "manipulation", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" } : null),
         }}
       >
         <PosterArt posterPath={show.posterPath} overrideSrc={getCustomPoster(show.id)} base={show.base} glow={show.glow} alt={show.title} tmdbSize={tmdbSize} sizes={sizes} />

@@ -30,17 +30,7 @@ export default function GenrePosterRow({ title, items, shared, mediaType = "tv" 
   if (!items.length) return null;
   const fullListHref = `/profile/library?genre=${encodeURIComponent(title)}${mediaType === "movie" ? "&type=movies" : ""}`;
   return (
-    <div
-      style={{
-        marginTop: 35,
-        // A poster shelf is self-contained and has a predictable height.
-        // Let WebKit skip painting shelves that are well outside the
-        // viewport; on iPad several more image-heavy shelves otherwise sit
-        // in the paint area at once than they do on a phone.
-        contentVisibility: "auto",
-        containIntrinsicSize: "220px",
-      }}
-    >
+    <div style={{ marginTop: 35 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 20px 14px" }}>
         <Icon name={GENRE_ICON[title] || "tv"} size={16} color={GENRE_COLOR[title] || t.textDim} />
         <span style={{ fontSize: 19, fontWeight: 700, color: "#fff" }}>{title}</span>
@@ -61,7 +51,6 @@ export default function GenrePosterRow({ title, items, shared, mediaType = "tv" 
           overflowY: "hidden",
           WebkitOverflowScrolling: "touch",
           scrollbarWidth: "none",
-          overscrollBehaviorX: "contain",
         }}
       >
         {/* Match Aisle's proven iOS scroll geometry: the scroller owns only
@@ -77,6 +66,11 @@ export default function GenrePosterRow({ title, items, shared, mediaType = "tv" 
               width={104}
               titlePlacement="overlay"
               favorite={s.favorite}
+              // Unlike a standalone poster, a card inside this native
+              // scroller must not start a transform on touch-down. On iPad
+              // Safari that :active animation can win the gesture's initial
+              // hit-test and make an otherwise-scrollable row feel stuck.
+              pressScale={false}
               // These cards render at 104 CSS pixels. w342 stays crisp on
               // a Retina iPad without decoding the default 500px source for
               // every visible poster while the user is scrolling.
