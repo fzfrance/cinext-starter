@@ -305,7 +305,10 @@ export default function Page() {
     if (!user) { setMovieFavorites([]); return; }
     const cached = profileFavoritesSessionCache.get(user.id);
     if (cached?.movies) setMovieFavorites(cached.movies);
-    const ids = movieFavoriteEntries.slice(0, 6).map((e) => e.id);
+    // Fetch the full favorites row. The old six-item preview cap was just
+    // enough for a phone, but visibly stopped short on iPad portrait and
+    // landscape even when the user had more favorite movies available.
+    const ids = movieFavoriteEntries.map((e) => e.id);
     if (ids.length === 0) {
       setMovieFavorites([]);
       profileFavoritesSessionCache.set(user.id, { ...profileFavoritesSessionCache.get(user.id), movies: [] });
@@ -528,7 +531,7 @@ export default function Page() {
             // is already a favorite by definition, so it's always filled,
             // but still shown for consistency and to let it be unfavorited
             // right from this row.
-            displayedFavorites.slice(0, 6).map((s) => (
+            displayedFavorites.map((s) => (
               <PosterCard key={s.id} show={s} href={`/show/${s.id}`} width={104} titlePlacement="overlay" favorite={isFavorite(s.id)} onToggleFavorite={() => toggleFavorite(s.id, "Profile:favoritesRow")} onLongPress={(show, rect) => setLongPress({ show, rect })} />
             ))
           )}
@@ -546,7 +549,7 @@ export default function Page() {
               <div key={i} className="flex-shrink-0 rounded-xl" style={{ width: 104, aspectRatio: "2 / 3", background: t.cardFill, border: `1px solid ${t.cardBorder}` }} />
             ))
           ) : (
-            displayedMovieFavorites.slice(0, 6).map((m) => (
+            displayedMovieFavorites.map((m) => (
               <PosterCard key={m.id} show={m} href={`/movie/${m.id}`} width={104} titlePlacement="overlay" favorite={isMovieFavorite(m.id)} onToggleFavorite={() => toggleMovieFavorite(m.id, "Profile:movieFavoritesRow")} />
             ))
           )}
