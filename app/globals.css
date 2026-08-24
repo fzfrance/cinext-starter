@@ -17,6 +17,18 @@ body {
   display: none;
 }
 
+/* Home's 148%-wide foreground hero composition is tuned for a phone. On
+   an iPad that same percentage makes the 16:9 layer much taller than the
+   hero viewport and crops subjects near the top. Lower only that existing
+   layer by a small amount on tablet-sized touch screens; phone framing and
+   desktop behavior stay unchanged. The min-height guard excludes phones in
+   landscape even when their CSS viewport happens to be wider than 700px. */
+@media (min-width: 700px) and (min-height: 700px) and (pointer: coarse) {
+  .home-hero {
+    --home-hero-foreground-top: 53%;
+  }
+}
+
 /* Search overlay open/close — a horizontal push/pop instead of an instant
    swap, driven by the native View Transitions API (see
    lib/viewTransition.js, which toggles the 'vt-back' class below).

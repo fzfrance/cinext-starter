@@ -1191,7 +1191,7 @@ export default function Page() {
                   always extends exactly to the bottom of the eps-left
                   row, however tall the content renders. */}
               <div
-                className="relative overflow-hidden"
+                className="home-hero relative overflow-hidden"
                 style={{
                   "--header-height": "clamp(72px, 16vw, 96px)",
                   // Shortened ~80px (460→400 / 46→26) — this trims the
@@ -1295,9 +1295,12 @@ export default function Page() {
                           // image's own bottom edge now reaches down
                           // toward/under the button row instead of ending
                           // well above it.
-                          top: "48%",
+                          top: "var(--home-hero-foreground-top, 48%)",
                           left: "50%",
-                          width: "148%",
+                          // Keep the established 148% phone composition,
+                          // but stop that percentage from turning into an
+                          // extreme vertical crop on an iPad-width screen.
+                          width: "clamp(100%, 148%, 1280px)",
                           aspectRatio: "16 / 9",
                           transform: "translate(-50%, -50%)",
                           backgroundImage: `url(${tmdbImage(heroShow.posterPath, "w1280")})`,
