@@ -30,7 +30,17 @@ export default function GenrePosterRow({ title, items, shared, mediaType = "tv" 
   if (!items.length) return null;
   const fullListHref = `/profile/library?genre=${encodeURIComponent(title)}${mediaType === "movie" ? "&type=movies" : ""}`;
   return (
-    <div style={{ marginTop: 35 }}>
+    <div
+      style={{
+        marginTop: 35,
+        // A poster shelf is self-contained and has a predictable height.
+        // Let WebKit skip painting shelves that are well outside the
+        // viewport; on iPad several more image-heavy shelves otherwise sit
+        // in the paint area at once than they do on a phone.
+        contentVisibility: "auto",
+        containIntrinsicSize: "220px",
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 20px 14px" }}>
         <Icon name={GENRE_ICON[title] || "tv"} size={16} color={GENRE_COLOR[title] || t.textDim} />
         <span style={{ fontSize: 19, fontWeight: 700, color: "#fff" }}>{title}</span>
@@ -44,17 +54,37 @@ export default function GenrePosterRow({ title, items, shared, mediaType = "tv" 
           <Icon name="chevronRight" size={16} color={t.textDim} />
         </button>
       </div>
-      <div className="no-scrollbar flex gap-2.5" style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none", padding: "0 20px" }}>
-        {items.map((s) => (
-          <PosterCard
-            key={s.id}
-            show={s}
-            href={mediaType === "movie" ? `/movie/${s.id}` : `/show/${s.id}`}
-            width={104}
-            titlePlacement="overlay"
-            favorite={s.favorite}
-          />
-        ))}
+      <div
+        className="no-scrollbar"
+        style={{
+          overflowX: "auto",
+          overflowY: "hidden",
+          WebkitOverflowScrolling: "touch",
+          scrollbarWidth: "none",
+          overscrollBehaviorX: "contain",
+        }}
+      >
+        {/* Match Aisle's proven iOS scroll geometry: the scroller owns only
+            overflow, while one max-content child owns the full row width.
+            Keeping padding on this child also gives Safari an unambiguous
+            scroll extent on wide iPad viewports. */}
+        <div className="flex gap-2.5" style={{ width: "max-content", minWidth: "100%", padding: "0 20px" }}>
+          {items.map((s) => (
+            <PosterCard
+              key={s.id}
+              show={s}
+              href={mediaType === "movie" ? `/movie/${s.id}` : `/show/${s.id}`}
+              width={104}
+              titlePlacement="overlay"
+              favorite={s.favorite}
+              // These cards render at 104 CSS pixels. w342 stays crisp on
+              // a Retina iPad without decoding the default 500px source for
+              // every visible poster while the user is scrolling.
+              tmdbSize="w342"
+              sizes="104px"
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
