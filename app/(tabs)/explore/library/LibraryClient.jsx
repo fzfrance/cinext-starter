@@ -16,6 +16,12 @@ import { tmdbImage } from "@/lib/tmdb";
 const t = themes.dark;
 
 const STORAGE_KEY = "cinext:libraryFilters";
+// Kept in memory for the lifetime of the current app session so returning
+// from a title detail can put Browse All back exactly as it was, including
+// pages loaded by infinite scroll. Persisting the (potentially large) result
+// list in localStorage/sessionStorage would be wasteful; the compact query
+// state is persisted separately below for reloads and future visits.
+let browseAllSession = null;
 const MIN_YEAR = 1990;
 const MAX_YEAR = new Date().getFullYear();
 // Single-direction year filter now — yearFrom is the one draggable value
@@ -168,8 +174,11 @@ function activeFilterCount(f) {
 export default function LibraryClient({ providerLogos = {} }) {
   const router = useRouter();
   const readableLanguages = useReadableLanguages();
+  const restoredSessionRef = useRef(browseAllSession);
+  const restoredSession = restoredSessionRef.current;
+  const skipInitialFetchRef = useRef(Boolean(restoredSession));
 
-  const [activeGenre, setActiveGenre] = useState(null);
+  const [activeGenre, setActiveGenre] = useState(restoredSession?.activeGenre ?? null);
   // "movie" | "tv" | null ("All" — mixed by default, per the movies-as-
   // content-type plan). Lifted outside appliedFilters/draftFilters
   // (unlike Year/Platforms/Language) — the always-visible genre chip row
@@ -178,7 +187,7 @@ export default function LibraryClient({ providerLogos = {} }) {
   // dropdown toggle below writes to it directly for the same reason
   // (takes effect immediately, like the genre chips do, not gated behind
   // "Show Results").
-  const [contentType, setContentType] = useState(null);
+  const [contentType, setContentType] = useState(restoredSession?.contentType ?? null);
   const changeContentType = (next) => {
     setContentType(next);
     // A TV genre id is meaningless as a movie with_genres value and vice
@@ -187,17 +196,17 @@ export default function LibraryClient({ providerLogos = {} }) {
     // polish.
     setActiveGenre(null);
   };
-  const [appliedFilters, setAppliedFilters] = useState(DEFAULT_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState(restoredSession?.appliedFilters ?? DEFAULT_FILTERS);
   const [hydrated, setHydrated] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [draftFilters, setDraftFilters] = useState(DEFAULT_FILTERS);
   const [draftCount, setDraftCount] = useState(null);
 
-  const [shows, setShows] = useState([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
-  const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
+  const [shows, setShows] = useState(restoredSession?.shows ?? []);
+  const [totalCount, setTotalCount] = useState(restoredSession?.totalCount ?? 0);
+  const [totalPages, setTotalPages] = useState(restoredSession?.totalPages ?? 0);
+  const [page, setPage] = useState(restoredSession?.page ?? 1);
+  const [loading, setLoading] = useState(!restoredSession);
   const [loadingMore, setLoadingMore] = useState(false);
   // Bumped every time the genre/filters reset-fetch below starts — loadMore
   // captures the generation it was called under and discards its response
@@ -206,19 +215,48 @@ export default function LibraryClient({ providerLogos = {} }) {
   // new one's freshly-cleared list.
   const generationRef = useRef(0);
 
-  // Restores last visit's filters once, before the first real fetch below
+  // Restores last visit's complete query once, before the first real fetch below
   // — `hydrated` gates that fetch so it runs exactly once with the
-  // correct (possibly restored) filters, not once with defaults and then
-  // again right after.
+  // correct selection, not once with defaults and then again right after.
+  // The old storage shape contained the filters directly, so accepting
+  // both shapes preserves existing users' saved preferences.
   useEffect(() => {
+    if (restoredSessionRef.current) {
+      setHydrated(true);
+      return;
+    }
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setAppliedFilters({ ...DEFAULT_FILTERS, ...JSON.parse(raw) });
+      if (raw) {
+        const saved = JSON.parse(raw);
+        const savedFilters = saved.appliedFilters ?? saved;
+        setAppliedFilters({ ...DEFAULT_FILTERS, ...savedFilters });
+        if (saved.contentType === "movie" || saved.contentType === "tv") {
+          setContentType(saved.contentType);
+        }
+        if (typeof saved.activeGenre === "string") setActiveGenre(saved.activeGenre);
+      }
     } catch (err) {
       console.error("Failed to restore library filters:", err);
     }
     setHydrated(true);
   }, []);
+
+  // Persist the compact selection so a reload still keeps Type, Language,
+  // Genre, and the other filters. The loaded result pages themselves stay
+  // in the in-memory session snapshot used for detail-page back navigation.
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        activeGenre,
+        contentType,
+        appliedFilters,
+      }));
+    } catch (err) {
+      console.error("Failed to save library filters:", err);
+    }
+  }, [hydrated, activeGenre, contentType, appliedFilters]);
 
   // Genre or filters changed — reset to page 1 and clear the previous
   // list rather than appending, so switching genres (or applying filters)
@@ -227,6 +265,13 @@ export default function LibraryClient({ providerLogos = {} }) {
   // the query being switched away from (see loadMore below).
   useEffect(() => {
     if (!hydrated) return;
+    // A detail-page return already has the exact loaded result set. Keep it
+    // intact instead of replacing it with page one, which would also make
+    // the saved scroll position impossible to restore.
+    if (skipInitialFetchRef.current) {
+      skipInitialFetchRef.current = false;
+      return;
+    }
     generationRef.current += 1;
     const generation = generationRef.current;
     let cancelled = false;
@@ -247,6 +292,22 @@ export default function LibraryClient({ providerLogos = {} }) {
       });
     return () => { cancelled = true; };
   }, [hydrated, activeGenre, appliedFilters, contentType]);
+
+  // Restore only after the cached grid has mounted. Two animation frames
+  // allow its layout to be measured before applying the saved document
+  // offset, avoiding the visible jump to the top on iOS/iPadOS Safari.
+  useEffect(() => {
+    const restored = restoredSessionRef.current;
+    if (!hydrated || !restored) return;
+    let secondFrame;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => window.scrollTo(0, restored.scrollY ?? 0));
+    });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      if (secondFrame) cancelAnimationFrame(secondFrame);
+    };
+  }, [hydrated]);
 
   // Infinite scroll — appends the next page for the *current* genre/
   // filters only. Guarded by generationRef so a page that was still in
@@ -310,9 +371,24 @@ export default function LibraryClient({ providerLogos = {} }) {
   const dismissDropdown = () => setDropdownOpen(false);
   const applyFilters = () => {
     setAppliedFilters(draftFilters);
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(draftFilters)); } catch (err) { console.error("Failed to save library filters:", err); }
     setDropdownOpen(false);
   };
+
+  // Runs during the capture phase before a poster link changes routes.
+  // Keeping the rendered pages as well as the query is what lets Back
+  // return to an item beyond the first infinite-scroll page.
+  const rememberBrowsePosition = useCallback(() => {
+    browseAllSession = {
+      activeGenre,
+      contentType,
+      appliedFilters,
+      shows,
+      totalCount,
+      totalPages,
+      page,
+      scrollY: window.scrollY,
+    };
+  }, [activeGenre, contentType, appliedFilters, shows, totalCount, totalPages, page]);
 
   const filterCount = activeFilterCount(appliedFilters);
 
@@ -372,7 +448,7 @@ export default function LibraryClient({ providerLogos = {} }) {
         {loading ? "Loading…" : `${totalCount} title${totalCount === 1 ? "" : "s"}`}
       </div>
 
-      <div className="px-6" style={{ paddingBottom: 32 }}>
+      <div className="px-6" style={{ paddingBottom: 32 }} onClickCapture={rememberBrowsePosition}>
         <PosterGrid>
           {shows.map((s) => (
             <PosterCard
