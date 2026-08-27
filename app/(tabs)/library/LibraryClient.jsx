@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Icon from "@/components/ui/Icon";
 import RecommendedRow from "@/components/library/RecommendedRow";
@@ -25,6 +25,7 @@ import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
 const librarySessionCache = new Map();
+const LIBRARY_SNAPSHOT_PREFIX = "cinext:librarySnapshot:v1:";
 
 
 // Library — Shows/Movies/Collections, wired to the signed-in user's real
@@ -55,7 +56,10 @@ export default function LibraryClient() {
   const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
   const readableLanguages = useReadableLanguages();
-  const sessionCacheKey = user ? `${user.id}|${readableLanguages.join(",")}` : null;
+  // Library metadata does not change when the display-language preference
+  // resolves. Keying the cache by language used to throw away the warm
+  // snapshot and trigger a second full TMDB load moments after the first.
+  const sessionCacheKey = user?.id ?? null;
   const initialLibrary = sessionCacheKey ? librarySessionCache.get(sessionCacheKey) : null;
 
   // Every show touched by this screen — tracked shows AND any show that
@@ -65,6 +69,7 @@ export default function LibraryClient() {
   // everywhere else in the app).
   const [shows, setShows] = useState(() => initialLibrary?.shows ?? []);
   const [collectionsRaw, setCollectionsRaw] = useState(() => initialLibrary?.collectionsRaw ?? []); // [{id, name, shared, showIds, movieIds}]
+  const [collectionsLoaded, setCollectionsLoaded] = useState(() => Boolean(initialLibrary?.collectionsLoaded));
   const [loaded, setLoaded] = useState(() => Boolean(initialLibrary?.loaded));
   // Every movie touched by this screen — tracked movies AND any movie that
   // only appears inside a collection without being tracked, same rule as
@@ -127,16 +132,40 @@ export default function LibraryClient() {
     if (cached) {
       setShows(cached.shows ?? []);
       setCollectionsRaw(cached.collectionsRaw ?? []);
+      setCollectionsLoaded(Boolean(cached.collectionsLoaded));
       setMovies(cached.movies ?? []);
       setLoaded(Boolean(cached.loaded));
       setMoviesLoaded(Boolean(cached.moviesLoaded));
+      return;
+    }
+    // Survives a hard refresh/app relaunch. It paints immediately and is
+    // always refreshed by the live Supabase/TMDB effects below.
+    try {
+      const raw = localStorage.getItem(`${LIBRARY_SNAPSHOT_PREFIX}${sessionCacheKey}`);
+      if (!raw) return;
+      const snapshot = JSON.parse(raw);
+      setShows(snapshot.shows ?? []);
+      setCollectionsRaw(snapshot.collectionsRaw ?? []);
+      setCollectionsLoaded(Boolean(snapshot.collectionsLoaded));
+      setMovies(snapshot.movies ?? []);
+      setLoaded(Boolean(snapshot.loaded));
+      setMoviesLoaded(Boolean(snapshot.moviesLoaded));
+      librarySessionCache.set(sessionCacheKey, snapshot);
+    } catch (err) {
+      console.error("Failed to restore Library snapshot:", err);
     }
   }, [sessionCacheKey]);
 
   useEffect(() => {
     if (!sessionCacheKey || (!loaded && !moviesLoaded)) return;
-    librarySessionCache.set(sessionCacheKey, { shows, collectionsRaw, loaded, movies, moviesLoaded });
-  }, [sessionCacheKey, shows, collectionsRaw, loaded, movies, moviesLoaded]);
+    const snapshot = { shows, collectionsRaw, collectionsLoaded, loaded, movies, moviesLoaded };
+    librarySessionCache.set(sessionCacheKey, snapshot);
+    try {
+      localStorage.setItem(`${LIBRARY_SNAPSHOT_PREFIX}${sessionCacheKey}`, JSON.stringify(snapshot));
+    } catch (err) {
+      console.error("Failed to save Library snapshot:", err);
+    }
+  }, [sessionCacheKey, shows, collectionsRaw, collectionsLoaded, loaded, movies, moviesLoaded]);
 
   // DVD Case / Poster display mode — deliberately independent of `tab`
   // (Shows/Movies/Collections): switching tabs must never reset this, and
@@ -161,19 +190,25 @@ export default function LibraryClient() {
     try { localStorage.setItem(LIBRARY_VIEW_MODE_KEY, mode); } catch (err) { console.error("Failed to save library view mode:", err); }
   };
 
+  const libraryLoadUserRef = useRef(null);
   useEffect(() => {
     if (!user) return;
+    if (libraryLoadUserRef.current === user.id) return;
+    libraryLoadUserRef.current = user.id;
     let cancelled = false;
     (async () => {
       const [byShow, cols] = await Promise.all([getUserShows(user.id), getCollections(user.id)]);
+      if (cancelled) return;
       const trackedIds = Object.keys(byShow).map(Number);
       const collectionIds = cols.flatMap((c) => c.showIds);
       const allIds = [...new Set([...trackedIds, ...collectionIds])];
 
       setCollectionsRaw(cols);
+      setCollectionsLoaded(true);
 
       if (allIds.length === 0) {
-        if (!cancelled) { setShows([]); setLoaded(true); }
+        setShows([]);
+        setLoaded(true);
         return;
       }
 
@@ -190,17 +225,19 @@ export default function LibraryClient() {
         const st = byShow[id].status;
         return st !== "paused" && st !== "drop" && st !== "completed";
       });
-      const summary = await getShowWatchSummary(user.id, resolvableIds);
+      // Start the history read in parallel, but do not make posters/title
+      // metadata wait for it or for the much slower season-by-season TMDB
+      // progress resolution below.
+      const summaryPromise = getShowWatchSummary(user.id, resolvableIds).catch((err) => {
+        console.error("Failed to load Library watch summary:", err);
+        return {};
+      });
 
       const res = await fetch("/api/shows/library-detail", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          shows: allIds.map((id) => ({
-            id,
-            needsProgress: resolvableIds.includes(id),
-            watched: summary[id]?.watchedKeys ?? [],
-          })),
+          shows: allIds.map((id) => ({ id, needsProgress: false })),
         }),
       });
       const { results } = await res.json();
@@ -212,16 +249,12 @@ export default function LibraryClient() {
         if (!detail) return null;
         const tracked = byShow[id];
         const { base, glow } = fallbackPalette(id);
-        const resolvedStatus = tracked
-          ? resolveShowStatus({
-              explicitStatus: tracked.status,
-              watchedReleasedEpisodes: detail.watchedReleasedEpisodes ?? 0,
-              releasedEpisodes: detail.releasedEpisodes ?? 0,
-            })
-          : null;
         return {
           id,
-          title: resolveTitle(detail, readableLanguages),
+          // Stored language-neutral. The memoized display projection below
+          // resolves this without re-running the entire network pipeline
+          // when the user's language preference finishes loading.
+          title: detail.title,
           // Kept separately so the inline search below still matches an
           // international show by its English name even when it's
           // currently displaying under its original-language title, OR
@@ -231,6 +264,7 @@ export default function LibraryClient() {
           // of which one won).
           englishTitle: detail.title,
           originalTitle: detail.originalTitle,
+          originalLanguage: detail.originalLanguage,
           year: detail.year,
           meta: detail.meta,
           posterPath: detail.posterPath,
@@ -240,7 +274,7 @@ export default function LibraryClient() {
           tmdbRating: detail.tmdbRating,
           tagline: detail.tagline,
           base, glow,
-          status: resolvedStatus,
+          status: tracked?.status ?? null,
           favorite: tracked?.favorite ?? false,
           addedAt: tracked?.addedAt ?? 0,
         };
@@ -260,9 +294,46 @@ export default function LibraryClient() {
         return merged.map((s) => (s.id in prevLogoById ? { ...s, logoPath: prevLogoById[s.id] } : s));
       });
       setLoaded(true);
-    })().catch(console.error);
+
+      // Status auto-resolution is progressive: shelves are already usable
+      // while this slower history + season work finishes in the background.
+      if (resolvableIds.length === 0) return;
+      const summary = await summaryPromise;
+      if (cancelled) return;
+      const progressRes = await fetch("/api/shows/library-detail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shows: resolvableIds.map((id) => ({
+            id,
+            needsProgress: true,
+            watched: summary[id]?.watchedKeys ?? [],
+          })),
+        }),
+      });
+      const { results: progressResults } = await progressRes.json();
+      if (cancelled) return;
+      const progressById = Object.fromEntries((progressResults ?? []).map((detail) => [detail.id, detail]));
+      setShows((prev) => prev.map((show) => {
+        const detail = progressById[show.id];
+        const tracked = byShow[show.id];
+        if (!detail || !tracked) return show;
+        return {
+          ...show,
+          status: resolveShowStatus({
+            explicitStatus: tracked.status,
+            watchedReleasedEpisodes: detail.watchedReleasedEpisodes ?? 0,
+            releasedEpisodes: detail.releasedEpisodes ?? 0,
+            resolvedReleasedEpisodes: detail.resolvedReleasedEpisodes ?? detail.watchedReleasedEpisodes ?? 0,
+          }),
+        };
+      }));
+    })().catch((err) => {
+      console.error(err);
+      if (libraryLoadUserRef.current === user.id) libraryLoadUserRef.current = null;
+    });
     return () => { cancelled = true; };
-  }, [user, readableLanguages]);
+  }, [user]);
 
   // Spine/disc logos — a separate, progressive fetch (not blocking the
   // shelf's initial render): each show's best official title logo, matched
@@ -302,14 +373,18 @@ export default function LibraryClient() {
   // one batch fetch (/api/movies/library-detail) is the whole thing.
   // Depends on collectionsRaw (not a separate getCollections call) since
   // that same fetch already carries movieIds alongside showIds.
+  const movieLoadKeyRef = useRef(null);
   useEffect(() => {
-    if (!user) return;
+    if (!user || !collectionsLoaded) return;
+    const collectionMovieIds = collectionsRaw.flatMap((c) => c.movieIds ?? []);
+    const loadKey = `${user.id}|${[...new Set(collectionMovieIds)].sort((a, b) => a - b).join(",")}`;
+    if (movieLoadKeyRef.current === loadKey) return;
+    movieLoadKeyRef.current = loadKey;
     let cancelled = false;
     (async () => {
       const byMovie = await getUserMovies(user.id);
       const trackedIds = Object.keys(byMovie).map(Number);
-      const collectionIds = collectionsRaw.flatMap((c) => c.movieIds ?? []);
-      const allIds = [...new Set([...trackedIds, ...collectionIds])];
+      const allIds = [...new Set([...trackedIds, ...collectionMovieIds])];
 
       if (allIds.length === 0) {
         if (!cancelled) { setMovies([]); setMoviesLoaded(true); }
@@ -332,9 +407,10 @@ export default function LibraryClient() {
         const { base, glow } = fallbackPalette(id);
         return {
           id,
-          title: resolveTitle(detail, readableLanguages),
+          title: detail.title,
           englishTitle: detail.title,
           originalTitle: detail.originalTitle,
+          originalLanguage: detail.originalLanguage,
           year: detail.year,
           meta: detail.meta,
           posterPath: detail.posterPath,
@@ -359,9 +435,13 @@ export default function LibraryClient() {
         return merged.map((s) => (s.id in prevLogoById ? { ...s, logoPath: prevLogoById[s.id] } : s));
       });
       setMoviesLoaded(true);
-    })().catch((err) => { console.error(err); if (!cancelled) setMoviesLoaded(true); });
+    })().catch((err) => {
+      console.error(err);
+      if (movieLoadKeyRef.current === loadKey) movieLoadKeyRef.current = null;
+      if (!cancelled) setMoviesLoaded(true);
+    });
     return () => { cancelled = true; };
-  }, [user, collectionsRaw, readableLanguages]);
+  }, [user, collectionsLoaded, collectionsRaw]);
 
   const movieLogoIdsRef = useRef("");
   useEffect(() => {
@@ -402,10 +482,30 @@ export default function LibraryClient() {
   const handleMovieFavoriteChange = (movieId, favorite) => setMovies((prev) => prev.map((s) => (s.id === movieId ? { ...s, favorite } : s)));
   const handleMovieRemoved = (movieId) => { setMovies((prev) => prev.filter((s) => s.id !== movieId)); handleClose(); };
 
+  // Language preference is a presentation concern, not a data-fetch key.
+  // Project localized titles from already-loaded neutral metadata so a
+  // language setting resolving never empties/refetches the Library.
+  const localizedShows = useMemo(() => shows.map((show) => ({
+    ...show,
+    title: resolveTitle({
+      title: show.englishTitle ?? show.title,
+      originalTitle: show.originalTitle,
+      originalLanguage: show.originalLanguage,
+    }, readableLanguages),
+  })), [shows, readableLanguages]);
+  const localizedMovies = useMemo(() => movies.map((movie) => ({
+    ...movie,
+    title: resolveTitle({
+      title: movie.englishTitle ?? movie.title,
+      originalTitle: movie.originalTitle,
+      originalLanguage: movie.originalLanguage,
+    }, readableLanguages),
+  })), [movies, readableLanguages]);
+
   // Only actually-tracked shows (a real status) count for the Shows tab/
   // aisles/Recommended row — a show can be present here purely because it's
   // in a collection, without being tracked.
-  const trackedShows = shows.filter((s) => s.status);
+  const trackedShows = localizedShows.filter((s) => s.status);
   const statusFiltered = statusFilter === "all" ? trackedShows : trackedShows.filter((s) => s.status === statusFilter);
   // The search box searches THIS same page/shelf layout in place — no
   // separate results screen. It narrows whatever the status filter above
@@ -460,7 +560,7 @@ export default function LibraryClient() {
   // Movie equivalents of the block above — same rules, movie-scoped
   // (primaryGenreMovie instead of primaryGenre, movieStatusFilter instead
   // of statusFilter, otherwise identical).
-  const trackedMovies = movies.filter((s) => s.status);
+  const trackedMovies = localizedMovies.filter((s) => s.status);
   const movieStatusFiltered = movieStatusFilter === "all" ? trackedMovies : trackedMovies.filter((s) => s.status === movieStatusFilter);
   const movieFiltered = trimmedQuery ? movieStatusFiltered.filter((s) => s.title.toLowerCase().includes(trimmedQuery) || s.englishTitle?.toLowerCase().includes(trimmedQuery) || s.originalTitle?.toLowerCase().includes(trimmedQuery)) : movieStatusFiltered;
   // Only watchlist/completed("Watched") — movies use the simplified
@@ -645,7 +745,7 @@ export default function LibraryClient() {
             <div style={{ padding: "70px 0", textAlign: "center", color: t.textDim, fontSize: 13.5 }}>No collections yet.</div>
           ) : (
             collectionsRaw.map((c) => {
-              const byId = Object.fromEntries(shows.map((s) => [s.id, s]));
+              const byId = Object.fromEntries(localizedShows.map((s) => [s.id, s]));
               const items = c.showIds.map((id) => byId[id]).filter(Boolean);
               return <CollectionRow key={c.id} id={c.id} name={c.name} shared={c.shared} items={items} />;
             })
