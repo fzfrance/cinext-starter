@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Icon from "@/components/ui/Icon";
@@ -18,6 +18,11 @@ import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
 
+// Route-local continuity for a trip from Search into a title/person detail
+// and back. Keeping the small result list in memory avoids both a blank
+// re-search flash and losing the inner scroller's exact position.
+let searchSession = null;
+
 // Mixed movies+shows in one list — icon lookup has to check the right
 // vocabulary per item (movies only ever have watchlist/completed/remove,
 // see components/StatusMenu.jsx's movieStatusMenuOptions), or a movie
@@ -34,7 +39,7 @@ const statusIconFor = (status, mediaType) => (mediaType === "movie" ? movieStatu
 // (movies-as-content-type plan) — reads its own favorites context based
 // on item.mediaType, same branching MediaFavoriteBadge does for the
 // grid-card surfaces.
-function SearchResultRow({ item, status, menuOpen, onToggleMenu, onSelectStatus }) {
+function SearchResultRow({ item, status, menuOpen, onToggleMenu, onSelectStatus, onNavigate }) {
   const showFavorites = useFavorites();
   const movieFavorites = useMovieFavorites();
   const { isFavorite, toggleFavorite } = item.mediaType === "movie" ? movieFavorites : showFavorites;
@@ -43,7 +48,7 @@ function SearchResultRow({ item, status, menuOpen, onToggleMenu, onSelectStatus 
 
   return (
     <div className="relative flex gap-3 rounded-2xl" style={{ padding: 12, background: t.cardFill, border: `1px solid ${t.cardBorder}` }}>
-      <Link href={hrefForMedia(item)} className="flex flex-1 min-w-0 gap-3">
+      <Link href={hrefForMedia(item)} onClick={onNavigate} className="flex flex-1 min-w-0 gap-3">
         <div className="relative flex-shrink-0 rounded-xl overflow-hidden" style={{ width: 68, height: 96 }}>
           <PosterArt posterPath={item.posterPath} base={item.base} glow={item.glow} alt={item.title} />
           {favorite && (
@@ -85,9 +90,9 @@ function SearchResultRow({ item, status, menuOpen, onToggleMenu, onSelectStatus 
 // titles they're known for so the result reads as more than a bare
 // name. Tapping goes to /person/[id], same page Show/Movie Detail's own
 // cast rows already link to.
-function SearchPersonRow({ item }) {
+function SearchPersonRow({ item, onNavigate }) {
   return (
-    <Link href={`/person/${item.id}`} className="flex items-center gap-3 rounded-2xl" style={{ padding: 12, background: t.cardFill, border: `1px solid ${t.cardBorder}` }}>
+    <Link href={`/person/${item.id}`} onClick={onNavigate} className="flex items-center gap-3 rounded-2xl" style={{ padding: 12, background: t.cardFill, border: `1px solid ${t.cardBorder}` }}>
       <div className="relative flex-shrink-0 rounded-full overflow-hidden" style={{ width: 56, height: 56, background: t.cardFill }}>
         <PosterArt posterPath={item.profilePath} alt={item.name} />
       </div>
@@ -108,9 +113,13 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
   const router = useRouter();
   const readableLanguages = useReadableLanguages();
   const { resolvedStatusMap, selectStatus } = useLibraryStatus("Search");
+  const restoredSessionRef = useRef(searchSession);
+  const restoredSession = restoredSessionRef.current;
+  const resultsScrollRef = useRef(null);
+  const skipInitialSearchRef = useRef(Boolean(restoredSession?.query?.trim()));
 
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState([]);
+  const [query, setQuery] = useState(restoredSession?.query ?? "");
+  const [results, setResults] = useState(restoredSession?.results ?? []);
   const [loading, setLoading] = useState(false);
   const [menuOpenFor, setMenuOpenFor] = useState(null);
 
@@ -124,6 +133,14 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
   useEffect(() => {
     const trimmed = query.trim();
     if (trimmed === "") { setResults([]); setLoading(false); return; }
+    // A detail-page return already has the exact rows that were visible.
+    // Keep that first restored render stable instead of immediately
+    // replacing it with another network response.
+    if (skipInitialSearchRef.current) {
+      skipInitialSearchRef.current = false;
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     let cancelled = false;
     const handle = setTimeout(() => {
@@ -164,6 +181,40 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
     return () => { cancelled = true; clearTimeout(handle); };
   }, [query]);
 
+  // Search results scroll inside this fixed-height panel, not the document,
+  // so native browser scroll restoration cannot restore it. Wait for the
+  // cached rows to lay out, then restore the panel itself.
+  useEffect(() => {
+    const restored = restoredSessionRef.current;
+    if (!restored) return;
+    let secondFrame;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        if (resultsScrollRef.current) resultsScrollRef.current.scrollTop = restored.scrollTop ?? 0;
+      });
+    });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      if (secondFrame) cancelAnimationFrame(secondFrame);
+    };
+  }, []);
+
+  // Runs from a result link before its route transition. Capturing both
+  // rows and scroll offset lets Back resume on the exact same result.
+  const rememberSearchPosition = useCallback(() => {
+    searchSession = {
+      query,
+      results,
+      scrollTop: resultsScrollRef.current?.scrollTop ?? 0,
+    };
+  }, [query, results]);
+
+  const updateQuery = (value) => {
+    // A new/cleared query invalidates the previous navigation snapshot.
+    searchSession = null;
+    setQuery(value);
+  };
+
   // resolveTitle needs a title/originalTitle/originalLanguage shape a
   // person result doesn't have — left untouched (mediaType stays
   // "person", nothing to resolve) rather than resolving into undefined.
@@ -186,20 +237,21 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
           <ExploreClient trendingShows={trendingShows} trendingMovies={trendingMovies} heroSlides={heroSlides} />
         </div>
       ) : (
-        <div className="h-full overflow-y-auto" style={{ scrollbarWidth: "none", paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 104px)" }}>
+        <div ref={resultsScrollRef} className="h-full overflow-y-auto" style={{ scrollbarWidth: "none", paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 104px)" }}>
           <div className="px-6" style={{ paddingTop: "calc(env(safe-area-inset-top) + 16px)" }}>
             <div style={{ fontSize: 22, fontWeight: 800, color: "#fff" }}>Search Results</div>
           </div>
           <div className="px-6 flex flex-col gap-2.5" style={{ marginTop: 16 }}>
             {resolvedResults.map((item) =>
               item.mediaType === "person" ? (
-                <SearchPersonRow key={`person-${item.id}`} item={item} />
+                <SearchPersonRow key={`person-${item.id}`} item={item} onNavigate={rememberSearchPosition} />
               ) : (
                 <SearchResultRow
                   key={mediaKey(item)}
                   item={item}
                   status={resolvedStatusMap[mediaKey(item)]}
                   menuOpen={menuOpenFor === mediaKey(item)}
+                  onNavigate={rememberSearchPosition}
                   onToggleMenu={() => setMenuOpenFor((v) => (v === mediaKey(item) ? null : mediaKey(item)))}
                   onSelectStatus={(statusId) => { selectStatus(item, statusId); setMenuOpenFor(null); }}
                 />
@@ -238,13 +290,13 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
           <input
             autoFocus
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => updateQuery(e.target.value)}
             placeholder="Search by title or actor"
             className="flex-1 bg-transparent outline-none"
             style={{ fontSize: 14.5, color: "#fff" }}
           />
           {trimmed !== "" && (
-            <button onClick={() => setQuery("")} className="flex-shrink-0 active:scale-90 transition">
+            <button onClick={() => updateQuery("")} className="flex-shrink-0 active:scale-90 transition">
               <Icon name="x" size={15} color={t.textDim} />
             </button>
           )}
