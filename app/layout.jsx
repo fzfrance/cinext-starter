@@ -7,6 +7,7 @@ import { MovieCustomizationsProvider } from "@/lib/movie-customizations-context"
 import { NavTintProvider } from "@/lib/nav-tint-context";
 import { NavVisibilityProvider } from "@/lib/nav-visibility-context";
 import SwipeBackGesture from "@/components/ui/SwipeBackGesture";
+import AppLaunchScreen from "@/components/ui/AppLaunchScreen";
 
 // NOTE on the phone-frame pattern: every prototype file wrapped its content
 // in a fixed 390x844 rounded rectangle to simulate a phone in the artifact
@@ -47,6 +48,7 @@ export default function RootLayout({ children }) {
     <html lang="en" suppressHydrationWarning>
       <body className="antialiased">
         <AuthProvider>
+          <AppLaunchScreen />
           <FavoritesProvider>
             <MovieFavoritesProvider>
               <ShowCustomizationsProvider>
