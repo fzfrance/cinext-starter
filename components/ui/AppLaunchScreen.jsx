@@ -69,7 +69,7 @@ export default function AppLaunchScreen() {
         {POSTERS.map((poster, index) => (
           <div className={styles.posterTile} key={poster.path}>
             <Image
-              src={tmdbImage(poster.path, "w500")}
+              src={tmdbImage(poster.path, "w300")}
               alt=""
               fill
               sizes="(max-width: 699px) 58vw, 28vw"
