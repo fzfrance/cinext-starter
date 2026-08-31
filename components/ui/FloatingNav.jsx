@@ -44,6 +44,13 @@ export default function FloatingNav({ tintColor }) {
   const router = useRouter();
   const tint = tintColor || accent;
 
+  // Warm the standalone Search route and its Explore payload while the nav
+  // is visible. The tap can then begin its slide immediately instead of
+  // waiting for a cold server-rendered Search page.
+  useEffect(() => {
+    router.prefetch("/search");
+  }, [router]);
+
   const activeIndex = Math.max(0, tabs.findIndex((tb) => pathname?.startsWith(tb.href)));
   const activeTab = tabs[activeIndex];
   // The selected state is one shared glass droplet. It starts moving on
@@ -310,7 +317,7 @@ export default function FloatingNav({ tintColor }) {
       <button
         type="button"
         aria-label="Search"
-        onClick={() => pushWithTransition(router, "/search", "[data-search-page]")}
+        onClick={() => pushWithTransition(router, "/search")}
         className="flex items-center justify-center active:scale-90 transition flex-shrink-0"
         style={{ ...glassStyle, width: SEARCH_SIZE, height: SEARCH_SIZE, borderRadius: "50%", boxSizing: "border-box" }}
       >
