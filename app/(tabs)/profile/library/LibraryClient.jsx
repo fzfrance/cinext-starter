@@ -16,6 +16,7 @@ import { getUserShows } from "@/lib/userShows";
 import { getUserMovies } from "@/lib/userMovies";
 import { getShowWatchSummary } from "@/lib/episodeWatches";
 import { resolveShowStatus } from "@/lib/statusResolver";
+import { shelfGenresForShow, shelfGenresForMovie } from "@/lib/library";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { themes, statusMeta, DEFAULT_ACCENT } from "@/lib/theme";
 
@@ -171,6 +172,9 @@ export default function LibraryClient() {
           originalTitle: result.originalTitle,
           posterPath: result.posterPath,
           genre: result.genre,
+          genres: result.genres ?? [],
+          keywords: result.keywords ?? [],
+          shelfGenres: shelfGenresForShow(result.genres, result.keywords),
           ...byShow[id],
           status: resolvedStatus,
           lastWatchedAt: summary[id]?.lastWatchedAt ?? null,
@@ -221,6 +225,8 @@ export default function LibraryClient() {
           originalTitle: result.originalTitle,
           posterPath: result.posterPath,
           genre: result.genre,
+          genres: result.genres ?? [],
+          shelfGenres: shelfGenresForMovie(result.genres),
           ...byMovie[id],
           lastWatchedAt: null,
           progress: undefined,
@@ -252,11 +258,11 @@ export default function LibraryClient() {
   // list — sorted alphabetically so the menu order doesn't shuffle as
   // data loads. Recomputed per type, so switching Shows/Movies never
   // leaves a genre selected that the other type doesn't even have.
-  const genres = [...new Set(activeLibrary.map((s) => s.genre).filter(Boolean))].sort();
+  const genres = [...new Set(activeLibrary.flatMap((s) => s.shelfGenres ?? []))].sort();
   const trimmedQuery = searchQuery.trim().toLowerCase();
   const filteredLibrary = activeLibrary.filter((s) => {
     if (libraryFilter !== "all" && s.status !== libraryFilter) return false;
-    if (genreFilter && s.genre !== genreFilter) return false;
+    if (genreFilter && !s.shelfGenres?.includes(genreFilter)) return false;
     if (trimmedQuery && !s.title.toLowerCase().includes(trimmedQuery) && !s.englishTitle?.toLowerCase().includes(trimmedQuery) && !s.originalTitle?.toLowerCase().includes(trimmedQuery)) return false;
     return true;
   });

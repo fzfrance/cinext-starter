@@ -14,7 +14,7 @@ import { getUserShows } from "@/lib/userShows";
 import { getUserMovies } from "@/lib/userMovies";
 import { getShowWatchSummary } from "@/lib/episodeWatches";
 import { resolveShowStatus } from "@/lib/statusResolver";
-import { primaryGenre, primaryGenreMovie, fallbackPalette } from "@/lib/library";
+import { shelfGenresForShow, shelfGenresForMovie, fallbackPalette } from "@/lib/library";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 
@@ -115,6 +115,7 @@ export default function LibraryClient() {
           posterPath: detail.posterPath,
           backdropPath: detail.backdropPath,
           genres: detail.genres ?? [],
+          keywords: detail.keywords ?? [],
           logoPath: null,
           tmdbRating: detail.tmdbRating,
           tagline: detail.tagline,
@@ -276,9 +277,8 @@ export default function LibraryClient() {
   const recommended = trackedShows.filter((s) => s.status === "watchlist" && s.tmdbRating != null).sort((a, b) => b.tmdbRating - a.tmdbRating).slice(0, 3);
   const genreGroups = Object.entries(
     filtered.reduce((acc, s) => {
-      const g = primaryGenre(s.genres);
-      if (!g) return acc;
-      (acc[g] ||= []).push(s);
+      const shelfGenres = shelfGenresForShow(s.genres, s.keywords);
+      for (const genre of shelfGenres) (acc[genre] ||= []).push(s);
       return acc;
     }, {})
   )
@@ -297,9 +297,8 @@ export default function LibraryClient() {
   const movieRecommended = trackedMovies.filter((s) => s.status === "watchlist" && s.tmdbRating != null).sort((a, b) => b.tmdbRating - a.tmdbRating).slice(0, 3);
   const movieGenreGroups = Object.entries(
     movieFiltered.reduce((acc, s) => {
-      const g = primaryGenreMovie(s.genres);
-      if (!g) return acc;
-      (acc[g] ||= []).push(s);
+      const shelfGenres = shelfGenresForMovie(s.genres);
+      for (const genre of shelfGenres) (acc[genre] ||= []).push(s);
       return acc;
     }, {})
   )

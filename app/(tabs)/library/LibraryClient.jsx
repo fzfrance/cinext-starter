@@ -17,8 +17,8 @@ import { getUserShows } from "@/lib/userShows";
 import { getUserMovies } from "@/lib/userMovies";
 import { getShowWatchSummary } from "@/lib/episodeWatches";
 import { resolveShowStatus } from "@/lib/statusResolver";
-import { getCollections } from "@/lib/collections";
-import { primaryGenre, primaryGenreMovie, fallbackPalette } from "@/lib/library";
+import { getCollections, createCollection as createCollectionRow } from "@/lib/collections";
+import { shelfGenresForShow, shelfGenresForMovie, fallbackPalette } from "@/lib/library";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 
@@ -122,6 +122,8 @@ export default function LibraryClient() {
   const [movieStatusFilter, setMovieStatusFilter] = useState("all");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [newCollectionOpen, setNewCollectionOpen] = useState(false);
+  const [newCollectionName, setNewCollectionName] = useState("");
 
   // Preserve the fully rendered tab payload across route unmounts. A revisit
   // paints this snapshot immediately while the normal effects below refresh
@@ -483,6 +485,28 @@ export default function LibraryClient() {
   const handleMovieFavoriteChange = (movieId, favorite) => setMovies((prev) => prev.map((s) => (s.id === movieId ? { ...s, favorite } : s)));
   const handleMovieRemoved = (movieId) => { setMovies((prev) => prev.filter((s) => s.id !== movieId)); handleClose(); };
 
+  const createCollection = () => {
+    if (!user) { router.push("/login"); return; }
+    const name = newCollectionName.trim();
+    if (!name) return;
+    setNewCollectionName("");
+    setNewCollectionOpen(false);
+    createCollectionRow(user.id, name)
+      .then((row) => {
+        setCollectionsRaw((prev) => [{
+          id: row.id,
+          name: row.name,
+          description: row.description ?? "",
+          coverStyle: row.cover_style ?? "boxset",
+          createdAt: row.created_at,
+          shared: false,
+          showIds: [],
+          movieIds: [],
+        }, ...prev]);
+      })
+      .catch(console.error);
+  };
+
   // Language preference is a presentation concern, not a data-fetch key.
   // Project localized titles from already-loaded neutral metadata so a
   // language setting resolving never empties/refetches the Library.
@@ -529,8 +553,8 @@ export default function LibraryClient() {
   const recommended = trackedShows.filter((s) => s.status === "watchlist" && s.tmdbRating != null).sort((a, b) => b.tmdbRating - a.tmdbRating).slice(0, 3);
   const genreGroups = Object.entries(
     filtered.reduce((acc, s) => {
-      let g = primaryGenre(s.genres, s.keywords);
-      if (!g) {
+      let shelfGenres = shelfGenresForShow(s.genres, s.keywords);
+      if (shelfGenres.length === 0) {
         // Casual, fully-unfiltered browsing keeps Drama-only shows off
         // the shelf entirely (primaryGenre's own comment — a giant
         // catch-all Drama aisle was explicitly not wanted there). But
@@ -541,9 +565,9 @@ export default function LibraryClient() {
         // from a search for its own title, reads as the show never got
         // added at all, not as "no aisle for it by design".
         if (statusFilter === "all" && !trimmedQuery) return acc;
-        g = s.genres?.includes("Drama") ? "Drama" : "Other";
+        shelfGenres = ["Other"];
       }
-      (acc[g] ||= []).push(s);
+      for (const genre of shelfGenres) (acc[genre] ||= []).push(s);
       return acc;
     }, {})
   )
@@ -578,15 +602,15 @@ export default function LibraryClient() {
   const movieRecommended = trackedMovies.filter((s) => s.status === "watchlist" && s.tmdbRating != null).sort((a, b) => b.tmdbRating - a.tmdbRating).slice(0, 3);
   const movieGenreGroups = Object.entries(
     movieFiltered.reduce((acc, s) => {
-      let g = primaryGenreMovie(s.genres);
-      if (!g) {
+      let shelfGenres = shelfGenresForMovie(s.genres);
+      if (shelfGenres.length === 0) {
         // Same reasoning as the shows block above — Drama-only movies
         // stay off the casual unfiltered shelf, but must still be
         // reachable once the user filters by status or searches.
         if (movieStatusFilter === "all" && !trimmedQuery) return acc;
-        g = s.genres?.includes("Drama") ? "Drama" : "Other";
+        shelfGenres = ["Other"];
       }
-      (acc[g] ||= []).push(s);
+      for (const genre of shelfGenres) (acc[genre] ||= []).push(s);
       return acc;
     }, {})
   )
@@ -746,11 +770,62 @@ export default function LibraryClient() {
             <div style={{ padding: "70px 0", textAlign: "center", color: t.textDim, fontSize: 13.5 }}>No collections yet.</div>
           ) : (
             collectionsRaw.map((c) => {
-              const byId = Object.fromEntries(localizedShows.map((s) => [s.id, s]));
-              const items = c.showIds.map((id) => byId[id]).filter(Boolean);
+              const showsById = Object.fromEntries(localizedShows.map((s) => [s.id, { ...s, mediaType: "tv" }]));
+              const moviesById = Object.fromEntries(localizedMovies.map((m) => [m.id, { ...m, mediaType: "movie" }]));
+              const items = [
+                ...c.showIds.map((id) => showsById[id]),
+                ...(c.movieIds ?? []).map((id) => moviesById[id]),
+              ].filter(Boolean);
               return <CollectionRow key={c.id} id={c.id} name={c.name} shared={c.shared} items={items} />;
             })
           )}
+        </div>
+      )}
+
+      {tab === "collections" && (
+        <button
+          onClick={() => setNewCollectionOpen(true)}
+          aria-label="New collection"
+          className="fixed rounded-full flex items-center justify-center active:scale-90 transition"
+          style={{
+            bottom: "calc(88px + env(safe-area-inset-bottom))",
+            right: "max(21px, env(safe-area-inset-right))",
+            width: 54,
+            height: 54,
+            zIndex: 101,
+            background: "rgba(20,16,12,0.92)",
+            border: `1.5px solid ${accent}`,
+            boxShadow: "0 10px 24px rgba(0,0,0,0.35)",
+            backdropFilter: "blur(20px)",
+            WebkitBackdropFilter: "blur(20px)",
+          }}
+        >
+          <Icon name="folderPlus" size={22} color={accent} />
+        </button>
+      )}
+
+      {newCollectionOpen && (
+        <div className="fixed inset-0 flex items-center justify-center px-8" style={{ zIndex: 110, background: "rgba(0,0,0,0.6)" }} onClick={() => setNewCollectionOpen(false)}>
+          <div className="w-full rounded-3xl" style={{ maxWidth: 420, padding: 22, background: "#1a1512", border: `1px solid ${t.glassBorder}`, boxShadow: "0 30px 60px rgba(0,0,0,0.6)" }} onClick={(event) => event.stopPropagation()}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: "#fff", marginBottom: 14 }}>New Collection</div>
+            <input
+              autoFocus
+              value={newCollectionName}
+              onChange={(event) => setNewCollectionName(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Enter") createCollection(); }}
+              placeholder="Collection name"
+              className="w-full rounded-2xl outline-none"
+              style={{ padding: "13px 16px", background: t.cardFill, border: `1px solid ${t.cardBorder}`, fontSize: 14.5, color: "#fff" }}
+            />
+            <div className="flex gap-2.5" style={{ marginTop: 18 }}>
+              <button onClick={() => { setNewCollectionOpen(false); setNewCollectionName(""); }} className="flex-1 rounded-full active:scale-95 transition" style={{ padding: 12, background: t.cardFill, border: `1px solid ${t.glassBorder}` }}>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: "#fff" }}>Cancel</span>
+              </button>
+              <button onClick={createCollection} disabled={!newCollectionName.trim()} className="flex-1 rounded-full active:scale-95 transition" style={{ padding: 12, background: newCollectionName.trim() ? accent : t.cardFill }}>
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: newCollectionName.trim() ? "#1a1108" : t.textDim }}>Create</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

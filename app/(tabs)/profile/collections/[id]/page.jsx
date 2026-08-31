@@ -377,7 +377,7 @@ export default function Page({ params }) {
             );
           })}
         </PosterGrid>
-        {detail.covers.length === 0 && <div style={{ padding: "20px 0", textAlign: "center", fontSize: 13, color: t.textDim }}>No shows in this collection yet.</div>}
+        {detail.covers.length === 0 && <div style={{ padding: "20px 0", textAlign: "center", fontSize: 13, color: t.textDim }}>No titles in this collection yet.</div>}
       </div>
 
       {/* tap-outside catcher for open menus */}

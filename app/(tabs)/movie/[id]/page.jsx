@@ -1,5 +1,5 @@
 import MovieDetailClient from "./MovieDetailClient";
-import { getMovieDetails, getMovieRecommendations, getMovieWatchProviders } from "@/lib/tmdb";
+import { getMovieDetails, getMovieRecommendations, getMovieWatchProviders, getLocalizedMovieVideos } from "@/lib/tmdb";
 import { CAST_GRADIENTS, initialsOf } from "@/lib/theme";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -96,11 +96,15 @@ async function getMovieData(movieId) {
   const overview = movie.overview ?? "";
 
   // Same trailer/bonus-video shaping as Show Detail's page.jsx, verbatim.
-  const rawVideos = (movie.videos?.results ?? []).filter((v) => v.site === "YouTube");
+  let rawVideos = (movie.videos?.results ?? []).filter((v) => v.site === "YouTube");
+  if (rawVideos.length === 0) {
+    rawVideos = (await getLocalizedMovieVideos(movieId, movie.original_language)).filter((v) => v.site === "YouTube");
+  }
   const BONUS_VIDEO_TYPES = ["Teaser", "Featurette", "Behind the Scenes", "Clip", "Bloopers", "Opening Credits"];
   const trailerVideos = rawVideos.filter((v) => v.type === "Trailer").sort((a, b) => (b.official ? 1 : 0) - (a.official ? 1 : 0));
   const bonusVideos = rawVideos.filter((v) => BONUS_VIDEO_TYPES.includes(v.type));
-  const videoList = [...trailerVideos, ...bonusVideos].slice(0, 10).map((v) => ({ key: v.key, name: v.name, type: v.type }));
+  const otherVideos = rawVideos.filter((v) => v.type !== "Trailer" && !BONUS_VIDEO_TYPES.includes(v.type));
+  const videoList = [...trailerVideos, ...bonusVideos, ...otherVideos].slice(0, 10).map((v) => ({ key: v.key, name: v.name, type: v.type }));
 
   const similar = (recommendations.results ?? []).slice(0, 12).map((s) => ({
     id: s.id,

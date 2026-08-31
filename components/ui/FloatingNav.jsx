@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Icon from "@/components/ui/Icon";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
+import { pushWithTransition } from "@/lib/viewTransition";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -40,6 +41,7 @@ const tabs = [
  */
 export default function FloatingNav({ tintColor }) {
   const pathname = usePathname();
+  const router = useRouter();
   const tint = tintColor || accent;
 
   const activeIndex = Math.max(0, tabs.findIndex((tb) => pathname?.startsWith(tb.href)));
@@ -62,7 +64,7 @@ export default function FloatingNav({ tintColor }) {
     window.clearTimeout(settleTimerRef.current);
     const direction = Math.sign(nextIndex - previousIndex);
     const distance = Math.abs(nextIndex - previousIndex);
-    const stretch = Math.min(0.68, 0.38 + (distance - 1) * 0.12);
+    const stretch = Math.min(0.46, 0.28 + (distance - 1) * 0.08);
 
     visualIndexRef.current = nextIndex;
     setIndicator({
@@ -73,7 +75,7 @@ export default function FloatingNav({ tintColor }) {
 
     settleTimerRef.current = window.setTimeout(() => {
       setIndicator({ left: nextIndex, width: 1, direction: 0 });
-    }, 230);
+    }, 105);
   }, []);
 
   useEffect(() => {
@@ -231,7 +233,7 @@ export default function FloatingNav({ tintColor }) {
                 bottom: 0,
                 left: `${(indicator.left / tabs.length) * 100}%`,
                 width: `${(indicator.width / tabs.length) * 100}%`,
-                transition: "left 360ms cubic-bezier(0.4, 0, 0.2, 1.4), width 360ms cubic-bezier(0.4, 0, 0.2, 1.4), border-radius 360ms cubic-bezier(0.4, 0, 0.2, 1.4)",
+                transition: "left 210ms cubic-bezier(0.22, 1, 0.36, 1), width 210ms cubic-bezier(0.22, 1, 0.36, 1)",
                 willChange: "left, width",
               }}
             >
@@ -301,17 +303,19 @@ export default function FloatingNav({ tintColor }) {
           above) so it stays put at the right edge regardless of scroll.
           Opens the full-screen search overlay (app/search) as a real
           route, not local component state, so it's reachable identically
-          from every screen this nav appears on. A plain Link keeps Next's
-          prefetched navigation immediate; wrapping router.push in the
-          native View Transitions API produced duplicate page snapshots on
-          mobile while React was committing the route asynchronously. */}
-      <Link
-        href="/search"
+          from every screen this nav appears on. The transition helper
+          waits for App Router to commit before taking the destination
+          snapshot, avoiding the duplicate-frame flicker that occurred
+          when startViewTransition wrapped a synchronous router.push. */}
+      <button
+        type="button"
+        aria-label="Search"
+        onClick={() => pushWithTransition(router, "/search", "[data-search-page]")}
         className="flex items-center justify-center active:scale-90 transition flex-shrink-0"
         style={{ ...glassStyle, width: SEARCH_SIZE, height: SEARCH_SIZE, borderRadius: "50%", boxSizing: "border-box" }}
       >
         <Icon name="search" size={20} color={t.text} />
-      </Link>
+      </button>
     </div>
   );
 }

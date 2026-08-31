@@ -39,8 +39,8 @@ export default function CollectionRow({ id, name, shared, items }) {
         <div className="flex" style={{ gap: 12, padding: "0 20px", width: "max-content" }}>
           {items.map((s) => (
             <Link
-              key={s.id}
-              href={`/show/${s.id}`}
+              key={`${s.mediaType ?? "tv"}-${s.id}`}
+              href={s.mediaType === "movie" ? `/movie/${s.id}` : `/show/${s.id}`}
               className="flex-shrink-0"
               style={{
                 width: POSTER_W,

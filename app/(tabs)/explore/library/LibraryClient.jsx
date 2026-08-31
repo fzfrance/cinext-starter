@@ -2,12 +2,20 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Icon from "@/components/ui/Icon";
 import GlassCircle from "@/components/ui/GlassCircle";
-import PosterCard from "@/components/ui/PosterCard";
-import PosterGrid from "@/components/ui/PosterGrid";
+import PosterArt from "@/components/ui/PosterArt";
+import MediaFavoriteBadge from "@/components/ui/MediaFavoriteBadge";
+import MediaStatusBadge from "@/components/ui/MediaStatusBadge";
 import YearSlider from "@/components/YearSlider";
+import { useAuth } from "@/lib/auth-context";
+import { useShowCustomizations } from "@/lib/show-customizations-context";
+import { getUserShows } from "@/lib/userShows";
+import { getUserMovies } from "@/lib/userMovies";
+import { getShowWatchSummary } from "@/lib/episodeWatches";
+import { resolveShowStatus } from "@/lib/statusResolver";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { hrefForMedia, mediaKey } from "@/lib/media";
 import { themes } from "@/lib/theme";
@@ -27,7 +35,7 @@ const MAX_YEAR = new Date().getFullYear();
 // Single-direction year filter now — yearFrom is the one draggable value
 // ("since {year}"), yearTo always stays the current year (no upper
 // bound), so the API's existing yearFrom/yearTo shape didn't need to change.
-const DEFAULT_FILTERS = { yearFrom: MIN_YEAR, yearTo: MAX_YEAR, platforms: [], languages: [] };
+const DEFAULT_FILTERS = { yearFrom: MIN_YEAR, yearTo: MAX_YEAR, platforms: [], languages: [], watchState: "all" };
 
 // Curated genre chip set. genreIds is passed straight through as
 // `with_genres` (comma = AND, pipe = OR) to /discover/tv, so a value like
@@ -168,11 +176,27 @@ function activeFilterCount(f) {
   if (f.yearFrom !== MIN_YEAR) n++;
   if (f.platforms.length > 0) n++;
   if (f.languages.length > 0) n++;
+  if (f.watchState !== "all") n++;
   return n;
+}
+
+function BrowsePosterCard({ item, status }) {
+  const { getCustomPoster } = useShowCustomizations();
+  return (
+    <Link href={hrefForMedia(item)} className="block active:scale-95 transition cursor-pointer">
+      <div className="relative rounded-xl overflow-hidden" style={{ aspectRatio: "2 / 3", boxShadow: "0 6px 16px rgba(0,0,0,0.45)" }}>
+        <PosterArt posterPath={item.posterPath} overrideSrc={item.mediaType === "movie" ? undefined : getCustomPoster(item.id)} alt={item.title} tmdbSize="w342" sizes="30vw" />
+        {status ? <MediaStatusBadge status={status} /> : <MediaFavoriteBadge item={item} source="ExploreBrowseAll:favoriteBadge" />}
+      </div>
+      <div className="mt-1.5 text-[11.5px] font-semibold text-white" style={{ lineHeight: 1.2, minHeight: "2.4em", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.title}</div>
+      <div className="text-[10px] mt-0.5" style={{ color: t.textDim }}>{[item.rating ? `★ ${item.rating}` : null, item.year].filter(Boolean).join(" · ")}</div>
+    </Link>
+  );
 }
 
 export default function LibraryClient({ providerLogos = {} }) {
   const router = useRouter();
+  const { user } = useAuth();
   const readableLanguages = useReadableLanguages();
   const restoredSessionRef = useRef(browseAllSession);
   const restoredSession = restoredSessionRef.current;
@@ -208,12 +232,59 @@ export default function LibraryClient({ providerLogos = {} }) {
   const [page, setPage] = useState(restoredSession?.page ?? 1);
   const [loading, setLoading] = useState(!restoredSession);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [resolvedStatusMap, setResolvedStatusMap] = useState({});
+  const [statusLoaded, setStatusLoaded] = useState(false);
   // Bumped every time the genre/filters reset-fetch below starts — loadMore
   // captures the generation it was called under and discards its response
   // if the user switched genre/filters again before that page came back,
   // so a stale page for the *previous* query can't get appended onto the
   // new one's freshly-cleared list.
   const generationRef = useRef(0);
+
+  useEffect(() => {
+    if (!user) { setResolvedStatusMap({}); setStatusLoaded(true); return; }
+    let cancelled = false;
+    setStatusLoaded(false);
+    (async () => {
+      const [byShow, byMovie] = await Promise.all([
+        getUserShows(user.id),
+        getUserMovies(user.id).catch((err) => { console.error(err); return {}; }),
+      ]);
+      if (cancelled) return;
+      const map = {};
+      for (const [id, entry] of Object.entries(byShow)) map[`tv-${id}`] = entry.status;
+      for (const [id, entry] of Object.entries(byMovie)) map[`movie-${id}`] = entry.status;
+      setResolvedStatusMap(map);
+      setStatusLoaded(true);
+
+      const ids = Object.keys(byShow).map(Number);
+      const resolvableIds = ids.filter((id) => byShow[id].status !== "paused" && byShow[id].status !== "drop");
+      if (resolvableIds.length === 0) return;
+      const summary = await getShowWatchSummary(user.id, resolvableIds);
+      const res = await fetch("/api/shows/library-detail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shows: resolvableIds.map((id) => ({ id, needsProgress: true, watched: summary[id]?.watchedKeys ?? [] })) }),
+      });
+      const { results } = await res.json();
+      if (cancelled) return;
+      const byId = Object.fromEntries(results.map((result) => [result.id, result]));
+      setResolvedStatusMap((prev) => {
+        const next = { ...prev };
+        for (const id of resolvableIds) {
+          const result = byId[id];
+          if (!result) continue;
+          next[`tv-${id}`] = resolveShowStatus({
+            explicitStatus: byShow[id].status,
+            watchedReleasedEpisodes: result.watchedReleasedEpisodes ?? 0,
+            releasedEpisodes: result.releasedEpisodes ?? 0,
+          });
+        }
+        return next;
+      });
+    })().catch((err) => { console.error(err); if (!cancelled) setStatusLoaded(true); });
+    return () => { cancelled = true; };
+  }, [user]);
 
   // Restores last visit's complete query once, before the first real fetch below
   // — `hydrated` gates that fetch so it runs exactly once with the
@@ -352,6 +423,7 @@ export default function LibraryClient({ providerLogos = {} }) {
   // active constraint on the grid underneath.
   useEffect(() => {
     if (!dropdownOpen) return;
+    if (draftFilters.watchState !== "all") { setDraftCount(null); return; }
     let cancelled = false;
     const handle = setTimeout(() => {
       fetchLibrary({ genre: activeGenre, ...draftFilters, contentType })
@@ -391,6 +463,11 @@ export default function LibraryClient({ providerLogos = {} }) {
   }, [activeGenre, contentType, appliedFilters, shows, totalCount, totalPages, page]);
 
   const filterCount = activeFilterCount(appliedFilters);
+  const visibleShows = appliedFilters.watchState !== "all" && !statusLoaded ? [] : shows.filter((item) => {
+    if (appliedFilters.watchState === "all") return true;
+    const completed = resolvedStatusMap[mediaKey(item)] === "completed";
+    return appliedFilters.watchState === "watched" ? completed : !completed;
+  });
 
   return (
     <>
@@ -445,23 +522,20 @@ export default function LibraryClient({ providerLogos = {} }) {
       )}
 
       <div className="px-6" style={{ marginTop: 18, marginBottom: 10, fontSize: 13, color: t.textDim }}>
-        {loading ? "Loading…" : `${totalCount} title${totalCount === 1 ? "" : "s"}`}
+        {loading || (appliedFilters.watchState !== "all" && !statusLoaded)
+          ? "Loading…"
+          : appliedFilters.watchState === "all"
+          ? `${totalCount} title${totalCount === 1 ? "" : "s"}`
+          : `${visibleShows.length} matching loaded title${visibleShows.length === 1 ? "" : "s"}`}
       </div>
 
       <div className="px-6" style={{ paddingBottom: 32 }} onClickCapture={rememberBrowsePosition}>
-        <PosterGrid>
-          {shows.map((s) => (
-            <PosterCard
-              key={mediaKey(s)}
-              show={{ ...s, title: resolveTitle(s, readableLanguages) }}
-              href={hrefForMedia(s)}
-              width="100%"
-              titlePlacement="below"
-              subtitle={[s.rating ? `★ ${s.rating}` : null, s.year].filter(Boolean).join(" · ")}
-            />
+        <div className="grid grid-cols-3 gap-x-3 gap-y-5">
+          {visibleShows.map((s) => (
+            <BrowsePosterCard key={mediaKey(s)} item={{ ...s, title: resolveTitle(s, readableLanguages) }} status={resolvedStatusMap[mediaKey(s)] ?? null} />
           ))}
-        </PosterGrid>
-        {!loading && shows.length === 0 && (
+        </div>
+        {!loading && statusLoaded && visibleShows.length === 0 && (
           <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: t.textDim }}>Nothing matches these filters.</div>
         )}
         {/* Sentinel for infinite scroll — invisible, just a trigger point
@@ -521,6 +595,23 @@ function FilterDropdown({ draftFilters, setDraftFilters, draftCount, providerLog
                   style={{ padding: "7px 14px", background: selected ? "#fff" : "rgba(255,255,255,0.05)", border: `1px solid ${selected ? "#fff" : t.cardBorder}` }}
                 >
                   <span style={{ fontSize: 12.5, fontWeight: 600, color: selected ? "#111" : "#fff" }}>{opt.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#fff", marginBottom: 10 }}>Watch Status</div>
+          <div className="flex gap-2" style={{ marginBottom: 22 }}>
+            {[{ id: "all", label: "All" }, { id: "watched", label: "Watched" }, { id: "notWatched", label: "Not Watched" }].map((opt) => {
+              const selected = draftFilters.watchState === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  onClick={() => setDraftFilters((prev) => ({ ...prev, watchState: opt.id }))}
+                  className="rounded-full active:scale-95 transition"
+                  style={{ padding: "7px 12px", background: selected ? "#fff" : "rgba(255,255,255,0.05)", border: `1px solid ${selected ? "#fff" : t.cardBorder}` }}
+                >
+                  <span style={{ fontSize: 12, fontWeight: 600, color: selected ? "#111" : "#fff", whiteSpace: "nowrap" }}>{opt.label}</span>
                 </button>
               );
             })}

@@ -257,7 +257,7 @@ export default function MovieWatchDateSheet({ current, movieReleaseDate, onClose
           disabled={!hasChanges}
           className="absolute flex items-center justify-center active:scale-95 transition"
           style={{
-            top: -18,
+            top: 18,
             right: 16,
             width: 40,
             height: 40,

@@ -6,6 +6,7 @@ import Icon from "@/components/ui/Icon";
 import GlassCircle from "@/components/ui/GlassCircle";
 import { useAuth } from "@/lib/auth-context";
 import { getCollections, createCollection as createCollectionRow, deleteCollection } from "@/lib/collections";
+import { hydrateCollectionPreviews } from "@/lib/collectionPreviews";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 import { CollectionBackdrop, backdropThemes, sortOptions, sortItems } from "./shared";
 import CollectionBoxSet from "@/components/CollectionBoxSet";
@@ -40,22 +41,21 @@ export default function Page() {
         backdropTheme: backdropThemes[i % backdropThemes.length],
         customImage: null,
         addedAt: new Date(c.createdAt).getTime(),
-        count: c.showIds.length,
+        count: c.showIds.length + (c.movieIds?.length ?? 0),
         showIds: c.showIds,
+        movieIds: c.movieIds ?? [],
         covers: [],
       }));
       setCollections(mapped);
 
-      // Only Collector Box Set needs real per-show art (posters/backdrops)
+      // Only Collector Box Set needs real per-title art (posters/backdrops)
       // — every other style is still the local gradient/theme placeholder,
       // so this fetch is skipped entirely for those.
-      const boxsetOnes = mapped.filter((c) => c.coverStyle === "boxset" && c.showIds.length > 0);
-      await Promise.all(boxsetOnes.map(async (c) => {
-        const res = await fetch(`/api/shows/batch?ids=${c.showIds.slice(0, 8).join(",")}`);
-        const { results } = await res.json();
-        if (cancelled) return;
-        setCollections((prev) => prev.map((p) => (p.id === c.id ? { ...p, covers: results } : p)));
-      }));
+      const boxsetOnes = mapped.filter((c) => c.coverStyle === "boxset" && c.count > 0);
+      const hydrated = await hydrateCollectionPreviews(boxsetOnes, 5);
+      if (cancelled) return;
+      const coversById = new Map(hydrated.map((c) => [c.id, c.covers]));
+      setCollections((prev) => prev.map((c) => coversById.has(c.id) ? { ...c, covers: coversById.get(c.id) } : c));
     }).catch(console.error);
     return () => { cancelled = true; };
   }, [user]);
@@ -74,9 +74,9 @@ export default function Page() {
     createCollectionRow(user.id, name)
       .then((row) => {
         setCollections((prev) => [...prev, {
-          id: row.id, name: row.name, description: row.description ?? "", coverStyle: null,
+          id: row.id, name: row.name, description: row.description ?? "", coverStyle: row.cover_style ?? "boxset",
           backdropTheme: backdropThemes[prev.length % backdropThemes.length],
-          customImage: null, addedAt: new Date(row.created_at).getTime(), count: 0, showIds: [], covers: [],
+          customImage: null, addedAt: new Date(row.created_at).getTime(), count: 0, showIds: [], movieIds: [], covers: [],
         }]);
       })
       .catch(console.error);

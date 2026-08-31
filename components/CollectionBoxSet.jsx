@@ -68,7 +68,7 @@ const SLOTS = [
   { key: "outerRight", z: 1, transform: "translate(calc(-50% + 90%), calc(-50% + 4%)) rotate(15deg) rotateY(-6deg) scale(0.76)", shadow: "0 7px 16px rgba(0,0,0,0.34)", brightness: 0.78 },
 ];
 
-function FannedPoster({ show, slot, width }) {
+function FannedPoster({ show, slot, width, centerX }) {
   const src = show?.posterPath ? tmdbImage(show.posterPath, "w500") : null;
   const base = show?.base || FALLBACK_BASE;
   const glow = show?.glow || FALLBACK_GLOW;
@@ -77,7 +77,7 @@ function FannedPoster({ show, slot, width }) {
     <div
       style={{
         position: "absolute",
-        left: "50%",
+        left: centerX,
         top: "50%",
         width: `${width}%`,
         aspectRatio: "2 / 3",
@@ -103,7 +103,7 @@ function FannedPoster({ show, slot, width }) {
   );
 }
 
-export default function CollectionBoxSet({ shows = [], compact = false, width }) {
+export default function CollectionBoxSet({ shows = [], compact = false, width, centerX = "50%" }) {
   const realShows = shows.filter(Boolean).slice(0, 5);
   // compact reverted to 37 and the background reverted to flat/neutral —
   // a further enlarge (to 43) + a tone-tinted background were tried and
@@ -133,7 +133,7 @@ export default function CollectionBoxSet({ shows = [], compact = false, width })
       `}</style>
 
       {realShows.map((show, i) => (
-        <FannedPoster key={show.id} show={show} slot={SLOTS[i]} width={posterWidth} />
+        <FannedPoster key={`${show.mediaType ?? "tv"}-${show.id}`} show={show} slot={SLOTS[i]} width={posterWidth} centerX={centerX} />
       ))}
 
       {/* soft cast shadow the whole arrangement sits on */}

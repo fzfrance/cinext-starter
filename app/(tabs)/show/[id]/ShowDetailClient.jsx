@@ -14,6 +14,7 @@ import StatusMenu, { statusMenuOptions } from "@/components/StatusMenu";
 import SeasonBanner from "@/components/SeasonBanner";
 import SeasonRatingScreen from "@/components/SeasonRatingScreen";
 import ShareRatingCard from "@/components/ShareRatingCard";
+import CollectionPickerCard from "@/components/CollectionPickerCard";
 import { useAuth } from "@/lib/auth-context";
 import { useFavorites } from "@/lib/favorites-context";
 import { useShowCustomizations } from "@/lib/show-customizations-context";
@@ -21,12 +22,13 @@ import { getEpisodeWatches, addEpisodeWatches, clearEpisodeWatches, syncEpisodeW
 import { getEpisodeSkips, setEpisodeSkipped as persistEpisodeSkipped } from "@/lib/episodeSkips";
 import { getUserShow, getUserShows, setShowStatus, removeUserShow, setWatchlistAndClearProgress, removeImplicitLibraryRow } from "@/lib/userShows";
 import { getCollections, createCollection, addShowToCollection, removeShowFromCollection } from "@/lib/collections";
+import { hydrateCollectionPreviews } from "@/lib/collectionPreviews";
 import { getSeasonRatings, saveSeasonRating, deleteSeasonRating, getAutoSeasonScore } from "@/lib/seasonRatings";
 import { getProfile } from "@/lib/profile";
 import { tmdbImage } from "@/lib/tmdb";
 import { resolveShowStatus } from "@/lib/statusResolver";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
-import { themes, DEFAULT_ACCENT, collectionPalette, tintColorForShow } from "@/lib/theme";
+import { themes, DEFAULT_ACCENT, tintColorForShow } from "@/lib/theme";
 import { useNavTint } from "@/lib/nav-tint-context";
 import { useNavVisibility } from "@/lib/nav-visibility-context";
 
@@ -653,15 +655,22 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    getCollections(user.id).then((rows) => {
+    getCollections(user.id).then(async (rows) => {
       if (cancelled) return;
-      setCollections(rows.map((c, i) => ({
+      const mapped = rows.map((c) => ({
         id: c.id,
         name: c.name,
-        count: c.showIds.length,
+        count: c.showIds.length + (c.movieIds?.length ?? 0),
         inShow: c.showIds.includes(showId),
-        ...collectionPalette[i % collectionPalette.length],
-      })));
+        showIds: c.showIds,
+        movieIds: c.movieIds ?? [],
+        covers: [],
+      }));
+      setCollections(mapped);
+      const hydrated = await hydrateCollectionPreviews(mapped, 5);
+      if (cancelled) return;
+      const coversById = new Map(hydrated.map((c) => [c.id, c.covers]));
+      setCollections((prev) => prev.map((c) => ({ ...c, covers: coversById.get(c.id) ?? c.covers })));
     }).catch(console.error);
     return () => { cancelled = true; };
   }, [user, showId]);
@@ -993,7 +1002,13 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     if (!user) { router.push("/login"); return; }
     const target = collections.find((c) => c.id === id);
     if (!target) return;
-    setCollections((cs) => cs.map((c) => c.id !== id ? c : { ...c, inShow: !c.inShow, count: c.inShow ? Math.max(0, c.count - 1) : c.count + 1 }));
+    setCollections((cs) => cs.map((c) => {
+      if (c.id !== id) return c;
+      const covers = c.inShow
+        ? (c.covers ?? []).filter((item) => !(item.mediaType === "tv" && item.id === showId))
+        : [{ id: showId, title: show.title, posterPath: show.posterPath, backdropPath: show.backdropPath, mediaType: "tv" }, ...(c.covers ?? [])].slice(0, 5);
+      return { ...c, covers, inShow: !c.inShow, count: c.inShow ? Math.max(0, c.count - 1) : c.count + 1 };
+    }));
     if (target.inShow) removeShowFromCollection(id, showId).catch(console.error);
     else addShowToCollection(id, showId).catch(console.error);
   };
@@ -1002,7 +1017,6 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     if (!user) { router.push("/login"); return; }
     const name = newCollectionName.trim();
     if (!name) return;
-    const palette = collectionPalette[collections.length % collectionPalette.length];
     setNewCollectionName("");
     setNewCollectionOpen(false);
     // Waits for the real row (needs its actual id for subsequent
@@ -1010,7 +1024,15 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     // Date.now()-keyed placeholder that Supabase writes would never match.
     createCollection(user.id, name)
       .then((row) => {
-        setCollections((cs) => [{ id: row.id, name: row.name, count: 1, inShow: true, ...palette }, ...cs]);
+        setCollections((cs) => [{
+          id: row.id,
+          name: row.name,
+          count: 1,
+          inShow: true,
+          showIds: [showId],
+          movieIds: [],
+          covers: [{ id: showId, title: show.title, posterPath: show.posterPath, backdropPath: show.backdropPath, mediaType: "tv" }],
+        }, ...cs]);
         return addShowToCollection(row.id, showId);
       })
       .catch(console.error);
@@ -1854,17 +1876,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                 {collections.length === 0 ? (
                   <div style={{ fontSize: 12.5, color: t.textDim, textAlign: "center", padding: "24px 0" }}>No collections yet.</div>
                 ) : collections.map((c) => (
-                  <button key={c.id} onClick={() => toggleCollection(c.id)} className="relative w-full rounded-2xl overflow-hidden active:scale-[0.98] transition text-left flex-shrink-0" style={{ height: 88 }}>
-                    <div style={{ position: "absolute", inset: 0, background: `linear-gradient(120deg, ${c.c1}40 0%, ${c.c2} 55%, ${c.c1}22 100%)` }} />
-                    <div className="absolute inset-0" style={{ background: "linear-gradient(0deg, rgba(0,0,0,0.35) 0%, transparent 60%)" }} />
-                    <div className="absolute left-4" style={{ bottom: 12 }}>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: "#fff" }}>{c.name}</div>
-                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", marginTop: 2 }}>{c.count} title{c.count === 1 ? "" : "s"}</div>
-                    </div>
-                    <div className="absolute flex items-center justify-center rounded-full" style={{ top: 12, right: 12, width: 26, height: 26, background: c.inShow ? accent : "rgba(0,0,0,0.45)", border: c.inShow ? "none" : "1.5px solid rgba(255,255,255,0.5)" }}>
-                      {c.inShow && <Icon name="check" size={13} color="#1a1108" strokeWidth={2.8} />}
-                    </div>
-                  </button>
+                  <CollectionPickerCard key={c.id} collection={c} accent={accent} onClick={() => toggleCollection(c.id)} />
                 ))}
               </div>
               <div style={{ height: 76 }} />

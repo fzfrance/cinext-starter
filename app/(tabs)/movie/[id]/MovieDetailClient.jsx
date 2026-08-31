@@ -12,16 +12,18 @@ import MovieRatingBanner from "@/components/MovieRatingBanner";
 import MovieRatingScreen from "@/components/MovieRatingScreen";
 import MovieShareRatingCard from "@/components/MovieShareRatingCard";
 import MovieImagePickerScreen from "@/components/MovieImagePickerScreen";
+import CollectionPickerCard from "@/components/CollectionPickerCard";
 import { useAuth } from "@/lib/auth-context";
 import { useMovieFavorites } from "@/lib/movie-favorites-context";
 import { useMovieCustomizations } from "@/lib/movie-customizations-context";
 import { getUserMovie, getUserMovies, setMovieStatus, removeUserMovie } from "@/lib/userMovies";
 import { getMovieRating, saveMovieRating, deleteMovieRating } from "@/lib/movieRatings";
 import { getCollections, createCollection, addMovieToCollection, removeMovieFromCollection } from "@/lib/collections";
+import { hydrateCollectionPreviews } from "@/lib/collectionPreviews";
 import { getProfile } from "@/lib/profile";
 import { tmdbImage } from "@/lib/tmdb";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
-import { themes, DEFAULT_ACCENT, collectionPalette, tintColorForShow } from "@/lib/theme";
+import { themes, DEFAULT_ACCENT, tintColorForShow } from "@/lib/theme";
 import { useNavTint } from "@/lib/nav-tint-context";
 import { useNavVisibility } from "@/lib/nav-visibility-context";
 
@@ -159,15 +161,22 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    getCollections(user.id).then((rows) => {
+    getCollections(user.id).then(async (rows) => {
       if (cancelled) return;
-      setCollections(rows.map((c, i) => ({
+      const mapped = rows.map((c) => ({
         id: c.id,
         name: c.name,
-        count: c.movieIds.length,
+        count: c.showIds.length + (c.movieIds?.length ?? 0),
         inShow: c.movieIds.includes(movieId),
-        ...collectionPalette[i % collectionPalette.length],
-      })));
+        showIds: c.showIds,
+        movieIds: c.movieIds ?? [],
+        covers: [],
+      }));
+      setCollections(mapped);
+      const hydrated = await hydrateCollectionPreviews(mapped, 5);
+      if (cancelled) return;
+      const coversById = new Map(hydrated.map((c) => [c.id, c.covers]));
+      setCollections((prev) => prev.map((c) => ({ ...c, covers: coversById.get(c.id) ?? c.covers })));
     }).catch(console.error);
     return () => { cancelled = true; };
   }, [user, movieId]);
@@ -176,7 +185,13 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
     if (!user) { router.push("/login"); return; }
     const target = collections.find((c) => c.id === id);
     if (!target) return;
-    setCollections((cs) => cs.map((c) => c.id !== id ? c : { ...c, inShow: !c.inShow, count: c.inShow ? Math.max(0, c.count - 1) : c.count + 1 }));
+    setCollections((cs) => cs.map((c) => {
+      if (c.id !== id) return c;
+      const covers = c.inShow
+        ? (c.covers ?? []).filter((item) => !(item.mediaType === "movie" && item.id === movieId))
+        : [{ id: movieId, title: movie.title, posterPath: movie.posterPath, backdropPath: movie.backdropPath, mediaType: "movie" }, ...(c.covers ?? [])].slice(0, 5);
+      return { ...c, covers, inShow: !c.inShow, count: c.inShow ? Math.max(0, c.count - 1) : c.count + 1 };
+    }));
     if (target.inShow) removeMovieFromCollection(id, movieId).catch(console.error);
     else addMovieToCollection(id, movieId).catch(console.error);
   };
@@ -185,12 +200,19 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
     if (!user) { router.push("/login"); return; }
     const name = newCollectionName.trim();
     if (!name) return;
-    const palette = collectionPalette[collections.length % collectionPalette.length];
     setNewCollectionName("");
     setNewCollectionOpen(false);
     createCollection(user.id, name)
       .then((row) => {
-        setCollections((cs) => [{ id: row.id, name: row.name, count: 1, inShow: true, ...palette }, ...cs]);
+        setCollections((cs) => [{
+          id: row.id,
+          name: row.name,
+          count: 1,
+          inShow: true,
+          showIds: [],
+          movieIds: [movieId],
+          covers: [{ id: movieId, title: movie.title, posterPath: movie.posterPath, backdropPath: movie.backdropPath, mediaType: "movie" }],
+        }, ...cs]);
         return addMovieToCollection(row.id, movieId);
       })
       .catch(console.error);
@@ -672,17 +694,7 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
                 {collections.length === 0 ? (
                   <div style={{ fontSize: 12.5, color: t.textDim, textAlign: "center", padding: "24px 0" }}>No collections yet.</div>
                 ) : collections.map((c) => (
-                  <button key={c.id} onClick={() => toggleCollection(c.id)} className="relative w-full rounded-2xl overflow-hidden active:scale-[0.98] transition text-left flex-shrink-0" style={{ height: 88 }}>
-                    <div style={{ position: "absolute", inset: 0, background: `linear-gradient(120deg, ${c.c1}40 0%, ${c.c2} 55%, ${c.c1}22 100%)` }} />
-                    <div className="absolute inset-0" style={{ background: "linear-gradient(0deg, rgba(0,0,0,0.35) 0%, transparent 60%)" }} />
-                    <div className="absolute left-4" style={{ bottom: 12 }}>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: "#fff" }}>{c.name}</div>
-                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", marginTop: 2 }}>{c.count} title{c.count === 1 ? "" : "s"}</div>
-                    </div>
-                    <div className="absolute flex items-center justify-center rounded-full" style={{ top: 12, right: 12, width: 26, height: 26, background: c.inShow ? accent : "rgba(0,0,0,0.45)", border: c.inShow ? "none" : "1.5px solid rgba(255,255,255,0.5)" }}>
-                      {c.inShow && <Icon name="check" size={13} color="#1a1108" strokeWidth={2.8} />}
-                    </div>
-                  </button>
+                  <CollectionPickerCard key={c.id} collection={c} accent={accent} onClick={() => toggleCollection(c.id)} />
                 ))}
               </div>
               <div style={{ height: 76 }} />

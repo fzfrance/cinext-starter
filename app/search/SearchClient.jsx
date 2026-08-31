@@ -116,12 +116,22 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
   const restoredSessionRef = useRef(searchSession);
   const restoredSession = restoredSessionRef.current;
   const resultsScrollRef = useRef(null);
+  const searchInputRef = useRef(null);
   const skipInitialSearchRef = useRef(Boolean(restoredSession?.query?.trim()));
 
   const [query, setQuery] = useState(restoredSession?.query ?? "");
   const [results, setResults] = useState(restoredSession?.results ?? []);
   const [loading, setLoading] = useState(false);
   const [menuOpenFor, setMenuOpenFor] = useState(null);
+
+  // Let the 240ms full-page opening transition finish before asking
+  // iPadOS/iOS to show the keyboard. Focusing during the slide resizes the
+  // visual viewport mid-animation, which made only the opening direction
+  // jump while the keyboard-free closing direction stayed smooth.
+  useEffect(() => {
+    const timer = window.setTimeout(() => searchInputRef.current?.focus(), 280);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   // Debounced live TMDB search — same pattern as Explore's own (waits for
   // a pause in typing, drops stale responses if the query changed
@@ -222,7 +232,7 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
   const trimmed = query.trim();
 
   return (
-    <div className="fixed inset-0 z-50" style={{ background: t.bg }}>
+    <div data-search-page className="fixed inset-0 z-50" style={{ background: t.bg }}>
       {/* The unchanged Explore experience (hero, genre chips, Trending
           Now, For You, Browse All) stays visible/scrollable behind the
           fixed bottom search bar whenever there's no query — this is the
@@ -288,7 +298,7 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
         <div className="flex-1 flex items-center gap-2.5 rounded-full" style={{ padding: "13px 18px", background: t.cardFill, border: `1px solid ${t.cardBorder}`, backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)" }}>
           <Icon name="search" size={16} color={t.textDim} />
           <input
-            autoFocus
+            ref={searchInputRef}
             value={query}
             onChange={(e) => updateQuery(e.target.value)}
             placeholder="Search by title or actor"

@@ -1,5 +1,5 @@
 import ShowDetailClient from "./ShowDetailClient";
-import { getShowDetails, getSeasonDetails, getShowRecommendations, getWatchProviders } from "@/lib/tmdb";
+import { getShowDetails, getSeasonDetails, getShowRecommendations, getWatchProviders, getLocalizedShowVideos } from "@/lib/tmdb";
 import { CAST_GRADIENTS, initialsOf } from "@/lib/theme";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -191,11 +191,15 @@ async function getShowData(showId) {
   // "Interview" type, but Featurette is the closest general bucket and
   // plenty of real interview videos get tagged that way. Capped at 10
   // total so an unusually video-heavy show doesn't produce an endless list.
-  const rawVideos = (show.videos?.results ?? []).filter((v) => v.site === "YouTube");
+  let rawVideos = (show.videos?.results ?? []).filter((v) => v.site === "YouTube");
+  if (rawVideos.length === 0) {
+    rawVideos = (await getLocalizedShowVideos(showId, show.original_language)).filter((v) => v.site === "YouTube");
+  }
   const BONUS_VIDEO_TYPES = ["Teaser", "Featurette", "Behind the Scenes", "Clip", "Bloopers", "Opening Credits"];
   const trailerVideos = rawVideos.filter((v) => v.type === "Trailer").sort((a, b) => (b.official ? 1 : 0) - (a.official ? 1 : 0));
   const bonusVideos = rawVideos.filter((v) => BONUS_VIDEO_TYPES.includes(v.type));
-  const videoList = [...trailerVideos, ...bonusVideos].slice(0, 10).map((v) => ({ key: v.key, name: v.name, type: v.type }));
+  const otherVideos = rawVideos.filter((v) => v.type !== "Trailer" && !BONUS_VIDEO_TYPES.includes(v.type));
+  const videoList = [...trailerVideos, ...bonusVideos, ...otherVideos].slice(0, 10).map((v) => ({ key: v.key, name: v.name, type: v.type }));
 
   const similar = (recommendations.results ?? []).slice(0, 12).map((s) => ({
     id: s.id,

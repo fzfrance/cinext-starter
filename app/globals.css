@@ -141,8 +141,8 @@ body {
    pseudo-elements. */
 ::view-transition-old(root),
 ::view-transition-new(root) {
-  animation-duration: 360ms;
-  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  animation-duration: 240ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 ::view-transition-old(root) {
@@ -172,6 +172,13 @@ html.vt-back::view-transition-new(root) {
 @keyframes cinext-enter-left {
   from { transform: translateX(-100%); }
   to { transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 1ms;
+  }
 }
 
 /* DVD case open overlay — the "tap the disc" hint fading in once the
