@@ -270,6 +270,7 @@ export default function LibraryClient() {
           posterPath: detail.posterPath,
           backdropPath: detail.backdropPath,
           genres: detail.genres ?? [],
+          keywords: detail.keywords ?? [],
           logoPath: null, // filled in by the separate logo-fetch effect below
           tmdbRating: detail.tmdbRating,
           tagline: detail.tagline,
@@ -528,7 +529,7 @@ export default function LibraryClient() {
   const recommended = trackedShows.filter((s) => s.status === "watchlist" && s.tmdbRating != null).sort((a, b) => b.tmdbRating - a.tmdbRating).slice(0, 3);
   const genreGroups = Object.entries(
     filtered.reduce((acc, s) => {
-      let g = primaryGenre(s.genres);
+      let g = primaryGenre(s.genres, s.keywords);
       if (!g) {
         // Casual, fully-unfiltered browsing keeps Drama-only shows off
         // the shelf entirely (primaryGenre's own comment — a giant

@@ -259,7 +259,7 @@ function SeeAllHeader({ title, count, onBack, right }) {
 const PILL_STYLE = { height: 30, padding: "0 13px", borderRadius: 999, display: "flex", alignItems: "center", background: "rgba(0,0,0,0.65)", border: "1px solid rgba(255,255,255,0.10)", fontSize: 12, fontWeight: 600, color: "#fff", whiteSpace: "nowrap" };
 const FOOTER_BG = "#131316";
 
-function InProgressGalleryCard({ item, onLongPress }) {
+function InProgressGalleryCard({ item, onLongPress, onMarkWatched }) {
   const router = useRouter();
   const longPress = useLongPress((rect) => onLongPress(item.show, rect));
   const epLabel = item.season != null && item.episode != null ? `S${String(item.season).padStart(2, "0")} · E${String(item.episode).padStart(2, "0")}` : null;
@@ -316,12 +316,21 @@ function InProgressGalleryCard({ item, onLongPress }) {
           {moreLeft > 0 && <div style={PILL_STYLE}>+{moreLeft}</div>}
         </div>
 
-        {/* Complete button — the original small floating mark, brought
-            back as-is rather than the bigger solid-white circle this
-            redesign pass had tried. */}
-        <div className="absolute flex items-center justify-center rounded-full" style={{ right: 12, bottom: 12, width: 36, height: 36, background: "rgba(255,255,255,0.10)" }}>
-          <Icon name="check" size={16} color="rgba(255,255,255,0.85)" strokeWidth={2.6} />
-        </div>
+        {/* A real action, independent of the card's Show Detail link. Its
+            appearance matches the unwatched check control in Show
+            Detail's Watch Next episode rows. */}
+        <button
+          type="button"
+          aria-label={`Mark ${item.show.title} episode ${item.episode} watched`}
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          onPointerCancel={(e) => e.stopPropagation()}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMarkWatched(item); }}
+          className="absolute flex items-center justify-center rounded-full active:scale-90 transition"
+          style={{ right: 12, bottom: 12, width: 32, height: 32, background: "rgba(255,255,255,0.10)", zIndex: 2 }}
+        >
+          <Icon name="check" size={14} color="rgba(255,255,255,0.4)" strokeWidth={2.4} />
+        </button>
       </div>
 
       {/* ---- Title section — its own dark block below the artwork,
@@ -347,7 +356,7 @@ function InProgressGalleryCard({ item, onLongPress }) {
 // second, smaller poster competing for attention on an already-compact
 // card just reads as clutter — the show's own title in the footer below
 // already identifies it.
-function InProgressCompactCard({ item, onLongPress }) {
+function InProgressCompactCard({ item, onLongPress, onMarkWatched }) {
   const router = useRouter();
   const longPress = useLongPress((rect) => onLongPress(item.show, rect));
   const moreLeft = item.episodesLeft != null ? item.episodesLeft - 1 : 0;
@@ -382,13 +391,18 @@ function InProgressCompactCard({ item, onLongPress }) {
           <div style={{ marginTop: 3, fontSize: 9, fontWeight: 600, letterSpacing: "0.08em", color: "rgba(255,255,255,0.7)", textTransform: "uppercase" }}>Episode {item.episode}</div>
         )}
       </div>
-      {/* Complete mark — bottom-right corner, a solid dark backing (not
-          the faint translucent-white fill used elsewhere) so the
-          checkmark stays legible against whatever the artwork/scrim
-          behind it happens to be. */}
-      <div className="absolute flex items-center justify-center rounded-full" style={{ right: 9, bottom: 9, width: 28, height: 28, background: "rgba(0,0,0,0.65)" }}>
-        <Icon name="check" size={13} color="#fff" strokeWidth={2.6} />
-      </div>
+      <button
+        type="button"
+        aria-label={`Mark ${item.show.title} episode ${item.episode} watched`}
+        onPointerDown={(e) => e.stopPropagation()}
+        onPointerUp={(e) => e.stopPropagation()}
+        onPointerCancel={(e) => e.stopPropagation()}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMarkWatched(item); }}
+        className="absolute flex items-center justify-center rounded-full active:scale-90 transition"
+        style={{ right: 9, bottom: 9, width: 32, height: 32, background: "rgba(255,255,255,0.10)", zIndex: 2 }}
+      >
+        <Icon name="check" size={14} color="rgba(255,255,255,0.4)" strokeWidth={2.4} />
+      </button>
       {item.progress != null && (
         <div className="absolute left-0 right-0 bottom-0" style={{ height: 3, background: "rgba(255,255,255,0.15)" }}>
           <div style={{ height: "100%", width: `${item.progress}%`, background: accent }} />
@@ -918,6 +932,10 @@ export default function Page() {
     landscapeImage: s.epPosterPath || s.backdropPath || s.posterPath,
     season: s.season,
     episode: s.episode,
+    epTitle: s.epTitle,
+    runtimeMin: s.epRuntime,
+    episodeAirDate: s.epAirDate,
+    caughtUp: s.caughtUp,
     // episodesLeft counts every unwatched aired episode INCLUDING this
     // "next up" one itself — the gallery card's "+N" pill means "how many
     // MORE beyond the one already shown", so that's episodesLeft - 1.
@@ -994,6 +1012,17 @@ export default function Page() {
   // fetched once the rating sheet actually opens, not on every hero
   // render.
   const [heroCast, setHeroCast] = useState([]);
+  const [inProgressRating, setInProgressRating] = useState(null);
+  const [inProgressCast, setInProgressCast] = useState([]);
+
+  const markInProgressWatchedAndRate = (item) => {
+    if (!user) { router.push("/login"); return; }
+    if (!item?.id || item.season == null || item.episode == null) return;
+    if (!item.caughtUp) {
+      addEpisodeWatches(user.id, item.id, [{ seasonNumber: item.season, episodeNumber: item.episode }]).catch(console.error);
+    }
+    setInProgressRating(item);
+  };
   // Long-press "change status" quick menu — any poster on this page can
   // set this, opening the same PosterQuickStatusMenu popup regardless of
   // which section the press happened in. `rect` is the pressed
@@ -1010,6 +1039,16 @@ export default function Page() {
       .catch(() => { if (!cancelled) setHeroCast([]); });
     return () => { cancelled = true; };
   }, [heroRatingOpen, heroShow?.showId]);
+
+  useEffect(() => {
+    if (!inProgressRating?.id) return;
+    let cancelled = false;
+    fetch(`/api/shows/${inProgressRating.id}/cast`)
+      .then((res) => res.json())
+      .then(({ cast }) => { if (!cancelled) setInProgressCast(cast ?? []); })
+      .catch(() => { if (!cancelled) setInProgressCast([]); });
+    return () => { cancelled = true; };
+  }, [inProgressRating?.id]);
 
   return (
     <>
@@ -1065,7 +1104,7 @@ export default function Page() {
             // generous spacing throughout.
             <div className="px-6 flex flex-col gap-6" style={{ marginTop: 16 }}>
               {inProgressList.map((item) => (
-                <InProgressGalleryCard key={item.id} item={item} onLongPress={handleLongPress} />
+                <InProgressGalleryCard key={item.id} item={item} onLongPress={handleLongPress} onMarkWatched={markInProgressWatchedAndRate} />
               ))}
             </div>
           )}
@@ -1521,7 +1560,7 @@ export default function Page() {
               {inProgressViewMode === "gallery" ? (
                 <div className="mt-3 pl-6 flex items-start gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
                   {inProgressRowList.map((item) => (
-                    <InProgressCompactCard key={item.id} item={item} onLongPress={handleLongPress} />
+                    <InProgressCompactCard key={item.id} item={item} onLongPress={handleLongPress} onMarkWatched={markInProgressWatchedAndRate} />
                   ))}
                   <div className="w-2 flex-shrink-0" />
                 </div>
@@ -1605,6 +1644,27 @@ export default function Page() {
           onClose={() => { setHeroRatingOpen(false); setRefreshToken((n) => n + 1); }}
           onSave={({ stars }) => {
             if (user && stars) rateLatestWatch(user.id, heroShow.showId, heroShow.season, heroShow.episode, stars).catch(console.error);
+            setRefreshToken((n) => n + 1);
+          }}
+        />
+      )}
+
+      {inProgressRating && (
+        <EpisodeRatingFlow
+          subject={{
+            eyebrow: `S${inProgressRating.season} E${inProgressRating.episode}`,
+            title: inProgressRating.epTitle || `Episode ${inProgressRating.episode}`,
+            posterPath: inProgressRating.show.posterPath,
+            runtimeMin: inProgressRating.runtimeMin,
+            episodeAirDate: inProgressRating.episodeAirDate,
+            showId: inProgressRating.id,
+            season: inProgressRating.season,
+            episode: inProgressRating.episode,
+          }}
+          cast={inProgressCast}
+          onClose={() => { setInProgressRating(null); setInProgressCast([]); setRefreshToken((n) => n + 1); }}
+          onSave={({ stars }) => {
+            if (user && stars) rateLatestWatch(user.id, inProgressRating.id, inProgressRating.season, inProgressRating.episode, stars).catch(console.error);
             setRefreshToken((n) => n + 1);
           }}
         />

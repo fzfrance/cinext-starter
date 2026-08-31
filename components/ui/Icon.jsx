@@ -95,6 +95,13 @@ export default function Icon({ name, size = 18, color = "#fff", strokeWidth = 1.
           <path d="M4 17l5-5 4 4 3-3 4 4" />
         </svg>
       );
+    case "link":
+      return (
+        <svg {...p}>
+          <path d="M10 13a5 5 0 0 0 7.54.54l2-2a5 5 0 0 0-7.07-7.07l-1.15 1.15" />
+          <path d="M14 11a5 5 0 0 0-7.54-.54l-2 2a5 5 0 0 0 7.07 7.07l1.15-1.15" />
+        </svg>
+      );
     case "sun":
       return (
         <svg {...p}>

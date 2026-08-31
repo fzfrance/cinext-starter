@@ -188,14 +188,31 @@ function Segmented({ value, onChange, options }) {
   );
 }
 
-// The shareable ticket card (opened from Profile's "My Ratings" row or
-// Show Detail's share button) + real share sheet: native share with the
-// rendered card image where supported, and an always-visible Save Image
-// button. The dedicated "Copy Link" button was removed per explicit
-// request; the public /s/[shareId] page it used to front-door still
-// exists and is still reachable via handleNativeShare's own URL fallback
-// (browsers whose Web Share API can't take files but can take a URL),
-// so ensureShareId is still needed here even without that button.
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Older iOS/Safari builds can expose Clipboard API but reject it;
+      // fall through to the selection-based copy path below.
+    }
+  }
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  document.body.appendChild(input);
+  input.select();
+  const copied = document.execCommand("copy");
+  input.remove();
+  if (!copied) throw new Error("Copy failed");
+}
+
+// The shareable ticket card (opened from Profile's "My Ratings" route or
+// Show Detail's share button), with separate save-image, public-link, and
+// native social-share actions.
 export default function ShareRatingCard({ userId, showId, showTitle, originalTitle, originalLanguage, season, manual, auto, backdropPath, username, onClose, onEdit }) {
   const [, setNavHidden] = useNavVisibility();
   useEffect(() => {
@@ -461,6 +478,20 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
     }
   };
 
+  const handleCopyLink = async () => {
+    setBusy("copy");
+    try {
+      const shareId = await ensureShareId(userId, showId, season.seasonNumber);
+      await copyText(`${window.location.origin}/s/${shareId}`);
+      flashToast("Link copied");
+    } catch (err) {
+      console.error(err);
+      flashToast("Couldn't copy the link.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   // Show the original-language title above the English one only when
   // they're genuinely different (a real international show) — not for
   // shows whose "original" title already IS the English one.
@@ -526,12 +557,6 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
   // wrapper. This is what actually keeps them visually locked to the
   // card instead of an independent fixed-width cap.
   const controlsW = EXPORT_W * previewScale;
-  // Share's own width is a SCREEN-width fraction (55-60vw), not a
-  // controlsW fraction — controlsW now tracks the card's own ~80-85vw
-  // width, and Share reading at "55-60% of THAT" would land well past the
-  // spec's actual intent (55-60% of the SCREEN). Capped so it never
-  // balloons on a wide viewport.
-  const shareW = Math.min(vw * 0.58, 280);
   const reviewNumberLabel = reviewNumber != null ? String(reviewNumber).padStart(5, "0") : null;
 
   return (
@@ -849,8 +874,8 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
       </div>
 
       {/* ---------------- Controls (outside the exported card) ---------------- */}
-      {/* Just two lightweight things now: the Poster/Backdrop segmented
-          toggle, and Share. Edit moved to the header's corner pencil icon;
+      {/* Poster/Backdrop plus the three export actions. Edit lives in the
+          header's corner pencil icon;
           the old "Back" text button is gone (the header's X covers that
           job now, plus tapping the backdrop already closes this screen).
           width: controlsW locks the Segmented control to the card's own
@@ -868,17 +893,18 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
           />
         </div>
 
-        {/* Share — the only export action now (Save Image removed per
-            explicit request: its direct-download path was the one most
-            exposed to the artwork-not-loaded-yet export bug renderCardPng
-            now guards against, and Share alone covers the same "get this
-            card out of the app" need). 55-60vw wide, 54-58px tall, kept
-            visually secondary to the card (same orange accent/outline,
-            just no longer the loudest thing on screen once the card grew). */}
-        <div className="flex items-center justify-center" style={{ marginTop: 16 }}>
-          <button onClick={handleNativeShare} disabled={busy != null} className="flex items-center justify-center rounded-full active:scale-95 transition" style={{ width: shareW, minHeight: 56, gap: 10, whiteSpace: "nowrap", background: `${accent}14`, border: `1.5px solid ${accent}`, boxShadow: `0 0 16px ${accent}1f`, opacity: busy ? 0.7 : 1 }}>
-            <Icon name="share" size={14} color={accent} />
-            <span style={{ fontSize: 13.5, fontWeight: 700, color: accent }}>{busy === "native" ? "Sharing…" : "Share"}</span>
+        <div className="grid grid-cols-3" style={{ marginTop: 16, gap: 8 }}>
+          <button onClick={handleSaveImage} disabled={busy != null} className="flex flex-col items-center justify-center rounded-2xl active:scale-95 transition" style={{ minWidth: 0, minHeight: 58, gap: 4, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", opacity: busy ? 0.7 : 1 }}>
+            <Icon name="image" size={15} color="#fff" />
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>{busy === "save" ? "Saving…" : "Save Image"}</span>
+          </button>
+          <button onClick={handleCopyLink} disabled={busy != null} className="flex flex-col items-center justify-center rounded-2xl active:scale-95 transition" style={{ minWidth: 0, minHeight: 58, gap: 4, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", opacity: busy ? 0.7 : 1 }}>
+            <Icon name="link" size={15} color="#fff" />
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>{busy === "copy" ? "Copying…" : "Copy Link"}</span>
+          </button>
+          <button onClick={handleNativeShare} disabled={busy != null} className="flex flex-col items-center justify-center rounded-2xl active:scale-95 transition" style={{ minWidth: 0, minHeight: 58, gap: 4, background: `${accent}14`, border: `1.5px solid ${accent}`, boxShadow: `0 0 16px ${accent}1f`, opacity: busy ? 0.7 : 1 }}>
+            <Icon name="share" size={15} color={accent} />
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: accent, whiteSpace: "nowrap" }}>{busy === "native" ? "Sharing…" : "Share"}</span>
           </button>
         </div>
       </div>

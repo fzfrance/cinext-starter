@@ -1189,7 +1189,8 @@ export default function Page() {
                   instead of a single fixed px), the label bumped up
                   slightly but stays clearly secondary, and the gap between
                   them tightened so they read as one unit. */}
-              <div className="px-6" style={{ marginTop: 22 }}>
+              <div className={`highlights-overview${personality ? "" : " highlights-overview-without-personality"}`}>
+              <div className="highlights-hours px-6" style={{ marginTop: 22 }}>
                 <div className="flex items-baseline" style={{ gap: 6 }}>
                   <span style={{ fontSize: "clamp(51px, 12vw, 64px)", fontWeight: 700, letterSpacing: "-0.04em", color: "#fff", lineHeight: 1 }}>{hours}</span>
                   <span style={{ fontSize: 22, fontWeight: 600, color: "rgba(255,255,255,0.62)" }}>hours watched</span>
@@ -1218,10 +1219,10 @@ export default function Page() {
                   (0 and 1) so they stack correctly by z-index rather than
                   relying on DOM order, since two positioned siblings need
                   that to paint in the right order. */}
-              {personality && (
-                <div className="px-6" style={{ marginTop: 18 }}>
-                  <div
-                    className="flex items-center rounded-2xl"
+                  {personality && (
+                    <div className="highlights-personality-wrap px-6" style={{ marginTop: 18 }}>
+                    <div
+                    className="highlights-personality-panel flex items-center rounded-2xl"
                     style={{
                       gap: 16.8,
                       padding: 22.5,
@@ -1247,11 +1248,13 @@ export default function Page() {
                       <div style={{ fontSize: 22.3, fontWeight: 700, color: "#fff", marginTop: 2 }}>{personality.name}</div>
                       <div style={{ fontSize: 12.5, color: t.textDim, marginTop: 2.8, lineHeight: 1.35 }}>{personality.description}</div>
                     </div>
-                  </div>
-                </div>
-              )}
+                    </div>
+                    </div>
+                  )}
+              </div>
 
-              {/* summary stat cards — colors sampled directly from a
+              <div className="highlights-stats-section px-6" style={{ marginTop: 14 }}>
+                  {/* summary stat cards — colors sampled directly from a
                   supplied reference image (statIconGold/statCardBg in
                   lib/theme.js), deliberately distinct from the app's usual
                   vibrant amber accent so this row reads as its own quieter
@@ -1266,7 +1269,7 @@ export default function Page() {
                   2-line-wrapping "Active Days" label), leaving visible
                   dead space below the shorter single-line labels in the
                   other 3 cards. Each card now sizes to its own content. */}
-              <div className="flex items-start gap-2.5 px-6 overflow-x-auto" style={{ marginTop: 14, scrollbarWidth: "none" }}>
+                  <div className="highlights-summary-stats flex items-start gap-2.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
                 {/* Widget scaled down another 5% on top of the previous
                     pass (width/padding/icon badge/border-radius/margins),
                     plus the number reduced another 10% on top of its own
@@ -1279,7 +1282,7 @@ export default function Page() {
                     its own independent ["Shows","Movies","Active Days",
                     "Rewatched"] tuple, not this one. */}
                 {[["episodes", monthEntries.length, "Episodes"], ["layers", uniqueShowCount, "Shows"], ["clapperboard", monthMovieEntries.length, "Movies"], ["refresh", rewatchCount, "Rewatched"]].map(([icon, n, l], i) => (
-                  <div key={i} className="flex-shrink-0 flex flex-col items-center text-center" style={{ width: 86.36, padding: "12.70px 11.29px", background: statCardBg, border: "1px solid rgba(255,255,255,0.05)", borderRadius: 12.23 }}>
+                  <div key={i} className="highlights-summary-stat flex-shrink-0 flex flex-col items-center text-center" style={{ width: 86.36, padding: "12.70px 11.29px", background: statCardBg, border: "1px solid rgba(255,255,255,0.05)", borderRadius: 12.23 }}>
                     <div className="flex items-center justify-center rounded-full flex-shrink-0" style={{ width: 37.62, height: 37.62, background: `${statIconGold}12` }}>
                       <Icon name={icon} size={16.93} color={accent} strokeWidth={1.4} />
                     </div>
@@ -1287,6 +1290,7 @@ export default function Page() {
                     <div style={{ fontSize: 10.26, fontWeight: 500, color: t.textDim, marginTop: 3.59, textAlign: "center", lineHeight: 1.2 }}>{l}</div>
                   </div>
                 ))}
+                  </div>
               </div>
 
               {/* top shows — one horizontal-scrolling row of large

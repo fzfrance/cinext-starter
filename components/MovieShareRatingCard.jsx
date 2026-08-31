@@ -119,6 +119,28 @@ function Segmented({ value, onChange, options }) {
   );
 }
 
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Older iOS/Safari builds can expose Clipboard API but reject it;
+      // fall through to the selection-based copy path below.
+    }
+  }
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  document.body.appendChild(input);
+  input.select();
+  const copied = document.execCommand("copy");
+  input.remove();
+  if (!copied) throw new Error("Copy failed");
+}
+
 export default function MovieShareRatingCard({ userId, movieId, movieTitle, originalTitle, originalLanguage, movie, manual, backdropPath, username, onClose, onEdit }) {
   const [, setNavHidden] = useNavVisibility();
   useEffect(() => {
@@ -318,6 +340,20 @@ export default function MovieShareRatingCard({ userId, movieId, movieTitle, orig
     }
   };
 
+  const handleCopyLink = async () => {
+    setBusy("copy");
+    try {
+      const shareId = await ensureMovieShareId(userId, movieId);
+      await copyText(`${window.location.origin}/s/${shareId}`);
+      flashToast("Link copied");
+    } catch (err) {
+      console.error(err);
+      flashToast("Couldn't copy the link.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const showOriginal = !!(
     originalTitle &&
     originalLanguage &&
@@ -362,7 +398,6 @@ export default function MovieShareRatingCard({ userId, movieId, movieTitle, orig
   const heightScale = availableH > 0 ? availableH / EXPORT_H : widthScale;
   const previewScale = Math.max(0.15, Math.min(1, widthScale, heightScale));
   const controlsW = EXPORT_W * previewScale;
-  const shareW = Math.min(vw * 0.58, 280);
   const reviewNumberLabel = reviewNumber != null ? String(reviewNumber).padStart(5, "0") : null;
 
   return (
@@ -525,10 +560,18 @@ export default function MovieShareRatingCard({ userId, movieId, movieTitle, orig
           />
         </div>
 
-        <div className="flex items-center justify-center" style={{ marginTop: 16 }}>
-          <button onClick={handleNativeShare} disabled={busy != null} className="flex items-center justify-center rounded-full active:scale-95 transition" style={{ width: shareW, minHeight: 56, gap: 10, whiteSpace: "nowrap", background: `${accent}14`, border: `1.5px solid ${accent}`, boxShadow: `0 0 16px ${accent}1f`, opacity: busy ? 0.7 : 1 }}>
-            <Icon name="share" size={14} color={accent} />
-            <span style={{ fontSize: 13.5, fontWeight: 700, color: accent }}>{busy === "native" ? "Sharing…" : "Share"}</span>
+        <div className="grid grid-cols-3" style={{ marginTop: 16, gap: 8 }}>
+          <button onClick={handleSaveImage} disabled={busy != null} className="flex flex-col items-center justify-center rounded-2xl active:scale-95 transition" style={{ minWidth: 0, minHeight: 58, gap: 4, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", opacity: busy ? 0.7 : 1 }}>
+            <Icon name="image" size={15} color="#fff" />
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>{busy === "save" ? "Saving…" : "Save Image"}</span>
+          </button>
+          <button onClick={handleCopyLink} disabled={busy != null} className="flex flex-col items-center justify-center rounded-2xl active:scale-95 transition" style={{ minWidth: 0, minHeight: 58, gap: 4, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", opacity: busy ? 0.7 : 1 }}>
+            <Icon name="link" size={15} color="#fff" />
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>{busy === "copy" ? "Copying…" : "Copy Link"}</span>
+          </button>
+          <button onClick={handleNativeShare} disabled={busy != null} className="flex flex-col items-center justify-center rounded-2xl active:scale-95 transition" style={{ minWidth: 0, minHeight: 58, gap: 4, background: `${accent}14`, border: `1.5px solid ${accent}`, boxShadow: `0 0 16px ${accent}1f`, opacity: busy ? 0.7 : 1 }}>
+            <Icon name="share" size={15} color={accent} />
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: accent, whiteSpace: "nowrap" }}>{busy === "native" ? "Sharing…" : "Share"}</span>
           </button>
         </div>
       </div>

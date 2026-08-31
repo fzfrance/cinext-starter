@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Icon from "@/components/ui/Icon";
@@ -31,11 +31,9 @@ const tabs = [
 
 /**
  * FloatingNav — the global bottom nav: a floating liquid-glass segmented
- * pill (Home/Highlights/Profile), each tab carrying its own static active
- * background (no shared/animated indicator moving between them — tapping
- * a different tab just swaps which one has that background on, instantly,
- * no sliding/morphing), plus a separate circular search button to its
- * right. `tintColor` (a hex color, e.g. a show's own accent from
+ * pill (Home/Library/Highlights/Profile), with a shared liquid-glass
+ * droplet that stretches between active tabs, plus a separate circular
+ * search button to its right. `tintColor` (a hex color, e.g. a show's own accent from
  * lib/theme.js's tintColorForShow) subtly colors the glass on both, so the
  * whole nav reads as belonging to whatever screen it's on. Defaults to the
  * app's own amber accent when no tintColor is given.
@@ -46,6 +44,45 @@ export default function FloatingNav({ tintColor }) {
 
   const activeIndex = Math.max(0, tabs.findIndex((tb) => pathname?.startsWith(tb.href)));
   const activeTab = tabs[activeIndex];
+  const fluidFilterId = `liquid-glow-${useId().replace(/:/g, "")}`;
+
+  // The selected state is one shared glass droplet. It starts moving on
+  // pointer-down, rather than waiting for the route to commit, so the nav
+  // acknowledges a tap immediately. The first phase moves most of the way
+  // while leaving a stretched trailing edge; the second lets surface
+  // tension pull the droplet back to one tab's width.
+  const [indicator, setIndicator] = useState({ left: activeIndex, width: 1, direction: 0 });
+  const [selectedIndex, setSelectedIndex] = useState(activeIndex);
+  const visualIndexRef = useRef(activeIndex);
+  const settleTimerRef = useRef(null);
+
+  const morphIndicatorTo = useCallback((nextIndex) => {
+    const previousIndex = visualIndexRef.current;
+    setSelectedIndex(nextIndex);
+    if (previousIndex === nextIndex) return;
+
+    window.clearTimeout(settleTimerRef.current);
+    const direction = Math.sign(nextIndex - previousIndex);
+    const distance = Math.abs(nextIndex - previousIndex);
+    const stretch = Math.min(0.68, 0.38 + (distance - 1) * 0.12);
+
+    visualIndexRef.current = nextIndex;
+    setIndicator({
+      left: direction > 0 ? nextIndex - stretch : nextIndex,
+      width: 1 + stretch,
+      direction,
+    });
+
+    settleTimerRef.current = window.setTimeout(() => {
+      setIndicator({ left: nextIndex, width: 1, direction: 0 });
+    }, 230);
+  }, []);
+
+  useEffect(() => {
+    morphIndicatorTo(activeIndex);
+  }, [activeIndex, morphIndicatorTo]);
+
+  useEffect(() => () => window.clearTimeout(settleTimerRef.current), []);
 
   // Collapses to a single small button on scroll-down. Deliberately does
   // NOT auto-expand again on scroll-up — once collapsed, it stays that way
@@ -68,15 +105,10 @@ export default function FloatingNav({ tintColor }) {
   // page's scroll position left behind.
   useEffect(() => { setCollapsed(false); lastScrollY.current = 0; }, [pathname]);
 
-  // Collapse/expand is now a plain two-state cross-fade (opacity + scale)
-  // between the full nav and the separate corner button below — no more
-  // shared element sliding/gliding between the active tab's position and
-  // the corner (that WAS the "liquid" motion being reported: a single
-  // absolute-positioned indicator animating its left/width/top/height with
-  // a spring easing). Each tab now carries its own static active
-  // background instead (see the per-tab Link below), so there's nothing
-  // that needs to visually travel anywhere when collapsing, and no
-  // hand-off choreography to get right.
+  // Collapse/expand is a plain two-state cross-fade (opacity + scale)
+  // between the full nav and the separate corner button below. The active
+  // droplet only moves inside the expanded pill; it never participates in
+  // the collapse hand-off, which keeps that state change predictable.
   //
   // The expanded width used to be a hardcoded 340px, sized to roughly
   // fit 4 tabs. On a narrow phone (iPhone SE at 375px, or any width once
@@ -189,27 +221,115 @@ export default function FloatingNav({ tintColor }) {
             transition: `${glassStyle.transition}, opacity 220ms ease, transform 220ms ease`,
           }}
         >
-          {/* No shared/animated element behind the tabs — each one carries
-              its own static active background+border (via the `active`
-              flag right below), swapped instantly on navigation. Nothing
-              here slides, morphs, or moves position between tabs. */}
-          {tabs.map((tab) => {
-            const active = pathname?.startsWith(tab.href);
+          {/* The goo filter belongs only to the absolute background layer.
+              Link content is rendered in separate z-indexed wrappers below,
+              so icons and text never inherit filtering or backdrop blur. */}
+          <svg aria-hidden="true" width="0" height="0" className="absolute">
+            <defs>
+              <filter
+                id={fluidFilterId}
+                x="-35%"
+                y="-55%"
+                width="170%"
+                height="210%"
+                colorInterpolationFilters="sRGB"
+              >
+                <feGaussianBlur
+                  in="SourceGraphic"
+                  stdDeviation="10"
+                  result="blur"
+                />
+                <feColorMatrix
+                  in="blur"
+                  mode="matrix"
+                  values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 19 -9"
+                  result="goo"
+                />
+                <feComposite in="SourceGraphic" in2="goo" operator="atop" />
+              </filter>
+            </defs>
+          </svg>
+
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute"
+            style={{ left: 8, right: 8, top: 7, bottom: 7 }}
+          >
+            <div
+              className="menu-active-indicator absolute"
+              style={{
+                top: 0,
+                bottom: 0,
+                left: `${(indicator.left / tabs.length) * 100}%`,
+                width: `${(indicator.width / tabs.length) * 100}%`,
+                filter: `url(#${fluidFilterId})`,
+                transition: "left 360ms cubic-bezier(0.4, 0, 0.2, 1.4), width 360ms cubic-bezier(0.4, 0, 0.2, 1.4), border-radius 360ms cubic-bezier(0.4, 0, 0.2, 1.4)",
+                willChange: "left, width",
+              }}
+            >
+              {/* Multiple smooth source shapes give the alpha-threshold
+                  filter real material to merge. A lone pill would simply
+                  composite back into the same geometric pill. */}
+              <div
+                className="absolute inset-0"
+                style={{
+                  borderRadius: 30,
+                  background: "rgba(255,255,255,0.13)",
+                  border: "1px solid rgba(255,255,255,0.16)",
+                  borderTopColor: "rgba(255,255,255,0.72)",
+                  boxShadow: "0 8px 18px rgba(0,0,0,0.28), 0 2px 7px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.24)",
+                  backdropFilter: "blur(12px)",
+                  WebkitBackdropFilter: "blur(12px)",
+                }}
+              />
+              <div
+                className="absolute rounded-full"
+                style={{
+                  width: indicator.direction === 0 ? 22 : 30,
+                  height: indicator.direction === 0 ? 22 : 30,
+                  top: indicator.direction === 0 ? "54%" : "50%",
+                  left: indicator.direction > 0 ? -7 : indicator.direction < 0 ? "auto" : "12%",
+                  right: indicator.direction < 0 ? -7 : indicator.direction > 0 ? "auto" : "auto",
+                  transform: "translateY(-50%)",
+                  background: "rgba(255,255,255,0.14)",
+                  backdropFilter: "blur(12px)",
+                  WebkitBackdropFilter: "blur(12px)",
+                  transition: "width 280ms cubic-bezier(0.4, 0, 0.2, 1.4), height 280ms cubic-bezier(0.4, 0, 0.2, 1.4), left 280ms cubic-bezier(0.4, 0, 0.2, 1.4), right 280ms cubic-bezier(0.4, 0, 0.2, 1.4)",
+                }}
+              />
+              <div
+                className="absolute rounded-full"
+                style={{
+                  width: 14,
+                  height: 14,
+                  right: indicator.direction < 0 ? "auto" : 5,
+                  left: indicator.direction < 0 ? 5 : "auto",
+                  bottom: -2,
+                  background: "rgba(255,255,255,0.16)",
+                  transition: "left 280ms cubic-bezier(0.4, 0, 0.2, 1.4), right 280ms cubic-bezier(0.4, 0, 0.2, 1.4)",
+                }}
+              />
+            </div>
+          </div>
+
+          {tabs.map((tab, index) => {
+            const active = index === selectedIndex;
             return (
               <Link
                 key={tab.href}
                 href={tab.href}
-                // flex:"1 1 0" — every tab is an exact equal-width slot
-                // (no per-content padding-driven sizing). No background/
-                // border on the active state at all now, per explicit
-                // request — the icon/text color swap alone (amber vs.
-                // dim white below) is the only active/inactive cue.
-                className="relative flex flex-col items-center gap-1 active:scale-95 transition"
+                aria-current={active ? "page" : undefined}
+                onPointerDown={() => morphIndicatorTo(index)}
+                // flex:"1 1 0" — every tab is an exact equal-width slot,
+                // keeping the shared droplet aligned at every nav width.
+                className="relative flex items-center justify-center active:scale-95 transition"
                 style={{ flex: "1 1 0", minWidth: 0, padding: "7px 0" }}
               >
-                <Icon name={tab.icon} size={20} color={active ? accent : "rgba(255,255,255,0.75)"} />
-                <span style={{ fontSize: 10.5, fontWeight: 600, color: active ? accent : "rgba(255,255,255,0.75)" }}>
-                  {tab.label}
+                <span className="relative z-10 flex flex-col items-center gap-1">
+                  <Icon name={tab.icon} size={20} color={active ? accent : "rgba(255,255,255,0.75)"} />
+                  <span style={{ fontSize: 10.5, fontWeight: 600, color: active ? accent : "rgba(255,255,255,0.75)" }}>
+                    {tab.label}
+                  </span>
                 </span>
               </Link>
             );

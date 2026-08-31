@@ -1,9 +1,15 @@
 .launch {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100svh;
   z-index: 10000;
   overflow: hidden;
   isolation: isolate;
+  contain: strict;
+  overscroll-behavior: none;
   background: #020302;
   opacity: 1;
   transition: opacity 520ms cubic-bezier(0.4, 0, 0.2, 1), visibility 520ms;
@@ -17,15 +23,17 @@
 
 .posterCanvas {
   position: absolute;
-  top: -38vh;
-  right: -39vw;
-  bottom: -38vh;
-  left: -39vw;
+  top: 50%;
+  left: 50%;
+  width: 178vw;
+  width: 178svw;
+  height: 176vh;
+  height: 176svh;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-content: center;
   gap: 10px;
-  transform: rotate(7deg) scale(1.04) translateZ(0);
+  transform: translate3d(-50%, -50%, 0) rotate(7deg) scale(1.04);
   transform-origin: center;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
@@ -138,13 +146,13 @@
 
 @media (min-width: 700px) {
   .posterCanvas {
-    top: -56vh;
-    right: -17vw;
-    bottom: -56vh;
-    left: -17vw;
+    width: 134vw;
+    width: 134svw;
+    height: 212vh;
+    height: 212svh;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 13px;
-    transform: rotate(6deg) scale(1.02) translateZ(0);
+    transform: translate3d(-50%, -50%, 0) rotate(6deg) scale(1.02);
   }
 
   .posterTile:nth-child(3n + 1),
@@ -167,10 +175,10 @@
 
 @media (orientation: landscape) and (max-height: 600px) {
   .posterCanvas {
-    top: -110vh;
-    right: -10vw;
-    bottom: -110vh;
-    left: -10vw;
+    width: 120vw;
+    width: 120svw;
+    height: 320vh;
+    height: 320svh;
     grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 

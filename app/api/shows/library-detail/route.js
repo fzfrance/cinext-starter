@@ -62,6 +62,11 @@ async function resolveShow({ id, needsProgress, watched, skipped }) {
     // resolver (lib/library.js's primaryGenre/GENRE_PRIORITY), which needs
     // every tag a show carries, not just the first one `genre` above uses.
     genres: (show.genres ?? []).map((g) => g.name),
+    // TMDB's TV genre taxonomy has no Horror, Thriller, Romance, History,
+    // Music, or standalone Science Fiction/Fantasy entries. Keywords let
+    // the client normalize shows into the same user-facing shelf names as
+    // movies without pretending every Mystery show is Horror.
+    keywords: (show.keywords?.results ?? show.keywords?.keywords ?? []).map((keyword) => keyword.name),
     // TMDB's own rating, shown raw (not halved/normalized) — backs the
     // Library shelf's "Highly Recommended" row.
     tmdbRating: show.vote_average ?? null,
