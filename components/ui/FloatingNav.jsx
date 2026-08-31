@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Icon from "@/components/ui/Icon";
@@ -44,8 +44,6 @@ export default function FloatingNav({ tintColor }) {
 
   const activeIndex = Math.max(0, tabs.findIndex((tb) => pathname?.startsWith(tb.href)));
   const activeTab = tabs[activeIndex];
-  const fluidFilterId = `liquid-glow-${useId().replace(/:/g, "")}`;
-
   // The selected state is one shared glass droplet. It starts moving on
   // pointer-down, rather than waiting for the route to commit, so the nav
   // acknowledges a tap immediately. The first phase moves most of the way
@@ -221,35 +219,6 @@ export default function FloatingNav({ tintColor }) {
             transition: `${glassStyle.transition}, opacity 220ms ease, transform 220ms ease`,
           }}
         >
-          {/* The goo filter belongs only to the absolute background layer.
-              Link content is rendered in separate z-indexed wrappers below,
-              so icons and text never inherit filtering or backdrop blur. */}
-          <svg aria-hidden="true" width="0" height="0" className="absolute">
-            <defs>
-              <filter
-                id={fluidFilterId}
-                x="-35%"
-                y="-55%"
-                width="170%"
-                height="210%"
-                colorInterpolationFilters="sRGB"
-              >
-                <feGaussianBlur
-                  in="SourceGraphic"
-                  stdDeviation="10"
-                  result="blur"
-                />
-                <feColorMatrix
-                  in="blur"
-                  mode="matrix"
-                  values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 19 -9"
-                  result="goo"
-                />
-                <feComposite in="SourceGraphic" in2="goo" operator="atop" />
-              </filter>
-            </defs>
-          </svg>
-
           <div
             aria-hidden="true"
             className="pointer-events-none absolute"
@@ -262,7 +231,6 @@ export default function FloatingNav({ tintColor }) {
                 bottom: 0,
                 left: `${(indicator.left / tabs.length) * 100}%`,
                 width: `${(indicator.width / tabs.length) * 100}%`,
-                filter: `url(#${fluidFilterId})`,
                 transition: "left 360ms cubic-bezier(0.4, 0, 0.2, 1.4), width 360ms cubic-bezier(0.4, 0, 0.2, 1.4), border-radius 360ms cubic-bezier(0.4, 0, 0.2, 1.4)",
                 willChange: "left, width",
               }}
@@ -271,10 +239,10 @@ export default function FloatingNav({ tintColor }) {
                 className="absolute inset-0"
                 style={{
                   borderRadius: 30,
-                  background: "rgba(255,255,255,0.13)",
-                  border: "1px solid rgba(255,255,255,0.16)",
-                  borderTopColor: "rgba(255,255,255,0.72)",
-                  boxShadow: "0 8px 18px rgba(0,0,0,0.28), 0 2px 7px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.24)",
+                  background: "rgba(12,12,15,0.72)",
+                  border: "1px solid rgba(255,255,255,0.07)",
+                  borderTopColor: "rgba(255,255,255,0.11)",
+                  boxShadow: "0 5px 14px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.06)",
                   backdropFilter: "blur(12px)",
                   WebkitBackdropFilter: "blur(12px)",
                 }}
