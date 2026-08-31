@@ -39,7 +39,7 @@ export default function MediaStatusBadge({ status }) {
   return (
     <div
       className="absolute flex items-center justify-center"
-      style={{ top: 6, right: 6, width: 22, height: 22, borderRadius: "50%", background: "rgba(0,0,0,0.6)" }}
+      style={{ top: 6, right: 6, width: 22, height: 22, borderRadius: "50%", background: "rgba(0,0,0,0.6)", zIndex: 5 }}
     >
       <Icon name={icon} size={12} color={accent} />
     </div>

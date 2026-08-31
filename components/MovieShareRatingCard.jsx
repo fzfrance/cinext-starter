@@ -156,6 +156,8 @@ export default function MovieShareRatingCard({ userId, movieId, movieTitle, orig
   const [atmoRGB, setAtmoRGB] = useState([26, 22, 16]);
   const [reviewNumber, setReviewNumber] = useState(null);
   const [busy, setBusy] = useState(null);
+  const exportBlobRef = useRef(null);
+  const [exportReady, setExportReady] = useState(false);
   const [toast, setToast] = useState("");
   const [vw, setVw] = useState(390);
   const [vh, setVh] = useState(844);
@@ -271,6 +273,7 @@ export default function MovieShareRatingCard({ userId, movieId, movieTitle, orig
         }
       })
     );
+    await Promise.all(restores.map(([img]) => img.decode?.().catch(() => {})));
     return () => {
       restores.forEach(([img, src, srcset]) => {
         if (srcset != null) img.setAttribute("srcset", srcset);
@@ -279,13 +282,21 @@ export default function MovieShareRatingCard({ userId, movieId, movieTitle, orig
     };
   };
 
-  const renderCardPng = async () => {
-    const { toPng } = await import("html-to-image");
+  const renderCardBlob = async () => {
+    const { toBlob } = await import("html-to-image");
     if (document.fonts?.ready) await document.fonts.ready;
     await waitForImages(cardRef.current);
     const restoreImages = await inlineImagesAsDataUrls(cardRef.current);
     try {
-      return await toPng(cardRef.current, { width: EXPORT_W, height: EXPORT_H, pixelRatio: 1, backgroundColor: "#000" });
+      const options = { width: EXPORT_W, height: EXPORT_H, pixelRatio: 1, backgroundColor: "#000" };
+      let blob;
+      try {
+        blob = await toBlob(cardRef.current, options);
+      } catch {
+        blob = await toBlob(cardRef.current, { ...options, skipFonts: true });
+      }
+      if (!blob) throw new Error("Rating card image generation returned no image");
+      return blob;
     } finally {
       restoreImages();
     }
@@ -294,10 +305,10 @@ export default function MovieShareRatingCard({ userId, movieId, movieTitle, orig
   const handleNativeShare = async () => {
     setBusy("native");
     try {
-      const dataUrl = await renderCardPng();
+      const blob = exportBlobRef.current;
+      if (!blob) { flashToast("Preparing image…"); return; }
       const shareText = `${movieTitle}: ${score.toFixed(1)}/10 on Cinext`;
       if (navigator.canShare) {
-        const blob = await (await fetch(dataUrl)).blob();
         const file = new File([blob], "cinext-rating.png", { type: "image/png" });
         if (navigator.canShare({ files: [file] })) {
           await navigator.share({ files: [file], title: movieTitle, text: shareText });
@@ -320,9 +331,9 @@ export default function MovieShareRatingCard({ userId, movieId, movieTitle, orig
   const handleSaveImage = async () => {
     setBusy("save");
     try {
-      const dataUrl = await renderCardPng();
+      const blob = exportBlobRef.current;
+      if (!blob) { flashToast("Preparing image…"); return; }
       if (navigator.canShare) {
-        const blob = await (await fetch(dataUrl)).blob();
         const file = new File([blob], "cinext-rating.png", { type: "image/png" });
         if (navigator.canShare({ files: [file] })) {
           await navigator.share({ files: [file] });
@@ -331,8 +342,12 @@ export default function MovieShareRatingCard({ userId, movieId, movieTitle, orig
       }
       const link = document.createElement("a");
       link.download = `cinext-${movieTitle.replace(/\s+/g, "-").toLowerCase()}-movie.png`;
-      link.href = dataUrl;
+      const objectUrl = URL.createObjectURL(blob);
+      link.href = objectUrl;
+      document.body.appendChild(link);
       link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
     } catch (err) {
       if (err?.name !== "AbortError") { console.error(err); flashToast("Couldn't save the image."); }
     } finally {
@@ -378,6 +393,25 @@ export default function MovieShareRatingCard({ userId, movieId, movieTitle, orig
     return () => { cancelled = true; };
   }, [movieId, readableLanguages]);
   const titleLogoUrl = !titleLogoFailed && titleLogoPath ? tmdbImage(titleLogoPath, "w500") : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    exportBlobRef.current = null;
+    setExportReady(false);
+    const timer = window.setTimeout(() => {
+      renderCardBlob()
+        .then((blob) => {
+          if (cancelled) return;
+          exportBlobRef.current = blob;
+          setExportReady(true);
+        })
+        .catch((err) => {
+          if (!cancelled) console.error("Couldn't prepare movie rating card image:", err);
+        });
+    }, 120);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageType, activeImagePath, titleLogoUrl, atmoRGB, reviewNumber]);
 
   // Redesigned preview hierarchy — card first, everything else lightweight
   // and secondary. Same values as ShareRatingCard.jsx's own identical
@@ -561,17 +595,17 @@ export default function MovieShareRatingCard({ userId, movieId, movieTitle, orig
         </div>
 
         <div className="grid grid-cols-3" style={{ marginTop: 16, gap: 8 }}>
-          <button onClick={handleSaveImage} disabled={busy != null} className="flex flex-col items-center justify-center rounded-2xl active:scale-95 transition" style={{ minWidth: 0, minHeight: 58, gap: 4, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", opacity: busy ? 0.7 : 1 }}>
+          <button onClick={handleSaveImage} disabled={busy != null || !exportReady} className="flex flex-col items-center justify-center rounded-2xl active:scale-95 transition" style={{ minWidth: 0, minHeight: 58, gap: 4, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", opacity: busy || !exportReady ? 0.7 : 1 }}>
             <Icon name="image" size={15} color="#fff" />
-            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>{busy === "save" ? "Saving…" : "Save Image"}</span>
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>{!exportReady ? "Preparing…" : busy === "save" ? "Saving…" : "Save Image"}</span>
           </button>
           <button onClick={handleCopyLink} disabled={busy != null} className="flex flex-col items-center justify-center rounded-2xl active:scale-95 transition" style={{ minWidth: 0, minHeight: 58, gap: 4, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", opacity: busy ? 0.7 : 1 }}>
             <Icon name="link" size={15} color="#fff" />
             <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>{busy === "copy" ? "Copying…" : "Copy Link"}</span>
           </button>
-          <button onClick={handleNativeShare} disabled={busy != null} className="flex flex-col items-center justify-center rounded-2xl active:scale-95 transition" style={{ minWidth: 0, minHeight: 58, gap: 4, background: `${accent}14`, border: `1.5px solid ${accent}`, boxShadow: `0 0 16px ${accent}1f`, opacity: busy ? 0.7 : 1 }}>
+          <button onClick={handleNativeShare} disabled={busy != null || !exportReady} className="flex flex-col items-center justify-center rounded-2xl active:scale-95 transition" style={{ minWidth: 0, minHeight: 58, gap: 4, background: `${accent}14`, border: `1.5px solid ${accent}`, boxShadow: `0 0 16px ${accent}1f`, opacity: busy || !exportReady ? 0.7 : 1 }}>
             <Icon name="share" size={15} color={accent} />
-            <span style={{ fontSize: 10.5, fontWeight: 700, color: accent, whiteSpace: "nowrap" }}>{busy === "native" ? "Sharing…" : "Share"}</span>
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: accent, whiteSpace: "nowrap" }}>{!exportReady ? "Preparing…" : busy === "native" ? "Sharing…" : "Share"}</span>
           </button>
         </div>
       </div>

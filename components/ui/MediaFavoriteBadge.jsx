@@ -21,7 +21,7 @@ export default function MediaFavoriteBadge({ item, source = "unknown" }) {
       type="button"
       onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFavorite(item.id, source); }}
       className="absolute flex items-center justify-center active:scale-90 transition"
-      style={{ top: 6, right: 6, width: 22, height: 22, borderRadius: "50%", background: "rgba(0,0,0,0.5)" }}
+      style={{ top: 6, right: 6, width: 22, height: 22, borderRadius: "50%", background: "rgba(0,0,0,0.5)", zIndex: 5 }}
     >
       <Icon name="heart" size={13} color="#e0567a" />
     </button>

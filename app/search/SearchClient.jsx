@@ -124,15 +124,6 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
   const [loading, setLoading] = useState(false);
   const [menuOpenFor, setMenuOpenFor] = useState(null);
 
-  // Let the 240ms full-page opening transition finish before asking
-  // iPadOS/iOS to show the keyboard. Focusing during the slide resizes the
-  // visual viewport mid-animation, which made only the opening direction
-  // jump while the keyboard-free closing direction stayed smooth.
-  useEffect(() => {
-    const timer = window.setTimeout(() => searchInputRef.current?.focus(), 280);
-    return () => window.clearTimeout(timer);
-  }, []);
-
   // Debounced live TMDB search — same pattern as Explore's own (waits for
   // a pause in typing, drops stale responses if the query changed
   // mid-flight). /search/multi (movies-as-content-type plan) returns
@@ -287,6 +278,7 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
           underneath. */}
       <div className="fixed left-0 right-0 flex items-center gap-2.5 px-4" style={{ bottom: 0, paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 6px)", paddingTop: 12 }}>
         <button
+          onPointerDown={() => searchInputRef.current?.blur()}
           onClick={() => backWithTransition(router)}
           className="flex items-center justify-center rounded-full overflow-hidden active:scale-90 transition flex-shrink-0"
           style={{ width: 50, height: 50, background: t.cardFill, border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)" }}
