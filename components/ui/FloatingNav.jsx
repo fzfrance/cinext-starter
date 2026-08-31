@@ -140,13 +140,13 @@ export default function FloatingNav({ tintColor }) {
   // Liquid-glass surface — simplified to a plain flat translucent fill,
   // no tint/gradient layers (the earlier diagonal sheen + per-show tint
   // wash read as busy rather than "simple glass"). Just strong blur, one
-  // flat dark base (~15% more transparent than before: 0.34 -> 0.29), and
+  // flat dark base, and
   // thin neutral inset highlight/shadow lines along the top/bottom edge
   // for a real glass-edge feel.
   const glassStyle = {
-    background: "rgba(8,8,10,0.29)",
-    border: "1px solid rgba(255,255,255,0.10)",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.10), inset 0 -1px 0 rgba(0,0,0,0.3)",
+    background: "rgba(4,4,6,0.68)",
+    border: "1px solid rgba(255,255,255,0.09)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -1px 0 rgba(0,0,0,0.48), 0 12px 32px rgba(0,0,0,0.28)",
     backdropFilter: "blur(24px)",
     WebkitBackdropFilter: "blur(24px)",
     transition: "background 400ms ease, border-color 400ms ease, box-shadow 400ms ease",
@@ -267,9 +267,6 @@ export default function FloatingNav({ tintColor }) {
                 willChange: "left, width",
               }}
             >
-              {/* Multiple smooth source shapes give the alpha-threshold
-                  filter real material to merge. A lone pill would simply
-                  composite back into the same geometric pill. */}
               <div
                 className="absolute inset-0"
                 style={{
@@ -280,33 +277,6 @@ export default function FloatingNav({ tintColor }) {
                   boxShadow: "0 8px 18px rgba(0,0,0,0.28), 0 2px 7px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.24)",
                   backdropFilter: "blur(12px)",
                   WebkitBackdropFilter: "blur(12px)",
-                }}
-              />
-              <div
-                className="absolute rounded-full"
-                style={{
-                  width: indicator.direction === 0 ? 22 : 30,
-                  height: indicator.direction === 0 ? 22 : 30,
-                  top: indicator.direction === 0 ? "54%" : "50%",
-                  left: indicator.direction > 0 ? -7 : indicator.direction < 0 ? "auto" : "12%",
-                  right: indicator.direction < 0 ? -7 : indicator.direction > 0 ? "auto" : "auto",
-                  transform: "translateY(-50%)",
-                  background: "rgba(255,255,255,0.14)",
-                  backdropFilter: "blur(12px)",
-                  WebkitBackdropFilter: "blur(12px)",
-                  transition: "width 280ms cubic-bezier(0.4, 0, 0.2, 1.4), height 280ms cubic-bezier(0.4, 0, 0.2, 1.4), left 280ms cubic-bezier(0.4, 0, 0.2, 1.4), right 280ms cubic-bezier(0.4, 0, 0.2, 1.4)",
-                }}
-              />
-              <div
-                className="absolute rounded-full"
-                style={{
-                  width: 14,
-                  height: 14,
-                  right: indicator.direction < 0 ? "auto" : 5,
-                  left: indicator.direction < 0 ? 5 : "auto",
-                  bottom: -2,
-                  background: "rgba(255,255,255,0.16)",
-                  transition: "left 280ms cubic-bezier(0.4, 0, 0.2, 1.4), right 280ms cubic-bezier(0.4, 0, 0.2, 1.4)",
                 }}
               />
             </div>
