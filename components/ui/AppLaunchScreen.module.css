@@ -89,7 +89,7 @@
 
 .markWrap {
   position: relative;
-  width: clamp(142px, 39.6vw, 198px);
+  width: clamp(121px, 33.66vw, 168px);
   aspect-ratio: 1506 / 1564;
   margin-bottom: -18px;
 }
