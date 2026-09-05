@@ -35,6 +35,11 @@ import {
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
 const profileFavoritesSessionCache = new Map();
+// The profile row is a preview, not the full Favorites screen. Keep its
+// metadata request bounded so a large library cannot hold the visible row
+// hostage to dozens of TMDB requests; 12 covers the widest supported tablet
+// layout with a little room for scrolling.
+const PROFILE_FAVORITE_SHOW_PREVIEW_LIMIT = 12;
 
 // Two-cover blended backdrop for collection cards — distinct from
 // PosterArt's single-cover gradient, no shared equivalent.
@@ -233,7 +238,7 @@ export default function Page() {
       setShowFavoritesLoading(false);
     }
     if (favoritesCtxLoading) { if (!cached?.shows) setShowFavoritesLoading(true); return; }
-    const ids = favoriteEntries.map((entry) => entry.id);
+    const ids = favoriteEntries.slice(0, PROFILE_FAVORITE_SHOW_PREVIEW_LIMIT).map((entry) => entry.id);
     if (ids.length === 0) {
       setShowFavorites([]);
       setShowFavoritesLoading(false);
@@ -242,14 +247,15 @@ export default function Page() {
     }
     let cancelled = false;
     setShowFavoritesLoading(true);
-    fetch(`/api/shows/batch?ids=${ids.join(",")}`)
+    fetch(`/api/shows/batch?ids=${ids.join(",")}`, { cache: "no-store" })
       .then((res) => {
         if (!res.ok) throw new Error(`Favorite shows failed (${res.status})`);
         return res.json();
       })
       .then(({ results }) => {
+        if (!Array.isArray(results)) throw new Error("Favorite shows response was invalid");
         if (cancelled) return;
-        const addedAtById = Object.fromEntries(favoriteEntries.map((entry) => [entry.id, entry.addedAt]));
+        const addedAtById = Object.fromEntries(favoriteEntries.slice(0, PROFILE_FAVORITE_SHOW_PREVIEW_LIMIT).map((entry) => [entry.id, entry.addedAt]));
         const shows = (results ?? []).map((show) => ({ ...show, addedAt: addedAtById[show.id] }));
         setShowFavorites(shows);
         profileFavoritesSessionCache.set(user.id, { ...profileFavoritesSessionCache.get(user.id), shows });
