@@ -55,11 +55,9 @@ const DEFAULT_FILTERS = { yearFrom: MIN_YEAR, yearTo: MAX_YEAR, platforms: [], l
 //   Romance                 -> 18 (Drama — TMDB TV shows with romance are almost always tagged Drama)
 const GENRES = [
   { name: "All", genreIds: null },
-  { name: "Drama", genreIds: "18" },
   { name: "Action", genreIds: "10759" },
   { name: "Comedy", genreIds: "35" },
   { name: "Thriller", genreIds: "80|9648" },
-  { name: "Crime", genreIds: "80" },
   { name: "Mystery", genreIds: "9648" },
   { name: "Sci-Fi", genreIds: "10765" },
   { name: "Fantasy", genreIds: "10765" },
@@ -78,11 +76,9 @@ const GENRES = [
 // applies here.
 const MOVIE_GENRES = [
   { name: "All", genreIds: null },
-  { name: "Drama", genreIds: "18" },
   { name: "Action", genreIds: "28" },
   { name: "Comedy", genreIds: "35" },
   { name: "Thriller", genreIds: "53" },
-  { name: "Crime", genreIds: "80" },
   { name: "Mystery", genreIds: "9648" },
   { name: "Sci-Fi", genreIds: "878" },
   { name: "Fantasy", genreIds: "14" },
