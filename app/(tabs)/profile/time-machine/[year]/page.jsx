@@ -18,6 +18,27 @@ import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
 
+// A historical year can contain enough distinct titles to make one large
+// batch URL slow or reject. Resolve in small independent chunks so one bad
+// TMDB response cannot turn the entire year's list into an empty state.
+async function fetchBatchResults(path, ids) {
+  if (ids.length === 0) return [];
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 20) chunks.push(ids.slice(i, i + 20));
+  const responses = await Promise.all(chunks.map(async (chunk) => {
+    try {
+      const response = await fetch(`${path}?ids=${chunk.join(",")}`, { cache: "no-store" });
+      if (!response.ok) return [];
+      const payload = await response.json();
+      return Array.isArray(payload?.results) ? payload.results : [];
+    } catch (err) {
+      console.error(`Failed to load Time Machine media batch (${path}):`, err);
+      return [];
+    }
+  }));
+  return responses.flat();
+}
+
 // TV/Movie badge for this page specifically — deliberately NOT
 // lib/media.js's shared badgeForMedia (that one uses "ticket" for movies,
 // the icon Search's own mixed rows use). Here the movie icon is the same
@@ -160,8 +181,8 @@ export default function Page() {
       const movieIds = [...lastMovieDate.keys()];
 
       const [showResults, movieResults] = await Promise.all([
-        showIds.length ? fetch(`/api/shows/batch?ids=${showIds.join(",")}`).then((r) => r.json()).then((d) => d.results) : [],
-        movieIds.length ? fetch(`/api/movies/batch?ids=${movieIds.join(",")}`).then((r) => r.json()).then((d) => d.results) : [],
+        fetchBatchResults("/api/shows/batch", showIds),
+        fetchBatchResults("/api/movies/batch", movieIds),
       ]);
       if (cancelled) return;
 
