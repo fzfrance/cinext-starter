@@ -25,17 +25,20 @@ async function fetchBatchResults(path, ids) {
   if (ids.length === 0) return [];
   const chunks = [];
   for (let i = 0; i < ids.length; i += 20) chunks.push(ids.slice(i, i + 20));
-  const responses = await Promise.all(chunks.map(async (chunk) => {
+  const responses = [];
+  // Keep chunks sequential: a large historical year should not fan out into
+  // dozens of simultaneous TMDB requests and get every title rate-limited.
+  for (const chunk of chunks) {
     try {
       const response = await fetch(`${path}?ids=${chunk.join(",")}`, { cache: "no-store" });
-      if (!response.ok) return [];
+      if (!response.ok) { responses.push([]); continue; }
       const payload = await response.json();
-      return Array.isArray(payload?.results) ? payload.results : [];
+      responses.push(Array.isArray(payload?.results) ? payload.results : []);
     } catch (err) {
       console.error(`Failed to load Time Machine media batch (${path}):`, err);
-      return [];
+      responses.push([]);
     }
-  }));
+  }
   return responses.flat();
 }
 
@@ -186,9 +189,21 @@ export default function Page() {
       ]);
       if (cancelled) return;
 
+      const showById = new Map(showResults.map((show) => [String(show.id), show]));
+      const movieById = new Map(movieResults.map((movie) => [String(movie.id), movie]));
+      // Keep the watch record visible even when TMDB temporarily has no
+      // metadata for an ID. The detail route remains usable, and the
+      // placeholder makes the missing enrichment recoverable rather than
+      // presenting a misleading empty year.
       const merged = [
-        ...showResults.map((s) => ({ ...s, mediaType: "tv", watchedAt: lastShowDate.get(s.id) })),
-        ...movieResults.map((m) => ({ ...m, mediaType: "movie", watchedAt: lastMovieDate.get(m.id) })),
+        ...showIds.map((id) => ({
+          ...(showById.get(String(id)) ?? { id: Number(id), title: "Watched TV show", posterPath: null }),
+          mediaType: "tv", watchedAt: lastShowDate.get(id) ?? lastShowDate.get(Number(id)),
+        })),
+        ...movieIds.map((id) => ({
+          ...(movieById.get(String(id)) ?? { id: Number(id), title: "Watched movie", posterPath: null }),
+          mediaType: "movie", watchedAt: lastMovieDate.get(id) ?? lastMovieDate.get(Number(id)),
+        })),
       ].sort((a, b) => (b.watchedAt ?? "").localeCompare(a.watchedAt ?? ""));
 
       setItems(merged);
