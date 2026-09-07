@@ -1315,206 +1315,146 @@ export default function Page() {
 
           {layoutReady && isMobile && monthStatus === "ready" && monthEntries.length > 0 && (
             <>
-              {/* headline stat — same concise "N hours watched" copy, just
-                  a stronger size hierarchy: the number is the dominant
-                  element now (clamp so it scales with viewport width
-                  instead of a single fixed px), the label bumped up
-                  slightly but stays clearly secondary, and the gap between
-                  them tightened so they read as one unit. */}
-              <div className={`highlights-overview${personality ? "" : " highlights-overview-without-personality"}`}>
-              <div className="highlights-hours px-6" style={{ marginTop: 22 }}>
-                <div className="flex items-baseline" style={{ gap: 6 }}>
-                  <span style={{ fontSize: "clamp(51px, 12vw, 64px)", fontWeight: 700, letterSpacing: "-0.04em", color: "#fff", lineHeight: 1 }}>{hours}</span>
-                  <span style={{ fontSize: 22, fontWeight: 600, color: "rgba(255,255,255,0.62)" }}>hours watched</span>
+              <div
+                className={`highlights-overview${personality ? "" : " highlights-overview-without-personality"}`}
+                data-hl-ambient={defaultAmbientPath || undefined}
+              >
+                <div className="highlights-hours-stack">
+                  <div className="highlights-stat-widget">
+                    <div className="highlights-hours">
+                      <span className="highlights-hours-n">{hours}</span>
+                      <span className="highlights-hours-label">hours watched</span>
+                    </div>
+                    <div className="highlights-summary-stats" style={{ scrollbarWidth: "none" }}>
+                      {[["episodes", monthEntries.length, "Episodes"], ["tv", uniqueShowCount, "Shows"], ["clapperboard", monthMovieEntries.length, "Movies"], ["refresh", rewatchCount, "Rewatched"]].map(([icon, n, l], i) => (
+                        <div key={i} className="highlights-summary-stat">
+                          <div className="highlights-summary-stat-icon">
+                            <Icon name={icon} size={15} color={accent} strokeWidth={1.4} />
+                          </div>
+                          <div className="highlights-summary-stat-n">{n}</div>
+                          <div className="highlights-summary-stat-l" style={{ color: t.textDim }}>{l}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              </div>
 
-              {/* TV personality — was sized at ~1.56x the original card
-                  (1.3x, then another 20% on top); scaled back down 10%
-                  from that (padding, icon badge, icon, and the name text
-                  together, so it still reads as one card shrinking, not
-                  just smaller text) plus a new "YOUR TV PERSONALITY"
-                  eyebrow label above the name. The description line below
-                  the name is reduced a further 30% off its own prior
-                  size, independent of that 10% — called out as its own
-                  size rather than following the card-wide scale.
-                  Surface refined to a "liquid glass" treatment (soft
-                  diagonal tint, blur, hairline border, bigger radius, a
-                  faint inset highlight + a wide soft shadow instead of a
-                  hard one) so this stays the visual focus point of the
-                  page relative to the quieter stat cards below — same
-                  content, same padding/gap/text sizes, just the card's
-                  own surface. The icon's amber glow sits behind the badge
-                  in its own absolutely-positioned layer, oversized and
-                  centered on it; both the glow and the badge are
-                  `position: relative`/`absolute` with explicit z-index
-                  (0 and 1) so they stack correctly by z-index rather than
-                  relying on DOM order, since two positioned siblings need
-                  that to paint in the right order. */}
-                  {personality && (
-                    <div className="highlights-personality-wrap px-6" style={{ marginTop: 18 }}>
+                {personality && (
+                  <div className="highlights-personality-wrap px-6" style={{ marginTop: 18 }}>
                     <div
-                    className="highlights-personality-panel flex items-center rounded-2xl"
-                    style={{
-                      gap: 16.8,
-                      padding: 22.5,
-                      background: "linear-gradient(135deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018))",
-                      backdropFilter: "blur(24px)",
-                      WebkitBackdropFilter: "blur(24px)",
-                      border: "1px solid rgba(255,255,255,0.09)",
-                      borderRadius: 28,
-                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 48px rgba(0,0,0,0.28)",
-                    }}
-                  >
-                    <div className="relative flex items-center justify-center flex-shrink-0" style={{ width: 61.7, height: 61.7 }}>
-                      <div
-                        className="absolute"
-                        style={{ width: 112, height: 112, left: "50%", top: "50%", transform: "translate(-50%, -50%)", borderRadius: "50%", background: "radial-gradient(circle, rgba(232,162,76,0.22), transparent 68%)", zIndex: 0 }}
-                      />
-                      <div className="relative flex items-center justify-center rounded-full" style={{ width: 61.7, height: 61.7, background: "rgba(232,162,76,0.14)", zIndex: 1 }}>
-                        <span style={{ fontSize: 28.1, lineHeight: 1 }}>{personality.emoji}</span>
+                      className="highlights-personality-panel flex items-center rounded-2xl"
+                      style={{
+                        gap: 14,
+                        padding: "33px 24px",
+                        borderRadius: 24,
+                      }}
+                    >
+                      <div className="relative flex items-center justify-center flex-shrink-0 highlights-personality-icon" style={{ width: 52, height: 52 }}>
+                        <div
+                          className="absolute highlights-personality-glow"
+                          style={{ width: 96, height: 96, left: "50%", top: "50%", transform: "translate(-50%, -50%)", borderRadius: "50%", background: "radial-gradient(circle, rgba(232,162,76,0.22), transparent 68%)", zIndex: 0 }}
+                        />
+                        <div className="relative flex items-center justify-center rounded-full highlights-personality-badge" style={{ width: 52, height: 52, background: "rgba(232,162,76,0.14)", zIndex: 1 }}>
+                          <span style={{ fontSize: 24, lineHeight: 1 }}>{personality.emoji}</span>
+                        </div>
+                      </div>
+                      <div className="min-w-0 highlights-personality-copy" style={{ textAlign: "left" }}>
+                        <div className="highlights-personality-eyebrow" style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: "0.08em", color: accent }}>YOUR TV PERSONALITY</div>
+                        <div className="highlights-personality-name" style={{ fontSize: 19, fontWeight: 700, color: "#fff", marginTop: 2 }}>{personality.name}</div>
+                        <div className="highlights-personality-desc" style={{ fontSize: 12, color: t.textDim, marginTop: 2, lineHeight: 1.35 }}>{personality.description}</div>
                       </div>
                     </div>
-                    <div className="min-w-0">
-                      <div style={{ fontSize: 13.2, fontWeight: 700, letterSpacing: "0.08em", color: accent }}>YOUR TV PERSONALITY</div>
-                      <div style={{ fontSize: 22.3, fontWeight: 700, color: "#fff", marginTop: 2 }}>{personality.name}</div>
-                      <div style={{ fontSize: 12.5, color: t.textDim, marginTop: 2.8, lineHeight: 1.35 }}>{personality.description}</div>
-                    </div>
-                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="highlights-tops">
+                <div className="highlights-tops-primary">
+                  {topShows.length > 0 && (
+                    <div className="highlights-panel highlights-tops-shows">
+                      <div className="highlights-tops-head">
+                        <div className="highlights-section-title" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 0 }}>Top Shows</div>
+                      </div>
+                      <div className="flex gap-3 overflow-x-auto highlights-poster-row" style={{ scrollbarWidth: "none" }}>
+                        {topShows.map((s) => {
+                          const title = resolveTitle(s, readableLanguages);
+                          return (
+                            <button
+                              key={s.showId}
+                              onClick={() => router.push(`/show/${s.showId}`)}
+                              className="flex-shrink-0 text-left active:scale-95 transition highlights-poster-card"
+                              style={{ width: 126 }}
+                              data-hl-ambient={s.posterPath || undefined}
+                            >
+                              <div className="relative rounded-2xl overflow-hidden highlights-poster-art" style={{ aspectRatio: "2 / 3", borderRadius: 14, boxShadow: "0 10px 24px rgba(0,0,0,0.34)", filter: "contrast(1.06) saturate(1.05)" }}>
+                                <PosterArt posterPath={s.posterPath} alt={title} />
+                                {s.rating != null && (
+                                  <div className="highlights-poster-rating-badge">
+                                    <Icon name="star" size={9} color={accent} />
+                                    <span>{s.rating.toFixed(1)}</span>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="highlights-poster-title">{title}</div>
+                              <div className="highlights-poster-stat">{s.hours}h · {s.episodeCount} ep</div>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
-              </div>
+                </div>
 
-              <div className="highlights-stats-section px-6" style={{ marginTop: 14 }}>
-                  {/* summary stat cards — colors sampled directly from a
-                  supplied reference image (statIconGold/statCardBg in
-                  lib/theme.js), deliberately distinct from the app's usual
-                  vibrant amber accent so this row reads as its own quieter
-                  "antique brushed gold" moment. Fixed comfortable sizes
-                  (~64% of the reference's own 68px badge/48px number, two
-                  20% reductions compounded), not computed/shrunk to
-                  force-fit the screen — the row scrolls horizontally if
-                  all 4 don't fit rather than squeezing each card down to
-                  whatever width is left. */}
-              {/* items-start — without it, flexbox's default cross-axis
-                  stretch makes every card match the tallest one (the
-                  2-line-wrapping "Active Days" label), leaving visible
-                  dead space below the shorter single-line labels in the
-                  other 3 cards. Each card now sizes to its own content. */}
-                  <div className="highlights-summary-stats flex items-start gap-2.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                {/* Widget scaled down another 5% on top of the previous
-                    pass (width/padding/icon badge/border-radius/margins),
-                    plus the number reduced another 10% on top of its own
-                    previous pass. */}
-                {/* Active Days dropped from this row per explicit request —
-                    it now surfaces as inline text next to the "Watch
-                    History" heading below instead (see activeDayCount's
-                    other usage). Profile's own separate this-month stats
-                    row (app/(tabs)/profile/page.jsx) is untouched — it has
-                    its own independent ["Shows","Movies","Active Days",
-                    "Rewatched"] tuple, not this one. */}
-                {[["episodes", monthEntries.length, "Episodes"], ["layers", uniqueShowCount, "Shows"], ["clapperboard", monthMovieEntries.length, "Movies"], ["refresh", rewatchCount, "Rewatched"]].map(([icon, n, l], i) => (
-                  <div key={i} className="highlights-summary-stat flex-shrink-0 flex flex-col items-center text-center" style={{ width: 86.36, padding: "12.70px 11.29px", background: statCardBg, border: "1px solid rgba(255,255,255,0.05)", borderRadius: 12.23 }}>
-                    <div className="flex items-center justify-center rounded-full flex-shrink-0" style={{ width: 37.62, height: 37.62, background: `${statIconGold}12` }}>
-                      <Icon name={icon} size={16.93} color={accent} strokeWidth={1.4} />
+                {topMovies.length > 0 && (
+                  <div className="highlights-panel highlights-tops-movies">
+                    <div className="highlights-tops-head">
+                      <div className="highlights-section-title" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 0 }}>Top Movies</div>
                     </div>
-                    <div style={{ fontSize: 24.95, fontWeight: 800, color: "#fff", marginTop: 6.75, lineHeight: 1 }}>{n}</div>
-                    <div style={{ fontSize: 10.26, fontWeight: 500, color: t.textDim, marginTop: 3.59, textAlign: "center", lineHeight: 1.2 }}>{l}</div>
+                    <div className="flex gap-3 overflow-x-auto highlights-poster-row" style={{ scrollbarWidth: "none" }}>
+                      {topMovies.map((m) => {
+                        const title = resolveTitle(m, readableLanguages);
+                        return (
+                          <button
+                            key={m.movieId}
+                            onClick={() => router.push(`/movie/${m.movieId}`)}
+                            className="flex-shrink-0 text-left active:scale-95 transition highlights-poster-card"
+                            style={{ width: 126 }}
+                            data-hl-ambient={m.posterPath || undefined}
+                          >
+                            <div className="relative rounded-2xl overflow-hidden highlights-poster-art" style={{ aspectRatio: "2 / 3", borderRadius: 14, boxShadow: "0 10px 24px rgba(0,0,0,0.34)", filter: "contrast(1.06) saturate(1.05)" }}>
+                              <PosterArt posterPath={m.posterPath} alt={title} />
+                              {m.rating != null && (
+                                <div className="highlights-poster-rating-badge">
+                                  <Icon name="star" size={9} color={accent} />
+                                  <span>{m.rating.toFixed(1)}</span>
+                                </div>
+                              )}
+                            </div>
+                            <div className="highlights-poster-title">{title}</div>
+                            <div className="highlights-poster-stat">{formatDuration(m.runtimeMinutes)}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                ))}
-                  </div>
+                )}
               </div>
-
-              {/* top shows — one horizontal-scrolling row of large
-                  posters (matching Home/Explore's existing row pattern),
-                  not a wrapping gallery grid: even capped at 5, a grid
-                  would still be 2 rows tall, whereas a single scrollable
-                  line keeps the section compact regardless of count.
-                  Still in ranked order (computeTopShows' minutes ->
-                  episodes -> recency sort), just without a visible rank
-                  number on the poster. */}
-              {topShows.length > 0 && (
-                <div style={{ marginTop: 26 }}>
-                  <div className="px-6" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 12 }}>Top Shows</div>
-                  <div className="flex gap-3 pl-6 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                    {topShows.map((s) => {
-                      const title = resolveTitle(s, readableLanguages);
-                      return (
-                        <button key={s.showId} onClick={() => router.push(`/show/${s.showId}`)} className="flex-shrink-0 text-left active:scale-95 transition" style={{ width: 156 }}>
-                          {/* Same poster size/count/scroll behavior — just a
-                              bigger radius, a deeper/softer shadow, and a
-                              touch more contrast on the image itself. */}
-                          <div className="relative rounded-2xl overflow-hidden" style={{ aspectRatio: "2 / 3", borderRadius: 22, boxShadow: "0 14px 32px rgba(0,0,0,0.34)", filter: "contrast(1.06) saturate(1.05)" }}>
-                            <PosterArt posterPath={s.posterPath} alt={title} />
-                            {/* This is the same `rating` computeTopShows already
-                                resolves for ranking (whichever touched season had
-                                the most watched episodes this month) — shown only
-                                when one exists, never a placeholder for an unrated
-                                show. */}
-                            {s.rating != null && (
-                              <div className="absolute flex items-center gap-1 rounded-full" style={{ left: 6, bottom: 6, padding: "3px 6px", background: "rgba(0,0,0,0.68)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)" }}>
-                                <Icon name="star" size={9} color={accent} />
-                                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff" }}>{s.rating.toFixed(1)}</span>
-                              </div>
-                            )}
-                          </div>
-                          <div className="mt-2 leading-tight" style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
-                          <div style={{ fontSize: 11, color: t.textDim, marginTop: 2 }}>{s.hours}h · {s.episodeCount} ep</div>
-                        </button>
-                      );
-                    })}
-                    <div className="w-2 flex-shrink-0" />
-                  </div>
-                </div>
-              )}
-
-              {/* top movies — directly below Top Shows, same card/row
-                  pattern. No episode-count equivalent for a movie, so the
-                  subtext is just its runtime. */}
-              {topMovies.length > 0 && (
-                <div style={{ marginTop: 26 }}>
-                  <div className="px-6" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 12 }}>Top Movies</div>
-                  <div className="flex gap-3 pl-6 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                    {topMovies.map((m) => {
-                      const title = resolveTitle(m, readableLanguages);
-                      return (
-                        <button key={m.movieId} onClick={() => router.push(`/movie/${m.movieId}`)} className="flex-shrink-0 text-left active:scale-95 transition" style={{ width: 156 }}>
-                          <div className="relative rounded-2xl overflow-hidden" style={{ aspectRatio: "2 / 3", borderRadius: 22, boxShadow: "0 14px 32px rgba(0,0,0,0.34)", filter: "contrast(1.06) saturate(1.05)" }}>
-                            <PosterArt posterPath={m.posterPath} alt={title} />
-                            {/* Same rating computeTopMovies already resolves for
-                                ranking — shown only when one exists. */}
-                            {m.rating != null && (
-                              <div className="absolute flex items-center gap-1 rounded-full" style={{ left: 6, bottom: 6, padding: "3px 6px", background: "rgba(0,0,0,0.68)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)" }}>
-                                <Icon name="star" size={9} color={accent} />
-                                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff" }}>{m.rating.toFixed(1)}</span>
-                              </div>
-                            )}
-                          </div>
-                          <div className="mt-2 leading-tight" style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
-                          <div style={{ fontSize: 11, color: t.textDim, marginTop: 2 }}>{formatDuration(m.runtimeMinutes)}</div>
-                        </button>
-                      );
-                    })}
-                    <div className="w-2 flex-shrink-0" />
-                  </div>
-                </div>
-              )}
-
-              {/* top genres — now a horizontal-scroll row of GenreTag
-                  pills (components/GenreTag.jsx) instead of an inline
-                  3-column grid. Each genre gets its own accent color
-                  (lib/highlights.js's genreColor) rather than sharing
-                  the single Highlights accent, per GenreTag's one-color-
-                  per-genre design contract. No action in its header —
-                  Watch History is its own section below now, not a link
-                  tucked into this one. */}
-              {topGenres.length > 0 && (
-                <div style={{ marginTop: 26 }}>
-                  <div className="px-6" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 12 }}>Top Genres</div>
-                  <GenreTagRow genres={topGenres.map((g) => ({ name: g.genre, color: g.color, icon: g.icon, emoji: g.emoji }))} />
-                </div>
-              )}
             </>
+          )}
+
+          {/* Top Genres sits just above Watch History (mobile-style bars),
+              not beside Top Shows — keeps the overview row as stats |
+              personality only. */}
+          {layoutReady && isMobile && monthStatus === "ready" && monthEntries.length > 0 && topGenres.length > 0 && (
+            <div className="highlights-panel highlights-tops-genres highlights-genres-before-history">
+              <div className="highlights-tops-head">
+                <div className="highlights-section-title" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 0 }}>Top Genres</div>
+              </div>
+              <GenreTagRow
+                className="highlights-genre-tag-row"
+                genres={topGenres.map((g) => ({ name: g.genre, color: g.color, icon: g.icon, emoji: g.emoji }))}
+              />
+            </div>
           )}
 
           {layoutReady && isDesktop && monthStatus === "ready" && monthEntries.length > 0 && (
