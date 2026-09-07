@@ -405,10 +405,10 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
                           readOnly
                           maxStars={10}
                           autoFit
-                          autoFitMin={26}
-                          autoFitMax={36}
-                          autoFitGapMin={3}
-                          autoFitGapMax={6}
+                          autoFitMin={22}
+                          autoFitMax={30}
+                          autoFitGapMin={2}
+                          autoFitGapMax={5}
                           rowPaddingInline={4}
                         />
                       </div>

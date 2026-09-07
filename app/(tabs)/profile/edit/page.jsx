@@ -171,7 +171,7 @@ export default function Page() {
   useEffect(() => {
     if (!isDesktop) return;
     openEditProfile();
-    router.replace("/profile");
+    router.replace("/home");
   }, [isDesktop, openEditProfile, router]);
 
   const [displayName, setDisplayName] = useState("");

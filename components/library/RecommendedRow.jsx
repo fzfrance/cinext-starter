@@ -12,11 +12,26 @@ const t = themes.dark;
 // page) applies before handing this component whatever 3 items it gets.
 export default function RecommendedRow({ items, onOpen, softGlow = false }) {
   if (!items.length) return null;
+  const row = items.slice(0, 3);
+  const leftGlow = row[0]?.glow || "#E8A24C";
+  const midGlow = row[Math.floor((row.length - 1) / 2)]?.glow || leftGlow;
+  const rightGlow = row[row.length - 1]?.glow || leftGlow;
   return (
     <div className={`recommended-row${softGlow ? " is-soft-glow" : ""}`} style={{ position: "relative" }}>
       <div
         className="recommended-row-glow"
-        style={softGlow ? undefined : {
+        style={softGlow ? {
+          position: "absolute",
+          inset: "8% -8% -6%",
+          pointerEvents: "none",
+          background:
+            `radial-gradient(ellipse 48% 46% at 18% 62%, ${leftGlow}40, transparent 72%),` +
+            `radial-gradient(ellipse 52% 48% at 50% 58%, ${midGlow}36, transparent 70%),` +
+            `radial-gradient(ellipse 48% 46% at 82% 60%, ${rightGlow}38, transparent 72%),` +
+            "radial-gradient(ellipse 70% 55% at 50% 58%, rgba(255,255,255,0.06), transparent 72%)",
+          filter: "blur(20px)",
+          opacity: 0.92,
+        } : {
           position: "absolute",
           top: 0,
           bottom: -8,
@@ -31,10 +46,20 @@ export default function RecommendedRow({ items, onOpen, softGlow = false }) {
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, justifyContent: "center" }}>
           <span style={{ fontSize: 25, fontWeight: 800, letterSpacing: -0.4 }}>Watch Next</span>
         </div>
-        <div style={{ fontSize: 12.5, color: t.textDim, marginTop: 2 }}>From your Watchlist</div>
+        <div
+          style={{
+            fontSize: 12.5,
+            color: "rgba(255,255,255,0.78)",
+            marginTop: 2,
+            textShadow:
+              "0 0 8px rgba(0,0,0,0.85), 0 1px 3px rgba(0,0,0,0.9), 0 2px 10px rgba(0,0,0,0.55)",
+          }}
+        >
+          From your Watchlist
+        </div>
         <div style={{ position: "relative", marginTop: 18, paddingBottom: 22 }}>
           <div style={{ position: "relative", display: "flex", justifyContent: "center", alignItems: "flex-end", gap: softGlow ? 20 : 16 }}>
-            {items.slice(0, 3).map((s) => (
+            {row.map((s) => (
               <button
                 key={s.id}
                 type="button"
@@ -48,7 +73,6 @@ export default function RecommendedRow({ items, onOpen, softGlow = false }) {
               </button>
             ))}
           </div>
-          {/* Same shelf board as genre aisles — under Watch Next posters too */}
           <div
             className="library-aisle-shelf recommended-row-shelf"
             aria-hidden="true"

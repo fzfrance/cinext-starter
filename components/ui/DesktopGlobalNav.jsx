@@ -7,16 +7,16 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Icon from "@/components/ui/Icon";
 import { useAuth } from "@/lib/auth-context";
 import { useDesktopModals } from "@/lib/desktop-modals-context";
+import { useDesktopSearch } from "@/lib/desktop-search-context";
 import { getProfile } from "@/lib/profile";
 import { supabase } from "@/lib/supabase";
 import { initialsOf } from "@/lib/theme";
 import { useAppLanguage } from "@/lib/languages";
 
 /**
- * Persistent desktop top nav. Search is a normal control that navigates
- * to /search — the bar itself lives on the search page so opening never
- * collapses or reflows this shell. Profile avatar sits beside Search and
- * opens a compact account menu (Profile / Settings / Sign out).
+ * Persistent desktop top nav. Search expands in-place inside the pill
+ * (right→left swipe): tabs slide away, the search field fills the middle,
+ * while the Cinext mark and profile avatar stay put.
  *
  * Library is split into three top-level tabs (Shows / Movies / Collections)
  * that share `/library?tab=…` so the existing data pipeline stays one place.
@@ -26,7 +26,15 @@ export default function DesktopGlobalNav() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { user } = useAuth();
-  const { openSettings } = useDesktopModals();
+  const { openSettings, openProfile } = useDesktopModals();
+  const {
+    query,
+    setQuery,
+    clearSearch,
+    lensOpen,
+    openDesktopSearch,
+    closeDesktopSearch,
+  } = useDesktopSearch();
   const { t: tr } = useAppLanguage();
   const libraryTab = searchParams.get("tab");
   const desktopTabs = [
@@ -56,7 +64,8 @@ export default function DesktopGlobalNav() {
   const [initials, setInitials] = useState("?");
   const [menuOpen, setMenuOpen] = useState(false);
   const menuWrapRef = useRef(null);
-  const onSearch = pathname?.startsWith("/search");
+  const searchInputRef = useRef(null);
+  const searchMode = lensOpen || pathname?.startsWith("/search");
 
   useEffect(() => {
     if (!user?.id) {
@@ -86,6 +95,14 @@ export default function DesktopGlobalNav() {
   }, [pathname, libraryTab]);
 
   useEffect(() => {
+    if (!searchMode) return undefined;
+    const id = window.requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [searchMode]);
+
+  useEffect(() => {
     if (!menuOpen) return undefined;
     const onPointerDown = (event) => {
       if (!menuWrapRef.current?.contains(event.target)) {
@@ -107,45 +124,119 @@ export default function DesktopGlobalNav() {
     return null;
   }
 
-  if (onSearch) return null;
-
   const handleSignOut = () => {
     setMenuOpen(false);
     supabase.auth.signOut().then(() => router.push("/login"));
   };
 
+  const openSearch = () => {
+    setMenuOpen(false);
+    if (searchMode) {
+      searchInputRef.current?.focus();
+      return;
+    }
+    if (!openDesktopSearch()) {
+      router.push("/search");
+    }
+  };
+
+  const closeSearch = () => {
+    if (lensOpen) {
+      closeDesktopSearch();
+      return;
+    }
+    clearSearch();
+    if (pathname?.startsWith("/search")) {
+      if (typeof window !== "undefined" && window.history.length > 1) router.back();
+      else router.push("/home");
+    }
+  };
+
+  const clearOrCloseSearch = () => {
+    if (query.trim()) setQuery("");
+    else closeSearch();
+  };
+
   return (
-    <nav className="desktop-global-nav" aria-label="Cinext navigation">
-      <Link href="/home" className="desktop-global-nav-mark" aria-label="Cinext home">
+    <nav
+      className={`desktop-global-nav${searchMode ? " is-search" : ""}`}
+      aria-label="Cinext navigation"
+    >
+      <Link
+        href="/home"
+        className="desktop-global-nav-mark"
+        aria-label="Cinext home"
+        onClick={() => {
+          if (lensOpen) closeDesktopSearch();
+        }}
+      >
         <Image src="/cinext-launch-mark.png" alt="Cinext" width={35} height={35} />
       </Link>
       <span className="desktop-global-nav-divider" aria-hidden="true" />
-      <div className="desktop-global-nav-tabs">
-        {desktopTabs.map((tab) => {
-          const active = tab.match(pathname);
-          return (
-            <Link
-              key={tab.href}
-              href={tab.href}
-              className={`desktop-global-nav-item${active ? " is-active" : ""}`}
-              aria-current={active ? "page" : undefined}
-            >
-              <Icon name={tab.icon} size={15} />
-              {tr(tab.labelKey)}
-            </Link>
-          );
-        })}
+
+      <div className="desktop-global-nav-center">
+        <div className="desktop-global-nav-tabs-pane" aria-hidden={searchMode}>
+          <div className="desktop-global-nav-tabs">
+            {desktopTabs.map((tab) => {
+              const active = tab.match(pathname);
+              return (
+                <Link
+                  key={tab.href}
+                  href={tab.href}
+                  className={`desktop-global-nav-item${active ? " is-active" : ""}`}
+                  aria-current={active ? "page" : undefined}
+                  tabIndex={searchMode ? -1 : undefined}
+                  onClick={() => {
+                    if (lensOpen) closeDesktopSearch();
+                  }}
+                >
+                  <Icon name={tab.icon} size={15} />
+                  {tr(tab.labelKey)}
+                </Link>
+              );
+            })}
+          </div>
+          <span className="desktop-global-nav-divider desktop-global-nav-auto" aria-hidden="true" />
+          <button
+            type="button"
+            className="desktop-global-nav-item desktop-global-nav-search-trigger"
+            onClick={openSearch}
+            aria-label={tr("navSearch")}
+            tabIndex={searchMode ? -1 : undefined}
+          >
+            <Icon name="search" size={17} />
+            {tr("navSearch")}
+          </button>
+        </div>
+
+        <div className="desktop-global-nav-search-pane" aria-hidden={!searchMode}>
+          <Icon name="search" size={17} color="rgba(255,255,255,0.55)" />
+          <input
+            ref={searchInputRef}
+            className="desktop-global-nav-search-input"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search movies, TV & actors..."
+            aria-label="Search movies, TV and actors"
+            autoComplete="off"
+            spellCheck={false}
+            tabIndex={searchMode ? 0 : -1}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") closeSearch();
+            }}
+          />
+          <button
+            type="button"
+            className="desktop-global-nav-search-clear"
+            onClick={clearOrCloseSearch}
+            aria-label={query.trim() ? "Clear search" : "Close search"}
+            tabIndex={searchMode ? 0 : -1}
+          >
+            <Icon name="x" size={14} color="rgba(255,255,255,0.75)" />
+          </button>
+        </div>
       </div>
-      <span className="desktop-global-nav-divider desktop-global-nav-auto" aria-hidden="true" />
-      <button
-        type="button"
-        className="desktop-global-nav-item desktop-global-nav-search-trigger"
-        onClick={() => router.push("/search")}
-        aria-label={tr("navSearch")}
-      >
-        <Icon name="search" size={17} />
-        {tr("navSearch")}
-      </button>
+
       <div className="desktop-global-nav-avatar-wrap" ref={menuWrapRef}>
         <button
           type="button"
@@ -164,15 +255,18 @@ export default function DesktopGlobalNav() {
         </button>
         {menuOpen && (
           <div className="desktop-global-nav-menu" role="menu">
-            <Link
-              href="/profile"
+            <button
+              type="button"
               role="menuitem"
               className="desktop-global-nav-menu-item"
-              onClick={() => setMenuOpen(false)}
+              onClick={() => {
+                setMenuOpen(false);
+                openProfile();
+              }}
             >
               <Icon name="user" size={16} />
               {tr("navProfile")}
-            </Link>
+            </button>
             <button
               type="button"
               role="menuitem"

@@ -942,7 +942,7 @@ function mapSearchResults(data) {
   });
 }
 
-export default function SearchClient({ trendingShows, trendingMovies, heroSlides, providerLogos = {} }) {
+export default function SearchClient({ trendingShows, trendingMovies, heroSlides, providerLogos = {}, asLens = false }) {
   const router = useRouter();
   const readableLanguages = useReadableLanguages();
   const { resolvedStatusMap, selectStatus } = useLibraryStatus("Search");
@@ -952,12 +952,12 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
     filter,
     setFilter,
     clearSearch,
+    closeDesktopSearch,
   } = useDesktopSearch();
   const restoredSessionRef = useRef(searchSession);
   const restoredSession = restoredSessionRef.current;
   const resultsScrollRef = useRef(null);
   const searchInputRef = useRef(null);
-  const desktopInputRef = useRef(null);
   const desktopResultsRef = useRef(null);
   const skipInitialSearchRef = useRef(Boolean(restoredSession?.query?.trim()));
   const didRestoreRef = useRef(false);
@@ -1020,23 +1020,24 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
   }, []);
 
   useEffect(() => {
-    desktopInputRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
     const onKeyDown = (e) => {
       if (e.key !== "Escape") return;
       e.preventDefault();
-      clearSearch();
       setDiscoveryFilters(DEFAULT_DISCOVERY_FILTERS);
       setBrowseMode(false);
+      if (asLens) {
+        closeDesktopSearch();
+        return;
+      }
+      clearSearch();
       router.back();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [router, clearSearch]);
+  }, [router, clearSearch, asLens, closeDesktopSearch]);
 
   const rememberSearchPosition = useCallback(() => {
+    if (asLens) closeDesktopSearch();
     const scrollTop = desktopResultsRef.current?.scrollTop ?? resultsScrollRef.current?.scrollTop ?? 0;
     searchSession = {
       query,
@@ -1046,18 +1047,11 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
       browseMode,
       scrollTop,
     };
-  }, [query, results, filter, discoveryFilters, browseMode]);
+  }, [query, results, filter, discoveryFilters, browseMode, asLens, closeDesktopSearch]);
 
   const updateQuery = (value) => {
     searchSession = null;
     setQuery(value);
-  };
-
-  const closeDesktopSearch = () => {
-    clearSearch();
-    setDiscoveryFilters(DEFAULT_DISCOVERY_FILTERS);
-    setBrowseMode(false);
-    router.back();
   };
 
   const matchesDiscoveryFilters = useCallback((item) => {
@@ -1125,7 +1119,12 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
 
   return (
     <>
-      <div data-search-page className="fixed inset-0 z-50" style={{ background: t.bg }}>
+      <div
+        data-search-page
+        data-search-lens={asLens ? "true" : undefined}
+        className={`fixed inset-0 z-50${asLens ? " is-lens" : ""}`}
+        style={asLens ? undefined : { background: t.bg }}
+      >
         {/* ---------- Mobile / tablet (unchanged) ---------- */}
         <div className="search-mobile-layout h-full">
           {trimmed === "" ? (
@@ -1199,33 +1198,6 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
             <SearchDesktopAmbient artPath={topResult.backdropPath || topResult.posterPath} />
           ) : null}
           <div className="search-desktop-shell">
-            <div className="search-desktop-bar-wrap">
-              <div className="search-desktop-bar">
-                <Icon name="search" size={18} color="rgba(255,255,255,0.45)" />
-                <input
-                  ref={desktopInputRef}
-                  value={query}
-                  onChange={(e) => updateQuery(e.target.value)}
-                  placeholder="Search movies, TV & actors..."
-                  className="search-desktop-input"
-                  aria-label="Search movies, TV and actors"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                <button
-                  type="button"
-                  className="search-desktop-clear"
-                  onClick={() => {
-                    if (trimmed) updateQuery("");
-                    else closeDesktopSearch();
-                  }}
-                  aria-label={trimmed ? "Clear search" : "Close search"}
-                >
-                  <Icon name="x" size={14} color="rgba(255,255,255,0.75)" />
-                </button>
-              </div>
-            </div>
-
             {trimmed === "" ? (
               browseMode ? (
                 <SearchBrowseDesktop

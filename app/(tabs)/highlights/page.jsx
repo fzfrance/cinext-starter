@@ -1315,10 +1315,10 @@ export default function Page() {
                       <span className="highlights-hours-label">hours watched</span>
                     </div>
                     <div className="highlights-summary-stats" style={{ scrollbarWidth: "none" }}>
-                      {[["episodes", monthEntries.length, "Episodes"], ["tv", uniqueShowCount, "Shows"], ["clapperboard", monthMovieEntries.length, "Movies"], ["refresh", rewatchCount, "Rewatched"]].map(([icon, n, l], i) => (
+                      {[["episodes", monthEntries.length, "Episodes"], ["layers", uniqueShowCount, "Shows"], ["clapperboard", monthMovieEntries.length, "Movies"], ["refresh", rewatchCount, "Rewatched"]].map(([icon, n, l], i) => (
                         <div key={i} className="highlights-summary-stat">
                           <div className="highlights-summary-stat-icon">
-                            <Icon name={icon} size={15} color={accent} strokeWidth={1.4} />
+                            <Icon name={icon} size={17} color={accent} strokeWidth={1.4} />
                           </div>
                           <div className="highlights-summary-stat-n">{n}</div>
                           <div className="highlights-summary-stat-l" style={{ color: t.textDim }}>{l}</div>
@@ -1460,15 +1460,13 @@ export default function Page() {
                 @keyframes highlightsDayFade { from { opacity: 0; } to { opacity: 1; } }
               `}</style>
 
-              <div className="highlights-history-head" style={{ marginBottom: 12 }}>
+              <div className="highlights-history-head" style={{ marginBottom: 12, display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
                 <span className="highlights-section-title" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 0, padding: 0 }}>Watch History</span>
+                <span className="highlights-history-sub">{activeDayCount} Active day{activeDayCount === 1 ? "" : "s"}</span>
               </div>
 
               <div className="highlights-history-body">
               <div className="highlights-calendar-col">
-              <div className="highlights-calendar-active" style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-                <span className="highlights-history-sub">{activeDayCount} Active day{activeDayCount === 1 ? "" : "s"}</span>
-              </div>
               <div className="highlights-calendar">
                 <div className="flex items-center justify-between">
                   <button

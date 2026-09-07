@@ -6,7 +6,8 @@ import Icon from "@/components/ui/Icon";
 import RecommendedRow from "@/components/library/RecommendedRow";
 import StatusFilterRow, { MOVIE_STATUS_ITEMS } from "@/components/library/StatusFilterRow";
 import LibraryTabMenu, { TAB_LABEL } from "@/components/library/LibraryTabMenu";
-import ViewModeToggle from "@/components/library/ViewModeToggle";
+import ViewModeMenu, { VIEW_MODE_ICON } from "@/components/library/ViewModeMenu";
+import GlassCircle from "@/components/ui/GlassCircle";
 import Aisle from "@/components/library/Aisle";
 import GenrePosterRow from "@/components/library/GenrePosterRow";
 import CollectionRow from "@/components/library/CollectionRow";
@@ -108,6 +109,7 @@ export default function LibraryClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally NOT depending on `tab` itself, or this would fight the selectTab handler's own optimistic setTab below
   }, [searchParams]);
   const [tabMenuOpen, setTabMenuOpen] = useState(false);
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
   // Switching tabs updates the URL (replace, not push — a tab switch
   // isn't its own back-button stop) alongside the local state, so this
   // page's own address always reflects what's actually showing: the
@@ -683,7 +685,10 @@ export default function LibraryClient() {
       <div className="flex items-center justify-between px-6" style={{ paddingTop: "calc(env(safe-area-inset-top) + 16px)" }}>
         <div style={{ position: "relative" }}>
           <button
-            onClick={() => setTabMenuOpen((v) => !v)}
+            onClick={() => {
+              setViewMenuOpen(false);
+              setTabMenuOpen((v) => !v);
+            }}
             className="flex items-center gap-1.5 active:scale-95 transition"
             style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
           >
@@ -699,8 +704,28 @@ export default function LibraryClient() {
           )}
         </div>
         <div className="flex items-center gap-2.5">
-          {/* Sort is elsewhere on mobile; view toggle mirrors Home's pill */}
-          <ViewModeToggle viewMode={viewMode} onSelect={selectViewMode} />
+          {/* Mobile keeps the View dropdown (not the desktop Poster/DVD pill). */}
+          <div style={{ position: "relative" }}>
+            <GlassCircle
+              onClick={() => {
+                setTabMenuOpen(false);
+                setViewMenuOpen((v) => !v);
+              }}
+              t={t}
+            >
+              <Icon name={VIEW_MODE_ICON[viewMode] || VIEW_MODE_ICON.dvd} size={16} color="#fff" />
+            </GlassCircle>
+            {viewMenuOpen && (
+              <ViewModeMenu
+                viewMode={viewMode}
+                onSelect={(mode) => {
+                  selectViewMode(mode);
+                  setViewMenuOpen(false);
+                }}
+                onClose={() => setViewMenuOpen(false)}
+              />
+            )}
+          </div>
           {/* Search — searches THIS library in place (title match against
               the same shelves below) rather than navigating to the separate
               global TMDB search — reveals an inline input instead of a new
@@ -802,7 +827,16 @@ export default function LibraryClient() {
                 ...c.showIds.map((id) => showsById[id]),
                 ...(c.movieIds ?? []).map((id) => moviesById[id]),
               ].filter(Boolean);
-              return <CollectionRow key={c.id} id={c.id} name={c.name} shared={c.shared} items={items} />;
+              return (
+                <CollectionRow
+                  key={c.id}
+                  id={c.id}
+                  name={c.name}
+                  shared={c.shared}
+                  items={items}
+                  withShelf
+                />
+              );
             })
           )}
         </div>
@@ -885,9 +919,9 @@ export default function LibraryClient() {
                   onClick={createCollection}
                   disabled={!newCollectionName.trim()}
                   className="flex-1 rounded-full active:scale-95 transition"
-                  style={{ padding: 12, background: newCollectionName.trim() ? accent : "rgba(255,255,255,0.06)" }}
+                  style={{ padding: 12, background: newCollectionName.trim() ? "#fff" : "rgba(255,255,255,0.06)" }}
                 >
-                  <span style={{ fontSize: 13.5, fontWeight: 700, color: newCollectionName.trim() ? "#1a1108" : t.textDim }}>Create</span>
+                  <span style={{ fontSize: 13.5, fontWeight: 700, color: newCollectionName.trim() ? "#0a0a0a" : t.textDim }}>Create</span>
                 </button>
               </div>
             </div>

@@ -79,7 +79,7 @@ export default function Page() {
   useEffect(() => {
     if (!isDesktop) return;
     openLanguageSettings();
-    router.replace("/profile");
+    router.replace("/home");
   }, [isDesktop, openLanguageSettings, router]);
 
   const [status, setStatus] = useState("loading");

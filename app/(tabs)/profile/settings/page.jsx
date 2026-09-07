@@ -60,7 +60,7 @@ export default function Page() {
   useEffect(() => {
     if (!isDesktop) return;
     openSettings();
-    router.replace("/profile");
+    router.replace("/home");
   }, [isDesktop, openSettings, router]);
 
   const [theme, setTheme] = useState("dark"); // "dark" | "light" | "system"

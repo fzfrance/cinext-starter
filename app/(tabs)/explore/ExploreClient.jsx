@@ -453,12 +453,18 @@ function ProviderMark({ provider }) {
     if (imgRef.current?.complete && imgRef.current.naturalWidth) classify(imgRef.current);
   }, [src]);
 
+  const href = `/explore/provider/${provider.provider_id}`;
+
   if (!src || shape === "missing") {
-    return <span className="explore-provider-name">{provider.provider_name}</span>;
+    return (
+      <Link href={href} className="explore-provider-name">
+        {provider.provider_name}
+      </Link>
+    );
   }
 
   return (
-    <div className={`explore-provider-card is-${shape}`} title={provider.provider_name}>
+    <Link href={href} className={`explore-provider-card is-${shape}`} title={provider.provider_name}>
       <img
         ref={imgRef}
         src={src}
@@ -466,7 +472,7 @@ function ProviderMark({ provider }) {
         onLoad={(event) => classify(event.currentTarget)}
         onError={() => setShape("missing")}
       />
-    </div>
+    </Link>
   );
 }
 

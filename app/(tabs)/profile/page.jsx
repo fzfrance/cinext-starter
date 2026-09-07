@@ -11,6 +11,8 @@ import PosterQuickStatusMenu from "@/components/ui/PosterQuickStatusMenu";
 import PosterArt from "@/components/ui/PosterArt";
 import StarInput from "@/components/ui/StarInput";
 import TimeMachineSection from "@/components/profile/TimeMachineSection";
+import { useIsDesktopSettings } from "@/components/ui/SettingsModal";
+import { useDesktopModals } from "@/lib/desktop-modals-context";
 import { useAuth } from "@/lib/auth-context";
 import { useFavorites } from "@/lib/favorites-context";
 import { useMovieFavorites } from "@/lib/movie-favorites-context";
@@ -80,6 +82,16 @@ function AtmosBackdrop({ imageUrl }) {
 export default function Page() {
   const router = useRouter();
   const { user, loading } = useAuth();
+  const isDesktop = useIsDesktopSettings();
+  const { openProfile } = useDesktopModals();
+
+  // Desktop: open the floating profile card over a real page behind it.
+  useEffect(() => {
+    if (!isDesktop) return;
+    openProfile();
+    router.replace("/home");
+  }, [isDesktop, openProfile, router]);
+
   const { isFavorite, toggleFavorite, favoriteEntries, loading: favoritesCtxLoading } = useFavorites();
   const { isFavorite: isMovieFavorite, toggleFavorite: toggleMovieFavorite, favoriteEntries: movieFavoriteEntries, loading: movieFavoritesCtxLoading } = useMovieFavorites();
   const readableLanguages = useReadableLanguages();
@@ -426,6 +438,8 @@ export default function Page() {
     return () => { cancelled = true; };
   }, [user, pageRefreshToken]);
 
+  if (isDesktop) return null;
+
   if (!loading && !user) {
     return (
       <div className="min-h-dvh flex flex-col items-center justify-center text-center px-8" style={{ background: t.bg }}>
@@ -455,6 +469,7 @@ export default function Page() {
 
   return (
     <>
+      <div className="profile-mobile-layout">
       <div className="relative w-full" style={{ height: 190 }}>
         <AtmosBackdrop imageUrl={profile?.backgroundUrl} />
         {/* Activity's own entry point moved here from the separate
@@ -671,6 +686,7 @@ export default function Page() {
         loading={timeMachineLoading}
         onYearSelect={(year) => router.push(`/profile/time-machine/${year}`)}
       />
+      </div>
 
       <PosterQuickStatusMenu
         show={longPress?.show ?? null}

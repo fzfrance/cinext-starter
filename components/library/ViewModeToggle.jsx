@@ -4,8 +4,9 @@ import Icon from "@/components/ui/Icon";
 import { VIEW_MODE_ICON } from "@/components/library/ViewModeMenu";
 
 /**
- * Poster / DVD Case switcher — same pill + white active disc as Home's
- * In Progress view toggle.
+ * Desktop-only Poster / DVD Case pill (same chrome as Home In Progress).
+ * Mobile Library must use ViewModeMenu dropdown — never mount this under
+ * `.library-mobile-chrome` / max-width 899px.
  */
 export default function ViewModeToggle({ viewMode, onSelect, className = "" }) {
   return (

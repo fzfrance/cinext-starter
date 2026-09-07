@@ -1,0 +1,23 @@
+---
+description: Keep mobile/PWA UI isolated from desktop web redesigns
+alwaysApply: true
+---
+
+# Mobile/PWA vs Desktop — no bleed
+
+Cinext has **two separate UI systems**. Desktop web work must never change mobile/PWA layout, widgets, or controls.
+
+## Hard rules
+
+1. **Default assumption:** Any visual/CSS/JSX change is **desktop-only** unless the user explicitly asks for mobile/PWA.
+2. **Breakpoints:** Desktop chrome and layouts live under `@media (min-width: 900px)`. Mobile/PWA restores and locks live under `@media (max-width: 899px)`.
+3. **Never** put desktop Highlights/Library/Explore layout into unscoped CSS or into tablet queries like `(min-width: 700px) and (pointer: coarse)` — those hit real phones/iPads and overwrite the PWA.
+4. **Shared components** (`LibraryClient`, `highlights/page.jsx`, etc.) may render both trees, but:
+   - Mobile keeps its own controls (e.g. Library **View dropdown**, not the desktop Poster/DVD **pill toggle**)
+   - Desktop-only UI goes in `LibraryDesktop` / desktop CSS classes, not by replacing mobile header chrome
+5. **Highlights:** Mobile must keep amber glow, inline “N hours watched”, **scrollable dark stat cards**, left-inset 156px poster shelves, matte calendar. Desktop glass/ambient/stat-widget is `min-width: 900px` only. A final `@media (max-width: 899px)` lock block must stay last in the cascade for Highlights.
+6. Before finishing desktop work, sanity-check: would this change appear on a 390px phone? If yes without an explicit mobile request, undo it or gate it behind `min-width: 900px`.
+
+## When the user reports mobile regression
+
+Fix **only** the mobile/PWA path. Do not “simplify” by sharing the new desktop widget. Restore the prior mobile control/pattern.

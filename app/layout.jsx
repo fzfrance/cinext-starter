@@ -10,6 +10,7 @@ import { NavVisibilityProvider } from "@/lib/nav-visibility-context";
 import { DesktopSearchProvider } from "@/lib/desktop-search-context";
 import { DesktopModalsProvider } from "@/lib/desktop-modals-context";
 import DesktopGlobalNav from "@/components/ui/DesktopGlobalNav";
+import DesktopSearchLens from "@/components/search/DesktopSearchLens";
 import SwipeBackGesture from "@/components/ui/SwipeBackGesture";
 import AppLaunchScreen from "@/components/ui/AppLaunchScreen";
 import AppLanguageBoot from "@/components/ui/AppLanguageBoot";
@@ -68,7 +69,8 @@ export default function RootLayout({ children }) {
                             <Suspense fallback={null}>
                               <DesktopGlobalNav />
                             </Suspense>
-                            {children}
+                            <div data-app-shell>{children}</div>
+                            <DesktopSearchLens />
                           </DesktopModalsProvider>
                         </DesktopSearchProvider>
                       </NavVisibilityProvider>

@@ -148,9 +148,15 @@ export default function LibraryDesktop({
 }) {
   const router = useRouter();
   const pageRef = useRef(null);
+  const ambientGenRef = useRef(0);
+  const ambientDebounceRef = useRef(null);
+  const ambientPickRafRef = useRef(null);
+  const lastAmbientRef = useRef({ left: null, mid: null, right: null });
   const [sortId, setSortId] = useState("added_desc");
   const [sortOpen, setSortOpen] = useState(false);
-  const [activeAmbientPath, setActiveAmbientPath] = useState(null);
+  // Balanced wash: left / mid / right poster art (not a single winner).
+  const [activeAmbient, setActiveAmbient] = useState({ left: null, mid: null, right: null });
+  // Stack of fading layers so scroll swaps ease instead of snapping.
   const [ambientLayers, setAmbientLayers] = useState([]);
 
   useEffect(() => {
@@ -193,92 +199,241 @@ export default function LibraryDesktop({
         ? movieFiltered.length
         : filtered.length;
 
-  const defaultAmbientPath = useMemo(() => {
-    const fromRec = recItems.find((s) => s.posterPath)?.posterPath;
-    if (fromRec) return fromRec;
-    const fromList = sortedFiltered.find((s) => s.posterPath)?.posterPath;
-    if (fromList) return fromList;
-    for (const c of sortedCollections) {
-      const show = localizedShows.find((s) => c.showIds.includes(s.id) && s.posterPath);
-      if (show) return show.posterPath;
-      const movie = localizedMovies.find((m) => (c.movieIds || []).includes(m.id) && m.posterPath);
-      if (movie) return movie.posterPath;
+  const pathsToAmbient = (paths) => {
+    const list = paths.filter(Boolean);
+    if (!list.length) return { left: null, mid: null, right: null };
+    if (list.length === 1) return { left: list[0], mid: list[0], right: list[0] };
+    if (list.length === 2) return { left: list[0], mid: list[0], right: list[1] };
+    return {
+      left: list[0],
+      mid: list[Math.floor((list.length - 1) / 2)],
+      right: list[list.length - 1],
+    };
+  };
+
+  const defaultAmbient = useMemo(() => {
+    // Collections: sample posters across rows so the wash matches Shows/Movies.
+    if (tab === "collections") {
+      const paths = [];
+      for (const c of sortedCollections) {
+        for (const id of c.showIds) {
+          const show = localizedShows.find((s) => s.id === id && s.posterPath);
+          if (show?.posterPath) {
+            paths.push(show.posterPath);
+            break;
+          }
+        }
+        if (paths.length >= 5) break;
+        for (const id of c.movieIds || []) {
+          const movie = localizedMovies.find((m) => m.id === id && m.posterPath);
+          if (movie?.posterPath) {
+            paths.push(movie.posterPath);
+            break;
+          }
+        }
+        if (paths.length >= 5) break;
+      }
+      return pathsToAmbient(paths);
     }
-    return null;
-  }, [recItems, sortedFiltered, sortedCollections, localizedShows, localizedMovies]);
+
+    const recPaths = recItems.map((s) => s.posterPath).filter(Boolean);
+    if (recPaths.length) return pathsToAmbient(recPaths);
+    const listPaths = sortedFiltered.map((s) => s.posterPath).filter(Boolean);
+    if (listPaths.length) return pathsToAmbient(listPaths.slice(0, 5));
+    return { left: null, mid: null, right: null };
+  }, [tab, recItems, sortedFiltered, sortedCollections, localizedShows, localizedMovies]);
 
   useEffect(() => {
-    setActiveAmbientPath(defaultAmbientPath);
-  }, [defaultAmbientPath, tab, activeFilter]);
+    setActiveAmbient(defaultAmbient);
+    lastAmbientRef.current = defaultAmbient;
+  }, [defaultAmbient, tab, activeFilter]);
 
   useEffect(() => {
-    const path = activeAmbientPath || defaultAmbientPath;
-    const url = path ? tmdbImage(path, "w780") : null;
-    if (!url) {
+    const sides = ["left", "mid", "right"];
+    const resolved = {
+      left: activeAmbient.left || defaultAmbient.left,
+      mid: activeAmbient.mid || activeAmbient.left || defaultAmbient.mid,
+      right: activeAmbient.right || activeAmbient.mid || activeAmbient.left || defaultAmbient.right,
+    };
+    const nextBySide = Object.fromEntries(
+      sides.map((side) => [side, resolved[side] ? tmdbImage(resolved[side], "w780") : null])
+    );
+    if (!sides.some((side) => nextBySide[side])) {
       setAmbientLayers((prev) => prev.map((layer) => ({ ...layer, visible: false })));
       return undefined;
     }
+
+    const gen = ++ambientGenRef.current;
     let cancelled = false;
-    setAmbientLayers((prev) => {
-      const already = prev.find((layer) => layer.url === url);
-      if (already) return prev.map((layer) => ({ ...layer, visible: layer.url === url }));
-      return [...prev.map((layer) => ({ ...layer, visible: false })), { url, visible: false }].slice(-2);
-    });
-    const raf = window.requestAnimationFrame(() => {
-      if (cancelled) return;
-      setAmbientLayers((prev) => prev.map((layer) => ({ ...layer, visible: layer.url === url })));
-    });
-    const timer = window.setTimeout(() => {
-      if (cancelled) return;
-      setAmbientLayers((prev) => prev.filter((layer) => layer.visible || layer.url === url).slice(-2));
-    }, 900);
+    const timers = [];
+    const imgs = [];
+
+    const preload = (url) =>
+      new Promise((resolve) => {
+        if (!url) {
+          resolve(null);
+          return;
+        }
+        const img = new window.Image();
+        imgs.push(img);
+        img.onload = () => resolve(url);
+        img.onerror = () => resolve(url);
+        img.src = url;
+      });
+
+    (async () => {
+      await Promise.all(sides.map((side) => preload(nextBySide[side])));
+      if (cancelled || ambientGenRef.current !== gen) return;
+
+      // Per-side crossfade: keep the current visible layer until the new
+      // one is ready, then overlap opacities so total wash never dips dark.
+      setAmbientLayers((prev) => {
+        const kept = [];
+        for (const side of sides) {
+          const url = nextBySide[side];
+          if (!url) {
+            for (const layer of prev.filter((l) => l.side === side)) {
+              kept.push({ ...layer, visible: false });
+            }
+            continue;
+          }
+          const sameVisible = prev.find((l) => l.side === side && l.url === url && l.visible);
+          if (sameVisible) {
+            kept.push(sameVisible);
+            continue;
+          }
+          for (const layer of prev.filter((l) => l.side === side)) {
+            // Stay lit while the incoming layer ramps up (staggered exit below).
+            kept.push({ ...layer, visible: true, pendingExit: true });
+          }
+          kept.push({
+            side,
+            url,
+            id: `${gen}-${side}`,
+            visible: false,
+            pendingExit: false,
+          });
+        }
+        return kept.slice(-12);
+      });
+
+      const showRaf = window.requestAnimationFrame(() => {
+        if (cancelled || ambientGenRef.current !== gen) return;
+        setAmbientLayers((prev) =>
+          prev.map((layer) =>
+            String(layer.id || "") === `${gen}-${layer.side}`
+              ? { ...layer, visible: true }
+              : layer
+          )
+        );
+      });
+      timers.push(showRaf);
+
+      // Let the new wash rise first, then ease the old one out — avoids the
+      // dark→bright→dark “whoop” from both sides being near 0 together.
+      const exitTimer = window.setTimeout(() => {
+        if (cancelled || ambientGenRef.current !== gen) return;
+        setAmbientLayers((prev) =>
+          prev.map((layer) =>
+            layer.pendingExit ? { ...layer, visible: false, pendingExit: false } : layer
+          )
+        );
+      }, 520);
+      timers.push(exitTimer);
+
+      const pruneTimer = window.setTimeout(() => {
+        if (cancelled || ambientGenRef.current !== gen) return;
+        setAmbientLayers((prev) =>
+          prev.filter((layer) => layer.visible || String(layer.id || "").startsWith(`${gen}-`))
+        );
+      }, 2800);
+      timers.push(pruneTimer);
+    })();
+
     return () => {
       cancelled = true;
-      window.cancelAnimationFrame(raf);
-      window.clearTimeout(timer);
+      for (const img of imgs) {
+        img.onload = null;
+        img.onerror = null;
+      }
+      // showRaf is a raf id; others are timeouts — cancel both safely.
+      for (const id of timers) {
+        window.cancelAnimationFrame(id);
+        window.clearTimeout(id);
+      }
     };
-  }, [activeAmbientPath, defaultAmbientPath]);
+  }, [activeAmbient, defaultAmbient]);
 
   useEffect(() => {
     const root = pageRef.current;
     if (!root) return undefined;
+
     const pickAmbient = () => {
       const nodes = root.querySelectorAll("[data-lib-ambient]");
       if (!nodes.length) return;
       const focusY = window.innerHeight * 0.42;
-      let best = null;
-      let bestDist = Infinity;
+      const candidates = [];
       nodes.forEach((node) => {
         const path = node.getAttribute("data-lib-ambient");
         if (!path) return;
         const rect = node.getBoundingClientRect();
-        if (rect.bottom < 60 || rect.top > window.innerHeight - 40) return;
+        if (rect.bottom < 40 || rect.top > window.innerHeight - 20) return;
         const mid = (rect.top + rect.bottom) / 2;
-        const dist = Math.abs(mid - focusY);
-        if (dist < bestDist) {
-          bestDist = dist;
-          best = path;
-        }
+        candidates.push({ path, left: rect.left, dist: Math.abs(mid - focusY) });
       });
-      if (best) setActiveAmbientPath(best);
+      if (!candidates.length) return;
+      candidates.sort((a, b) => a.dist - b.dist);
+      // Wider vertical band = more posters contribute, softer scroll handoff.
+      const bandDist = candidates[0].dist;
+      const band = candidates
+        .filter((c) => c.dist <= bandDist + 220)
+        .sort((a, b) => a.left - b.left);
+      const next = pathsToAmbient(band.map((c) => c.path));
+      const prev = lastAmbientRef.current;
+      // Hysteresis: ignore tiny swaps so the wash eases instead of thrashing.
+      if (
+        prev.left === next.left &&
+        prev.mid === next.mid &&
+        prev.right === next.right
+      ) {
+        return;
+      }
+      const changedSides =
+        (prev.left !== next.left ? 1 : 0) +
+        (prev.mid !== next.mid ? 1 : 0) +
+        (prev.right !== next.right ? 1 : 0);
+      // Prefer waiting until at least two sides want to move, unless the
+      // nearest poster is clearly a new focus (deep into the next row).
+      if (changedSides < 2 && candidates[0].dist > 48 && prev.left) {
+        return;
+      }
+      lastAmbientRef.current = next;
+      setActiveAmbient(next);
     };
+
+    const schedulePick = () => {
+      if (ambientPickRafRef.current != null) return;
+      ambientPickRafRef.current = window.requestAnimationFrame(() => {
+        ambientPickRafRef.current = null;
+        if (ambientDebounceRef.current) window.clearTimeout(ambientDebounceRef.current);
+        // Short settle so continuous scroll blends; still gradual via CSS fade.
+        ambientDebounceRef.current = window.setTimeout(() => {
+          ambientDebounceRef.current = null;
+          pickAmbient();
+        }, 90);
+      });
+    };
+
     pickAmbient();
-    let ticking = false;
-    const onScroll = () => {
-      if (ticking) return;
-      ticking = true;
-      window.requestAnimationFrame(() => {
-        ticking = false;
-        pickAmbient();
-      });
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll);
+    window.addEventListener("scroll", schedulePick, { passive: true });
+    window.addEventListener("resize", schedulePick);
     return () => {
-      window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
+      window.removeEventListener("scroll", schedulePick);
+      window.removeEventListener("resize", schedulePick);
+      if (ambientDebounceRef.current) window.clearTimeout(ambientDebounceRef.current);
+      if (ambientPickRafRef.current != null) window.cancelAnimationFrame(ambientPickRafRef.current);
     };
-  }, [tab, sortedFiltered, recItems, viewMode, activeFilter]);
+  }, [tab, sortedFiltered, sortedCollections, recItems, viewMode, activeFilter]);
 
   const empty =
     tab === "collections"
@@ -294,15 +449,15 @@ export default function LibraryDesktop({
       <div className="library-desktop-ambient" aria-hidden="true">
         {ambientLayers.map((layer) => (
           <div
-            key={layer.url}
-            className={`library-desktop-ambient-art${layer.visible ? " is-visible" : " is-exit"}`}
+            key={layer.id || `${layer.side}-${layer.url}`}
+            className={`library-desktop-ambient-art is-${layer.side}${layer.visible ? " is-visible" : " is-exit"}`}
             style={{ backgroundImage: `url(${layer.url})` }}
           />
         ))}
         <div className="library-desktop-ambient-veil" />
       </div>
 
-      <div className="library-desktop-shell is-collections">
+      <div className="library-desktop-shell">
         <main className="library-desktop-main">
           <header className="library-desktop-head">
             <div className="library-desktop-head-copy">
@@ -336,9 +491,9 @@ export default function LibraryDesktop({
                 <ViewModeToggle viewMode={viewMode} onSelect={onSelectViewMode} />
               )}
               {tab === "collections" && (
-                <button type="button" className="library-desktop-add-btn" onClick={onNewCollection}>
-                  <Icon name="folderPlus" size={15} color="#1a1108" />
-                  <span>New collection</span>
+                <button type="button" className="library-desktop-add-btn" onClick={onNewCollection} aria-label="New collection">
+                  <Icon name="plus" size={14} color="#0a0a0a" />
+                  <span>New</span>
                 </button>
               )}
             </div>
@@ -392,7 +547,17 @@ export default function LibraryDesktop({
                       </button>
                     );
                   }
-                  return <CollectionRow key={c.id} id={c.id} name={c.name} shared={c.shared} items={items} />;
+                  return (
+                    <CollectionRow
+                      key={c.id}
+                      id={c.id}
+                      name={c.name}
+                      shared={c.shared}
+                      items={items}
+                      posterWidth={168}
+                      withShelf
+                    />
+                  );
                 })
               )}
             </div>
