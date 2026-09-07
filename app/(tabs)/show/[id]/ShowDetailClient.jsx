@@ -891,6 +891,9 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
       // delete the library row and clear local status UI. removeUserShow
       // also clears watches/reviews so progress UI can't outlive the row.
       setStatusOpen(false);
+      // A queued watch reconciliation must not recreate this row after
+      // Remove has been selected.
+      setPendingStatusSync(false);
       setInLibrary(false);
       setFavorite(false);
       setStatus(null);
@@ -900,7 +903,9 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
         episodes: s.episodes.map((e) => ({ ...e, watched: false, watchCount: 0, skipped: false, myRating: null })),
       })));
       setWatchedShowIds((prev) => { const next = new Set(prev); next.delete(showId); return next; });
-      removeUserShow(user.id, showId, "ShowDetailClient:selectStatus:remove")
+      libraryWriteChainRef.current = libraryWriteChainRef.current
+        .catch(() => {})
+        .then(() => removeUserShow(user.id, showId, "ShowDetailClient:selectStatus:remove"))
         .catch((err) => {
           console.error(err);
           window.alert("Couldn't remove this show — please try again.");
@@ -918,6 +923,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
         `${displayTitle} has watched episodes. Moving it to Watchlist will clear its watch history — this can't be undone. Continue?`
       );
       if (!confirmed) { setStatusOpen(false); return; }
+      setPendingStatusSync(false);
       setStatus("watchlist");
       setStatusExplicit(true);
       setInLibrary(true);
@@ -925,14 +931,21 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
         ...s,
         episodes: s.episodes.map((e) => ({ ...e, watched: false, watchCount: 0, skipped: false, myRating: null })),
       })));
-      setWatchlistAndClearProgress(user.id, showId, "ShowDetailClient:selectStatus:watchlist-confirm").catch(console.error);
+      libraryWriteChainRef.current = libraryWriteChainRef.current
+        .catch(() => {})
+        .then(() => setWatchlistAndClearProgress(user.id, showId, "ShowDetailClient:selectStatus:watchlist-confirm"))
+        .catch(console.error);
       setStatusOpen(false);
       return;
     }
     setStatus(id);
+    setPendingStatusSync(false);
     setStatusExplicit(true);
     setInLibrary(true);
-    setShowStatus(user.id, showId, id, "ShowDetailClient:selectStatus", { explicit: true }).catch(console.error);
+    libraryWriteChainRef.current = libraryWriteChainRef.current
+      .catch(() => {})
+      .then(() => setShowStatus(user.id, showId, id, "ShowDetailClient:selectStatus", { explicit: true }))
+      .catch(console.error);
     // Canonical "Completed" behavior: status + every currently-aired
     // episode marked watched, in one place (see markAllSeasonsWatched) so
     // Show Detail can't drift from Explore's equivalent
@@ -950,10 +963,14 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     // status menu to change it.
     setDesktopMoreOpen(false);
     setStatusOpen(false);
+    setPendingStatusSync(false);
     setStatus("watchlist");
     setStatusExplicit(true);
     setInLibrary(true);
-    setShowStatus(user.id, showId, "watchlist", "ShowDetailClient:addToLibrary", { explicit: true }).catch(console.error);
+    libraryWriteChainRef.current = libraryWriteChainRef.current
+      .catch(() => {})
+      .then(() => setShowStatus(user.id, showId, "watchlist", "ShowDetailClient:addToLibrary", { explicit: true }))
+      .catch(console.error);
   };
 
   const markWatchedFromDetail = () => {
@@ -1873,6 +1890,12 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                         <div className="show-desktop-ep-thumb-wrap">
                           <div className="show-desktop-ep-thumb" onClick={() => setActiveEpisode({ seasonId, epNumber: e.n })}>
                             <PosterArt className="show-desktop-ep-still" posterPath={e.posterPath} base={e.base} glow={e.glow} alt={e.title} flat tmdbSize="w780" sizes="(min-width: 900px) 33vw, 100vw" />
+                            {e.watched && e.myRating ? (
+                              <div className="show-desktop-ep-user-rating show-desktop-ep-thumb-rating">
+                                <Icon name="star" size={10} color={accent} />
+                                <span>{e.myRating.toFixed(1)}/5</span>
+                              </div>
+                            ) : null}
                             {e.daysUntil != null && e.daysUntil !== Infinity && (
                               <div className="show-desktop-ep-countdown">{e.daysUntil === 0 ? "Today" : e.daysUntil === 1 ? "Tomorrow" : `${e.daysUntil} days`}</div>
                             )}
@@ -1923,12 +1946,6 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                         </div>
                         <h3 className="show-desktop-ep-title" onClick={() => setActiveEpisode({ seasonId, epNumber: e.n })}>
                           <span>{e.title}</span>
-                          {e.watched && e.myRating ? (
-                            <span className="show-desktop-ep-user-rating">
-                              <Icon name="star" size={10} color={accent} />
-                              <span>{e.myRating.toFixed(1)}/5</span>
-                            </span>
-                          ) : null}
                         </h3>
                         {e.synopsis ? <p className="show-desktop-ep-synopsis">{e.synopsis}</p> : null}
                         <div className="show-desktop-ep-meta">
@@ -2053,7 +2070,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                             <div onClick={() => setActiveEpisode({ seasonId: season.id, epNumber: e.n })} className="relative flex-shrink-0 cursor-pointer active:scale-95 transition" style={{ width: 106, height: 71, borderRadius: 10, overflow: "hidden" }}>
                               <PosterArt posterPath={e.posterPath} base={e.base} glow={e.glow} alt={e.title} />
                               {e.watched && e.myRating && (
-                                <div className="absolute flex items-center gap-1 rounded-full" style={{ right: 5, top: 5, padding: "2px 6px", background: "rgba(0,0,0,0.55)" }}>
+                                <div className="absolute flex items-center gap-1 rounded-full" style={{ left: 6, bottom: 6, padding: "2px 6px", background: "rgba(0,0,0,0.62)" }}>
                                   <Icon name="star" size={8} color={accent} />
                                   <span style={{ fontSize: 10, fontWeight: 600, color: "#fff" }}>{e.myRating.toFixed(1)}/5</span>
                                 </div>

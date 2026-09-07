@@ -3727,6 +3727,16 @@ html.vt-back::view-transition-new(root) {
     color: #fff;
     flex: 0 0 auto;
   }
+  .show-desktop-ep-thumb-rating {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    padding: 4px 7px;
+    border-radius: 999px;
+    background: rgba(0,0,0,.62);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
   .show-desktop-ep-user-rating span {
     color: rgba(255,255,255,0.88);
   }
