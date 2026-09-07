@@ -10,19 +10,24 @@ import PosterCard from "@/components/ui/PosterCard";
 import PosterGrid from "@/components/ui/PosterGrid";
 import PosterQuickStatusMenu from "@/components/ui/PosterQuickStatusMenu";
 import EpisodeRatingFlow from "@/components/EpisodeRatingFlow";
+import EpisodeDetail from "@/components/EpisodeDetail";
 import { useAuth } from "@/lib/auth-context";
 import { useFavorites } from "@/lib/favorites-context";
 import { useMovieFavorites } from "@/lib/movie-favorites-context";
 import { useShowCustomizations } from "@/lib/show-customizations-context";
 import { useLongPress } from "@/lib/useLongPress";
-import { getUserShows } from "@/lib/userShows";
+import { getUserShows, reconcileShowStatusAfterWatchChange } from "@/lib/userShows";
 import { getUserMovies } from "@/lib/userMovies";
-import { getRecentWatchedShowIds, getShowWatchSummary, addEpisodeWatches, rateLatestWatch } from "@/lib/episodeWatches";
+import { getRecentWatchedShowIds, getShowWatchSummary, addEpisodeWatches, syncEpisodeWatchCount, rateLatestWatch, getEpisodeWatches, getLatestWatchDate } from "@/lib/episodeWatches";
+import { getEpisodeSkips, setEpisodeSkipped } from "@/lib/episodeSkips";
+import { formatWatchDateLabel } from "@/lib/watchDate";
 import { getProfile } from "@/lib/profile";
 import { resolveShowStatus } from "@/lib/statusResolver";
-import { resolveTitle, useReadableLanguages } from "@/lib/languages";
+import { resolveTitle, useReadableLanguages, useAppLanguage } from "@/lib/languages";
+import { toTmdbLanguage } from "@/lib/languageCodes";
 import { tmdbImage } from "@/lib/tmdb";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
+import UpcomingAllModal from "@/components/ui/UpcomingAllModal";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -82,19 +87,43 @@ function calendarDayDiff(from, to) {
   return Math.round((Date.UTC(to.year, to.month - 1, to.day) - Date.UTC(from.year, from.month - 1, from.day)) / 86400000);
 }
 
-function formatFullDate(airDateStr) {
+function formatFullDate(airDateStr, localeTag = "en-US") {
   const { year, month, day } = parseAirDateParts(airDateStr);
-  return `${MONTH_NAMES[month - 1]} ${day}, ${year}`;
+  try {
+    return new Intl.DateTimeFormat(localeTag, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(Date.UTC(year, month - 1, day)));
+  } catch {
+    return `${MONTH_NAMES[month - 1]} ${day}, ${year}`;
+  }
 }
 
-// Returns a { primary, secondary } pair for the right-aligned countdown.
-// 0/1 days out read as words ("Today" / "Tomorrow"); anything further
-// out is a stacked number + "DAYS" label, matching the reference UI.
-function getCountdown(airDateStr) {
+// Returns a { primary, secondary, label, isToday } pair for countdowns.
+// Mobile keeps primary/secondary (number + "DAYS"); desktop pills use label.
+// Optional `tr` (App Language translator) localizes label/primary strings.
+function getCountdown(airDateStr, tr) {
+  const t = typeof tr === "function" ? tr : (key, vars) => {
+    if (key === "inDays") return `In ${vars.n} days`;
+    if (key === "days") return "DAYS";
+    const fallback = { tba: "TBA", aired: "Aired", today: "Today", tomorrow: "Tomorrow" };
+    return fallback[key] || key;
+  };
+  if (!airDateStr) return { primary: t("tba"), secondary: null, label: t("tba"), isToday: false };
   const diffDays = calendarDayDiff(bangkokTodayParts(), parseAirDateParts(airDateStr));
-  if (diffDays <= 0) return { primary: "Today", secondary: null };
-  if (diffDays === 1) return { primary: "Tomorrow", secondary: null };
-  return { primary: String(diffDays), secondary: "DAYS" };
+  // Past air dates are not "Today" — Upcoming should have filtered them out,
+  // but keep the label honest if stale data slips through.
+  if (diffDays < 0) return { primary: t("aired"), secondary: null, label: t("aired"), isToday: false };
+  if (diffDays === 0) return { primary: t("today"), secondary: null, label: t("today"), isToday: true };
+  if (diffDays === 1) return { primary: t("tomorrow"), secondary: null, label: t("tomorrow"), isToday: false };
+  return {
+    primary: String(diffDays),
+    secondary: t("days"),
+    label: t("inDays", { n: diffDays }),
+    isToday: false,
+  };
 }
 
 // Samples the lower third of a backdrop image (same region the hero's
@@ -208,11 +237,36 @@ function GlassPill({ children, filled, onClick, round }) {
 // again — margin-top is the one thing that legitimately varies per section
 // (how much room the section above it needs), passed in via className
 // rather than baked in here.
-function SectionHeader({ title, onSeeAll, className }) {
+function SectionHeader({ title, onSeeAll, right, className }) {
   return (
     <div className={`px-6 flex items-center justify-between ${className || ""}`}>
       <div className="text-white text-[19.55px] font-semibold">{title}</div>
-      {onSeeAll && <button className="text-[13px]" style={{ color: t.textDim }} onClick={onSeeAll}>See All</button>}
+      {right || (onSeeAll ? <button className="text-[13px]" style={{ color: t.textDim }} onClick={onSeeAll}>See All</button> : null)}
+    </div>
+  );
+}
+
+function InProgressViewToggle({ mode, onChange }) {
+  return (
+    <div className="home-view-toggle" role="group" aria-label="In Progress view">
+      <button
+        type="button"
+        className={mode === "grid" ? "is-active" : ""}
+        aria-pressed={mode === "grid"}
+        aria-label="Poster view"
+        onClick={() => onChange("grid")}
+      >
+        <Icon name="gridToggle" size={15} color={mode === "grid" ? "#111" : "rgba(255,255,255,0.6)"} />
+      </button>
+      <button
+        type="button"
+        className={mode === "gallery" ? "is-active" : ""}
+        aria-pressed={mode === "gallery"}
+        aria-label="Episode card view"
+        onClick={() => onChange("gallery")}
+      >
+        <Icon name="list" size={15} color={mode === "gallery" ? "#111" : "rgba(255,255,255,0.6)"} />
+      </button>
     </div>
   );
 }
@@ -421,9 +475,20 @@ function UpcomingRow({ item, onLongPress }) {
   const router = useRouter();
   const { isFavorite, toggleFavorite } = useFavorites();
   const { getCustomPoster } = useShowCustomizations();
+  const readableLanguages = useReadableLanguages();
+  const { t: tr, code: appLanguage } = useAppLanguage();
+  const dateLocale = toTmdbLanguage(appLanguage);
   const longPress = useLongPress((rect) => onLongPress({ id: item.id, title: item.show.title }, rect));
-  const { primary, secondary } = getCountdown(item.airDate);
+  const { primary, secondary } = getCountdown(item.airDate, tr);
   const favorited = isFavorite(item.id);
+  const showTitle = resolveTitle(
+    {
+      title: item.show?.title,
+      originalTitle: item.show?.originalTitle,
+      originalLanguage: item.show?.originalLanguage,
+    },
+    readableLanguages
+  ) || item.show.title;
   return (
     <div
       onClick={() => { if (longPress.consumeClick()) return; router.push(`/show/${item.id}`); }}
@@ -432,7 +497,7 @@ function UpcomingRow({ item, onLongPress }) {
       {...longPress.handlers}
     >
       <div className="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
-        <PosterArt posterPath={item.show.posterPath} overrideSrc={getCustomPoster(item.id)} base={item.show.base} glow={item.show.glow} alt={item.show.title} />
+        <PosterArt posterPath={item.show.posterPath} overrideSrc={getCustomPoster(item.id)} base={item.show.base} glow={item.show.glow} alt={showTitle} />
         {favorited && (
           <button
             type="button"
@@ -449,9 +514,9 @@ function UpcomingRow({ item, onLongPress }) {
             "Episode N" itself whenever TMDB has no real episode name yet
             (common for an unaired one), which read as the exact same
             "Episode 5" text appearing twice in a row. */}
-        <div className="text-[10px] font-semibold tracking-[0.14em]" style={{ color: t.textDim }}>{item.show.title.toUpperCase()} · SEASON {item.season}</div>
+        <div className="text-[10px] font-semibold tracking-[0.14em]" style={{ color: t.textDim }}>{showTitle.toUpperCase()} · {tr("seasonN", { n: item.season })}</div>
         <div className="text-white text-[15px] font-bold leading-tight mt-0.5 truncate">{item.epTitle}</div>
-        <div className="text-[12px] mt-0.5" style={{ color: t.textDim }}>{formatFullDate(item.airDate)}</div>
+        <div className="text-[12px] mt-0.5" style={{ color: t.textDim }}>{formatFullDate(item.airDate, dateLocale)}</div>
       </div>
       <div className="text-right flex-shrink-0">
         <div className="text-white font-bold leading-none" style={{ fontSize: secondary ? 22 : 15 }}>{primary}</div>
@@ -469,8 +534,12 @@ function UpcomingRow({ item, onLongPress }) {
 function UpcomingMovieRow({ item }) {
   const router = useRouter();
   const { isFavorite, toggleFavorite } = useMovieFavorites();
-  const { primary, secondary } = getCountdown(item.releaseDate);
+  const readableLanguages = useReadableLanguages();
+  const { t: tr, code: appLanguage } = useAppLanguage();
+  const dateLocale = toTmdbLanguage(appLanguage);
+  const { primary, secondary } = getCountdown(item.releaseDate, tr);
   const favorited = isFavorite(item.id);
+  const title = resolveTitle(item, readableLanguages) || item.title;
   return (
     <div
       onClick={() => router.push(`/movie/${item.id}`)}
@@ -478,7 +547,7 @@ function UpcomingMovieRow({ item }) {
       style={{ background: t.cardFill, border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(16px)" }}
     >
       <div className="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
-        <PosterArt posterPath={item.posterPath} alt={item.title} />
+        <PosterArt posterPath={item.posterPath} alt={title} />
         {favorited && (
           <button
             type="button"
@@ -491,11 +560,11 @@ function UpcomingMovieRow({ item }) {
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-white text-[15px] font-bold leading-tight truncate">{item.title}</div>
+        <div className="text-white text-[15px] font-bold leading-tight truncate">{title}</div>
         {item.releaseDate ? (
-          <div className="text-[12px] mt-0.5" style={{ color: t.textDim }}>{formatFullDate(item.releaseDate)}</div>
+          <div className="text-[12px] mt-0.5" style={{ color: t.textDim }}>{formatFullDate(item.releaseDate, dateLocale)}</div>
         ) : (
-          <div className="text-[12px] mt-0.5" style={{ color: t.textDim }}>{item.tmdbStatus || "Release date TBA"}</div>
+          <div className="text-[12px] mt-0.5" style={{ color: t.textDim }}>{item.tmdbStatus || tr("tba")}</div>
         )}
       </div>
       {item.releaseDate && (
@@ -508,12 +577,436 @@ function UpcomingMovieRow({ item }) {
   );
 }
 
+// Desktop See Next — landscape In Progress card (wide backdrop, title /
+// episode / progress / remaining overlaid). Separate from the mobile
+// compact gallery card so desktop can use a 4-up grid without fighting
+// that card's fixed 220px width.
+function HomeDesktopProgressCard({ item, onLongPress, onMarkWatched }) {
+  const router = useRouter();
+  const longPress = useLongPress((rect) => onLongPress(item.show, rect));
+  // "+N" beyond the episode already named — episodesLeft includes this one.
+  const moreLeft = item.episodesLeft != null ? item.episodesLeft - 1 : 0;
+  const episodeLabel = item.episode != null
+    ? `Episode ${item.episode}`
+    : ([item.code, item.ep].filter(Boolean).join(" · ") || "");
+  return (
+    <div
+      onClick={() => { if (longPress.consumeClick()) return; router.push(`/show/${item.id}`); }}
+      className="home-desktop-progress-card"
+      {...longPress.handlers}
+    >
+      <div className="home-desktop-progress-art">
+        <PosterArt posterPath={item.landscapeImage} base={item.show.base} glow={item.show.glow} alt={item.show.title} tmdbSize="w780" />
+        <div className="home-desktop-progress-scrim" />
+        <div className="home-desktop-progress-copy">
+          <div className="home-desktop-progress-title-row">
+            <div className="home-desktop-progress-title">{item.show.title}</div>
+            {moreLeft > 0 ? <span className="home-desktop-progress-more">+{moreLeft}</span> : null}
+          </div>
+          {episodeLabel ? (
+            <div className="home-desktop-progress-meta">{episodeLabel}</div>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          aria-label={`Mark ${item.show.title} episode ${item.episode} watched`}
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          onPointerCancel={(e) => e.stopPropagation()}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMarkWatched(item); }}
+          className="home-desktop-progress-check"
+        >
+          <Icon name="check" size={14} color="rgba(255,255,255,0.85)" strokeWidth={2.4} />
+        </button>
+        {item.progress != null ? (
+          <div className="home-desktop-progress-bar" aria-hidden="true">
+            <div style={{ width: `${Math.max(0, Math.min(100, item.progress ?? 0))}%` }} />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function featuredUpcomingArtPath(item) {
+  // Next-ep / release art only — never borrow a different episode's still.
+  // Season dumps keep the show poster. Otherwise: this item's still (when
+  // TMDB has one for the next ep), then poster, then backdrop — whatever
+  // the title itself provided.
+  if (item.mediaType === "movie") {
+    return item.backdropPath || item.posterPath || null;
+  }
+  if (item.isSeasonDrop) return item.show.posterPath || item.show.backdropPath || null;
+  return item.stillPath || item.show.posterPath || item.show.backdropPath || null;
+}
+
+// Continue Watching / In Progress landscape — next unwatched ep still when
+// available; season dumps stay on poster.
+function nextEpisodeDisplayArt({ stillPath, posterPath, backdropPath, isSeasonDrop }) {
+  if (isSeasonDrop) return posterPath || backdropPath || null;
+  return stillPath || posterPath || backdropPath || null;
+}
+
+function HomeDesktopUpcomingFeatured({ item, onLongPress }) {
+  const router = useRouter();
+  const { getCustomPoster } = useShowCustomizations();
+  const readableLanguages = useReadableLanguages();
+  const { t: tr, code: appLanguage } = useAppLanguage();
+  const dateLocale = toTmdbLanguage(appLanguage);
+  const isMovie = item.mediaType === "movie";
+  const longPress = useLongPress((rect) => {
+    if (isMovie || !onLongPress) return;
+    onLongPress({ id: item.id, title: item.show.title }, rect);
+  });
+  const dateStr = isMovie ? item.releaseDate : item.airDate;
+  const { label, isToday } = dateStr
+    ? getCountdown(dateStr, tr)
+    : { label: "", isToday: false };
+  const seasonEp = !isMovie
+    ? [
+        item.season != null ? tr("seasonN", { n: item.season }) : null,
+        item.episode != null ? tr("episodeN", { n: item.episode }) : (item.epTitle || null),
+      ].filter(Boolean).join(" · ")
+    : tr("movie");
+  const overview = (item.overview || item.show?.overview || "").trim();
+  const title = isMovie
+    ? resolveTitle(item, readableLanguages)
+    : resolveTitle(
+        {
+          title: item.show?.title,
+          originalTitle: item.show?.originalTitle,
+          originalLanguage: item.show?.originalLanguage,
+        },
+        readableLanguages
+      );
+  const artPath = featuredUpcomingArtPath(item);
+  const usingEpisodeStill = !isMovie && Boolean(item.stillPath) && !item.isSeasonDrop;
+  const customPoster = isMovie || usingEpisodeStill ? null : getCustomPoster(item.id);
+  const href = isMovie ? `/movie/${item.id}` : `/show/${item.id}`;
+
+  return (
+    <div
+      onClick={() => { if (!isMovie && longPress.consumeClick()) return; router.push(href); }}
+      className={`home-desktop-upcoming-featured${usingEpisodeStill || (isMovie && item.backdropPath) ? " is-still" : " is-poster"}`}
+      {...(isMovie ? {} : longPress.handlers)}
+    >
+      <div className="home-desktop-upcoming-featured-art">
+        <PosterArt
+          posterPath={artPath}
+          overrideSrc={customPoster}
+          glow={isMovie ? accent : item.show.glow}
+          alt={title}
+          tmdbSize="w780"
+          sizes="(min-width: 900px) 420px, 100vw"
+        />
+        <div className="home-desktop-upcoming-featured-fade" aria-hidden="true" />
+      </div>
+      <div className="home-desktop-upcoming-featured-copy">
+        <h3 className="home-desktop-upcoming-featured-title">{title}</h3>
+        {seasonEp ? <div className="home-desktop-upcoming-featured-ep">{seasonEp}</div> : null}
+        <div className="home-desktop-upcoming-featured-date">
+          <Icon name="calendar" size={13} color="rgba(255,255,255,0.45)" />
+          {dateStr ? formatFullDate(dateStr, dateLocale) : (item.tmdbStatus || tr("tba"))}
+        </div>
+        {overview ? <p className="home-desktop-upcoming-featured-overview">{overview}</p> : null}
+        {dateStr ? (
+          <div className={`home-desktop-upcoming-pill${isToday ? " is-today" : ""}`}>
+            <Icon name="calendar" size={13} color={isToday ? accent : "rgba(255,255,255,0.7)"} />
+            {label}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function HomeDesktopUpcomingRow({ item, onLongPress }) {
+  const router = useRouter();
+  const { getCustomPoster } = useShowCustomizations();
+  const readableLanguages = useReadableLanguages();
+  const { t: tr, code: appLanguage } = useAppLanguage();
+  const dateLocale = toTmdbLanguage(appLanguage);
+  const isMovie = item.mediaType === "movie";
+  const longPress = useLongPress((rect) => {
+    if (isMovie || !onLongPress) return;
+    onLongPress({ id: item.id, title: item.show.title }, rect);
+  });
+  const dateStr = isMovie ? item.releaseDate : item.airDate;
+  const { label, isToday } = dateStr
+    ? getCountdown(dateStr, tr)
+    : { label: "", isToday: false };
+  const seasonEp = !isMovie
+    ? [
+        item.season != null ? tr("seasonN", { n: item.season }) : null,
+        item.episode != null ? tr("episodeN", { n: item.episode }) : null,
+      ].filter(Boolean).join(" · ")
+    : tr("movie");
+  const title = isMovie
+    ? resolveTitle(item, readableLanguages)
+    : resolveTitle(
+        {
+          title: item.show?.title,
+          originalTitle: item.show?.originalTitle,
+          originalLanguage: item.show?.originalLanguage,
+        },
+        readableLanguages
+      );
+  const posterPath = isMovie ? item.posterPath : item.show.posterPath;
+  const href = isMovie ? `/movie/${item.id}` : `/show/${item.id}`;
+
+  return (
+    <div
+      onClick={() => { if (!isMovie && longPress.consumeClick()) return; router.push(href); }}
+      className="home-desktop-upcoming-card"
+      {...(isMovie ? {} : longPress.handlers)}
+    >
+      <div className="home-desktop-upcoming-thumb">
+        <PosterArt
+          posterPath={posterPath}
+          overrideSrc={isMovie ? null : getCustomPoster(item.id)}
+          base={item.show?.base}
+          glow={isMovie ? accent : item.show?.glow}
+          alt={title}
+          objectFit="contain"
+          flat
+        />
+      </div>
+      <div className="home-desktop-upcoming-copy">
+        <div className="home-desktop-upcoming-show">{title}</div>
+        {seasonEp ? <div className="home-desktop-upcoming-ep">{seasonEp}</div> : null}
+        <div className="home-desktop-upcoming-date">
+          <Icon name="calendar" size={12} color="rgba(255,255,255,0.42)" />
+          {dateStr ? formatFullDate(dateStr, dateLocale) : (item.tmdbStatus || tr("tba"))}
+        </div>
+      </div>
+      {dateStr ? (
+        <div className={`home-desktop-upcoming-status${isToday ? " is-today" : ""}`}>{label}</div>
+      ) : null}
+    </div>
+  );
+}
+
+function HomeDesktopUpcomingSection({ items, onLongPress }) {
+  const { t: tr } = useAppLanguage();
+  const [seeAllOpen, setSeeAllOpen] = useState(false);
+  if (!items.length) return null;
+  const [featured, ...rest] = items;
+  const stack = rest.slice(0, 3);
+  const canSeeAll = rest.length > 3;
+
+  return (
+    <section className="home-desktop-section">
+      <div className="home-desktop-section-head">
+        <h2>{tr("upcoming")}</h2>
+        {canSeeAll ? (
+          <button
+            type="button"
+            className="home-desktop-section-link"
+            onClick={() => setSeeAllOpen(true)}
+          >
+            {tr("seeAll")}
+          </button>
+        ) : null}
+      </div>
+      <div className={`home-desktop-upcoming-grid${stack.length === 0 ? " is-solo" : ""}`}>
+        <HomeDesktopUpcomingFeatured item={featured} onLongPress={onLongPress} />
+        {stack.length > 0 ? (
+          <div className="home-desktop-upcoming-stack">
+            {stack.map((item) => (
+              <HomeDesktopUpcomingRow key={item.key || `${item.mediaType}-${item.id}`} item={item} onLongPress={onLongPress} />
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <UpcomingAllModal
+        open={seeAllOpen}
+        items={items}
+        onClose={() => setSeeAllOpen(false)}
+        onLongPress={onLongPress}
+      />
+    </section>
+  );
+}
+
+function HomeDesktopLayout({
+  heroShow,
+  loaded,
+  markHeroWatchedAndRate,
+  goToHeroEpisode,
+  goToHeroShow,
+  inProgressItems,
+  inProgressPosterItems,
+  inProgressViewMode,
+  onInProgressViewModeChange,
+  handleLongPress,
+  markInProgressWatchedAndRate,
+  onToggleFavorite,
+  isFavorite,
+  upcomingItems,
+}) {
+  const progressEpisodeItems = inProgressItems;
+  const progressPosterItems = inProgressPosterItems?.length ? inProgressPosterItems : inProgressItems;
+  const hasProgress =
+    inProgressViewMode === "gallery"
+      ? progressEpisodeItems.length > 0
+      : progressPosterItems.length > 0;
+  const [ambientLayers, setAmbientLayers] = useState([]);
+  const ambientPath = heroShow?.posterPath || null;
+  const { t: tr } = useAppLanguage();
+
+  useEffect(() => {
+    const url = ambientPath ? tmdbImage(ambientPath, "w780") : null;
+    if (!url) {
+      setAmbientLayers((prev) => prev.map((layer) => ({ ...layer, visible: false })));
+      return undefined;
+    }
+
+    let cancelled = false;
+    setAmbientLayers((prev) => {
+      const already = prev.find((layer) => layer.url === url);
+      if (already) {
+        return prev.map((layer) => ({ ...layer, visible: layer.url === url }));
+      }
+      return [
+        ...prev.map((layer) => ({ ...layer, visible: false })),
+        { url, visible: false },
+      ].slice(-2);
+    });
+
+    const raf = window.requestAnimationFrame(() => {
+      if (cancelled) return;
+      setAmbientLayers((prev) => prev.map((layer) => ({ ...layer, visible: layer.url === url })));
+    });
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+      setAmbientLayers((prev) => prev.filter((layer) => layer.visible || layer.url === url).slice(-2));
+    }, 900);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
+  }, [ambientPath]);
+
+  return (
+    <div className="home-desktop-layout">
+      {ambientLayers.length > 0 ? (
+        <div className="home-desktop-hero-ambient" aria-hidden="true">
+          {ambientLayers.map((layer) => (
+            <div
+              key={layer.url}
+              className={`home-desktop-hero-ambient-art${layer.visible ? " is-visible" : " is-exit"}`}
+              style={{ backgroundImage: `url(${layer.url})` }}
+            />
+          ))}
+          <div className="home-desktop-hero-ambient-veil" />
+        </div>
+      ) : null}
+      <div className="home-desktop-shell">
+        {heroShow ? (
+          <div className="home-desktop-cw">
+            <div className="home-desktop-cw-media">
+              <PosterArt posterPath={heroShow.posterPath} glow={heroShow.accent} alt={heroShow.title} tmdbSize="w1280" sizes="(min-width: 900px) 920px, 100vw" />
+              <div className="home-desktop-cw-media-fade" aria-hidden="true" />
+            </div>
+            <div className="home-desktop-cw-panel">
+              <div className="home-desktop-cw-label">Continue Watching</div>
+              <h1 className="home-desktop-cw-title">{heroShow.title}</h1>
+              {heroShow.episodeLabel ? (
+                <div className="home-desktop-cw-episode">{heroShow.episodeLabel}</div>
+              ) : null}
+              {heroShow.overview ? (
+                <p className="home-desktop-cw-overview">{heroShow.overview}</p>
+              ) : null}
+              <div className="home-desktop-cw-actions">
+                <button type="button" className="home-desktop-cw-watch" onClick={markHeroWatchedAndRate}>
+                  <Icon name="play" size={14} color="#111" />
+                  {tr("watch")}
+                </button>
+                <button type="button" className="home-desktop-cw-icon-btn" onClick={goToHeroEpisode} aria-label="Episode details">
+                  <Icon name="info" size={17} color="#fff" />
+                </button>
+                <button type="button" className="home-desktop-cw-icon-btn" onClick={goToHeroShow} aria-label="Show details">
+                  <Icon name="tv" size={17} color="#fff" />
+                </button>
+              </div>
+              <div className="home-desktop-cw-progress">
+                <Ring pct={heroShow.progressPct ?? 0} size={18} accent={heroShow.accent || accent} />
+                <span>{tr("epsLeft", { n: heroShow.episodesLeft })}</span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="home-desktop-cw-empty">
+            {loaded ? (
+              <>
+                <Icon name="tv" size={24} color={t.textDim} />
+                <div className="home-desktop-cw-empty-title">{tr("nothingInProgress")}</div>
+                <div className="home-desktop-cw-empty-sub">{tr("nothingInProgressSub")}</div>
+              </>
+            ) : (
+              <div className="home-desktop-cw-skeleton" />
+            )}
+          </div>
+        )}
+
+        {hasProgress && (
+          <section className="home-desktop-section">
+            <div className="home-desktop-section-head">
+              <h2>{tr("inProgress")}</h2>
+              <InProgressViewToggle mode={inProgressViewMode} onChange={onInProgressViewModeChange} />
+            </div>
+            {inProgressViewMode === "gallery" ? (
+              <div className="home-desktop-progress-rail">
+                {progressEpisodeItems.map((item) => (
+                  <HomeDesktopProgressCard
+                    key={item.id}
+                    item={item}
+                    onLongPress={handleLongPress}
+                    onMarkWatched={markInProgressWatchedAndRate}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="home-desktop-progress-rail is-posters">
+                {progressPosterItems.map((item) => (
+                  <div key={item.id} className="home-desktop-progress-poster">
+                    <PosterCard
+                      show={item.show}
+                      href={`/show/${item.id}`}
+                      width="100%"
+                      titlePlacement="overlay"
+                      subtitle={`${item.code} · ${item.ep}`}
+                      progress={item.progress}
+                      favorite={isFavorite?.(item.id)}
+                      onToggleFavorite={() => onToggleFavorite?.(item.id)}
+                      onLongPress={handleLongPress}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {upcomingItems.length > 0 && (
+          <HomeDesktopUpcomingSection
+            items={upcomingItems}
+            onLongPress={handleLongPress}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Page() {
   const router = useRouter();
   const { user } = useAuth();
   const { isFavorite, toggleFavorite } = useFavorites();
   const { getCustomPoster } = useShowCustomizations();
   const readableLanguages = useReadableLanguages();
+  const { t: tr } = useAppLanguage();
   const initialHome = user ? homeSessionCache.get(user.id) : null;
   const [view, setView] = useState("home"); // "home" | "inProgress"
   // See All → In Progress's own display mode — "grid" (the existing
@@ -747,6 +1240,7 @@ export default function Page() {
       });
       for (const result of remainingResults) byId[result.id] = result;
 
+      const today = bangkokTodayParts();
       const upcomingResults = allIds
         // A show marked Completed must stay off this row even when TMDB
         // reports a future episode for it (a newly announced/renewed
@@ -756,6 +1250,13 @@ export default function Page() {
         .filter((id) => resolvedStatusOf(id) !== "completed")
         .map((id) => byId[id])
         .filter((r) => r && r.nextEpisodeToAir && !NOT_AIRING_STATUSES.has(r.tmdbStatus))
+        // Drop already-aired "next" pointers (TMDB often lags a day) so
+        // Upcoming never keeps showing last night's episode still.
+        .filter((r) => {
+          const air = r.nextEpisodeToAir.airDate;
+          if (!air) return false;
+          return calendarDayDiff(today, parseAirDateParts(air)) >= 0;
+        })
         // Plain string comparison, not Date subtraction — air_date is
         // always zero-padded ISO "YYYY-MM-DD", so lexicographic order is
         // already chronological order, with no timezone parsing involved.
@@ -858,10 +1359,14 @@ export default function Page() {
     season: hero.season,
     episode: hero.episode,
     title: resolveTitle(hero, readableLanguages),
-    // Episode still first, falling back to show backdrop, then poster,
-    // then PosterArt's own decorative default if all three are null.
-    // No user-facing toggle — just a fallback chain.
-    posterPath: hero.epPosterPath || hero.backdropPath || hero.posterPath,
+    // Next-ep still when TMDB has one; otherwise the show poster. Season
+    // dumps always keep the poster (same rules as Upcoming Featured).
+    posterPath: nextEpisodeDisplayArt({
+      stillPath: hero.epPosterPath,
+      posterPath: hero.posterPath,
+      backdropPath: hero.backdropPath,
+      isSeasonDrop: Boolean(hero.epIsSeasonDrop),
+    }),
     accent,
     episodeLabel: hero.season != null && hero.episode != null
       ? `S${hero.season} E${hero.episode}${hero.epTitle ? ` · ${hero.epTitle}` : ""}`
@@ -875,6 +1380,7 @@ export default function Page() {
     epTitle: hero.epTitle,
     runtimeMin: hero.epRuntime,
     episodeAirDate: hero.epAirDate,
+    overview: (hero.epOverview || hero.overview || "").trim(),
     // Guards markHeroWatchedAndRate below — see its own comment.
     caughtUp: hero.caughtUp,
   } : null;
@@ -929,7 +1435,13 @@ export default function Page() {
     // big banner card, plus the raw episode number for its "Episode N"
     // label, since `ep` above is the episode's own TMDB title text, not
     // that.
-    landscapeImage: s.epPosterPath || s.backdropPath || s.posterPath,
+    // Gallery / desktop landscape — same next-ep art rules as the hero.
+    landscapeImage: nextEpisodeDisplayArt({
+      stillPath: s.epPosterPath,
+      posterPath: s.posterPath,
+      backdropPath: s.backdropPath,
+      isSeasonDrop: Boolean(s.epIsSeasonDrop),
+    }),
     season: s.season,
     episode: s.episode,
     epTitle: s.epTitle,
@@ -953,21 +1465,56 @@ export default function Page() {
   const inProgressRowList = heroShow ? inProgressList.filter((item) => item.id !== heroShow.showId) : inProgressList;
 
   const upcomingEpisodes = upcoming.map((s) => ({
+    key: `tv-${s.id}`,
+    mediaType: "tv",
     id: s.id,
-    show: { title: resolveTitle(s, readableLanguages), posterPath: s.posterPath, glow: accent },
+    show: {
+      title: s.title,
+      originalTitle: s.originalTitle,
+      originalLanguage: s.originalLanguage,
+      posterPath: s.posterPath,
+      backdropPath: s.backdropPath || s.posterPath,
+      glow: accent,
+      overview: s.overview || "",
+    },
     season: s.nextEpisodeToAir.season,
     episode: s.nextEpisodeToAir.episode,
     epTitle: s.nextEpisodeToAir.title || `Episode ${s.nextEpisodeToAir.episode}`,
+    // Prefer the next episode's own overview; show overview only as fallback.
+    overview: s.nextEpisodeToAir.overview || s.overview || "",
+    // Only this next episode's still — never a prior episode's image.
+    stillPath: s.nextEpisodeToAir.stillPath || null,
+    isSeasonDrop: Boolean(s.nextEpisodeToAir.isSeasonDrop),
     // Kept as the raw "YYYY-MM-DD" string, not a Date object — getCountdown/
     // formatFullDate parse it directly as a Bangkok calendar date instead
     // of going through `new Date(...)`'s UTC-midnight interpretation.
     airDate: s.nextEpisodeToAir.airDate,
+    sortDate: s.nextEpisodeToAir.airDate || "9999-99-99",
   }));
+
+  const upcomingMovieItems = upcomingMovies.map((m) => ({
+    key: `movie-${m.id}`,
+    mediaType: "movie",
+    id: m.id,
+    title: m.title,
+    originalTitle: m.originalTitle,
+    originalLanguage: m.originalLanguage,
+    posterPath: m.posterPath,
+    backdropPath: m.backdropPath || m.posterPath,
+    overview: m.overview || "",
+    releaseDate: m.releaseDate,
+    tmdbStatus: m.tmdbStatus,
+    sortDate: m.releaseDate || "9999-99-99",
+  }));
+
+  // Single Upcoming rail — shows + library movies, soonest first.
+  const upcomingItems = [...upcomingEpisodes, ...upcomingMovieItems]
+    .sort((a, b) => a.sortDate.localeCompare(b.sortDate));
 
   const goToHeroEpisode = () => {
     setMenuOpen(false);
-    if (!heroShow?.showId || !heroShow.season || !heroShow.episode) return;
-    router.push(`/show/${heroShow.showId}/episode/${heroShow.season}/${heroShow.episode}`);
+    if (!heroShow?.showId || heroShow.season == null || heroShow.episode == null) return;
+    setHeroEpDetail({ loading: true, showId: heroShow.showId, season: heroShow.season, episodeNumber: heroShow.episode });
   };
 
   // The hero card's Watch button — marks this exact episode watched right
@@ -978,9 +1525,13 @@ export default function Page() {
   // EpisodeRatingFlow already retries its own row lookup a few times to
   // cover exactly this race.
   const [heroRatingOpen, setHeroRatingOpen] = useState(false);
+  const [heroEpDetail, setHeroEpDetail] = useState(null); // null | { loading, showId, season, episodeNumber, showTitle, episode, cast, watchedDateLabel }
+  const heroEpWriteChainRef = useRef(Promise.resolve());
+
   const markHeroWatchedAndRate = () => {
     if (!user) { router.push("/login"); return; }
     setMenuOpen(false);
+    setHeroEpDetail(null);
     if (!heroShow?.showId || heroShow.season == null || heroShow.episode == null) return;
     // Safety net, not the primary fix — a caught-up show should never
     // reach the hero card at all (resolveShowStatus resolves it to
@@ -1003,6 +1554,131 @@ export default function Page() {
     setMenuOpen(false);
     if (!heroShow?.showId) return;
     router.push(`/show/${heroShow.showId}`);
+  };
+
+  // Load episode detail + watch/skip state when the hero info button opens
+  // the centered overlay (same EpisodeDetail shell Show Detail uses).
+  useEffect(() => {
+    if (!heroEpDetail?.loading || !heroEpDetail.showId) return;
+    const { showId, season, episodeNumber } = heroEpDetail;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/shows/${showId}/episode/${season}/${episodeNumber}`);
+        if (!res.ok) throw new Error(`episode fetch ${res.status}`);
+        const data = await res.json();
+        let watched = false;
+        let watchCount = 0;
+        let myRating = null;
+        let skipped = false;
+        let watchedDateLabel = null;
+        if (user) {
+          const [byEpisode, skippedKeys] = await Promise.all([
+            getEpisodeWatches(user.id, showId),
+            getEpisodeSkips(user.id, showId),
+          ]);
+          const hit = byEpisode[`${season}-${episodeNumber}`];
+          if (hit) {
+            watched = true;
+            watchCount = hit.watchCount;
+            myRating = hit.rating ?? null;
+          }
+          skipped = skippedKeys.has(`${season}-${episodeNumber}`);
+          if (watched) {
+            const watch = await getLatestWatchDate(user.id, showId, season, episodeNumber);
+            watchedDateLabel = watch ? formatWatchDateLabel(watch) : null;
+          }
+        }
+        if (cancelled) return;
+        setHeroEpDetail({
+          loading: false,
+          showId,
+          season,
+          episodeNumber,
+          showTitle: data.showTitle || heroShow?.title || "",
+          episode: {
+            ...data.episode,
+            watched,
+            watchCount,
+            skipped,
+            myRating,
+          },
+          cast: data.cast ?? [],
+          watchedDateLabel,
+        });
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) setHeroEpDetail(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- open once per loading request; heroShow title is a display fallback only
+  }, [heroEpDetail?.loading, heroEpDetail?.showId, heroEpDetail?.season, heroEpDetail?.episodeNumber, user]);
+
+  const patchHeroEpDetail = (updater) => {
+    setHeroEpDetail((prev) => {
+      if (!prev || prev.loading || !prev.episode) return prev;
+      const nextEpisode = typeof updater === "function" ? updater(prev.episode) : updater;
+      return { ...prev, episode: nextEpisode };
+    });
+  };
+
+  const setHeroEpWatchCount = (count) => {
+    if (!heroEpDetail || heroEpDetail.loading) return;
+    const { showId, season, episode } = heroEpDetail;
+    const prevCount = episode.watchCount;
+    const prevSkipped = episode.skipped;
+    patchHeroEpDetail((e) => ({ ...e, watched: count > 0, watchCount: count, skipped: false }));
+    if (!user) return;
+    heroEpWriteChainRef.current = heroEpWriteChainRef.current
+      .catch(() => {})
+      .then(() => Promise.all([
+        syncEpisodeWatchCount(user.id, showId, season, episode.n, count),
+        prevSkipped ? setEpisodeSkipped(user.id, showId, season, episode.n, false) : Promise.resolve(),
+      ]))
+      .then(() => reconcileShowStatusAfterWatchChange(user.id, showId, "Home:heroEpDetail:setWatchCount"))
+      .catch((err) => {
+        console.error(err);
+        patchHeroEpDetail((e) => ({ ...e, watched: prevCount > 0, watchCount: prevCount, skipped: prevSkipped }));
+      });
+  };
+
+  const setHeroEpSkipped = (skipped) => {
+    if (!heroEpDetail || heroEpDetail.loading) return;
+    const { showId, season, episode } = heroEpDetail;
+    const prevSkipped = episode.skipped;
+    const prevWatched = episode.watched;
+    const prevCount = episode.watchCount;
+    patchHeroEpDetail((e) => ({
+      ...e,
+      skipped,
+      watched: skipped ? false : e.watched,
+      watchCount: skipped ? 0 : e.watchCount,
+    }));
+    if (!user) { router.push("/login"); return; }
+    heroEpWriteChainRef.current = heroEpWriteChainRef.current
+      .catch(() => {})
+      .then(() => Promise.all([
+        skipped && prevCount > 0 ? syncEpisodeWatchCount(user.id, showId, season, episode.n, 0) : Promise.resolve(),
+        setEpisodeSkipped(user.id, showId, season, episode.n, skipped),
+      ]))
+      .then(() => reconcileShowStatusAfterWatchChange(user.id, showId, "Home:heroEpDetail:setSkipped"))
+      .catch((err) => {
+        console.error(err);
+        patchHeroEpDetail((e) => ({ ...e, skipped: prevSkipped, watched: prevWatched, watchCount: prevCount }));
+      });
+  };
+
+  const markHeroEpWatchedFromDetail = () => {
+    if (!user) { router.push("/login"); return; }
+    setHeroEpWatchCount(1);
+    setHeroEpDetail(null);
+    setHeroRatingOpen(true);
+  };
+
+  const closeHeroEpDetail = () => {
+    setHeroEpDetail(null);
+    setRefreshToken((n) => n + 1);
   };
 
   // Cast for the hero's own "Who was your favorite?" voting UI — this
@@ -1055,7 +1731,7 @@ export default function Page() {
       {view === "inProgress" && (
         <>
           <SeeAllHeader
-            title="In Progress"
+            title={tr("inProgress")}
             count={inProgressList.length}
             onBack={() => setView("home")}
             right={
@@ -1112,7 +1788,8 @@ export default function Page() {
       )}
 
       {view === "home" && (
-        <div className="relative" style={{ isolation: "isolate", background: "#000" }}>
+        <>
+        <div className="home-mobile-layout relative" style={{ isolation: "isolate", background: "#000" }}>
           {/* Page-wide subtle noise — separate from the atmosphere's own
               Grain below (which is scoped to that box's own height and
               disappears with it) so the page keeps a faint texture all the
@@ -1547,16 +2224,11 @@ export default function Page() {
             // whole section (and everything below it) up more decisively
             // this time.
             <div style={{ position: "relative", zIndex: 3, paddingTop: 15, background: "transparent" }}>
-              <SectionHeader title="In Progress" onSeeAll={() => setView("inProgress")} />
-              {/* Mirrors whichever display mode See All → In Progress is
-                  set to (inProgressViewMode, persisted — see
-                  IN_PROGRESS_VIEW_MODE_KEY above), instead of always the
-                  poster layout regardless of what the user picked there.
-                  Gallery mode also drops the hero's own show (see
-                  inProgressRowList above) — the poster grid stays
-                  unfiltered since those small cards don't read as a
-                  duplicate of the hero the way a second full backdrop
-                  card right underneath it does. */}
+              <SectionHeader
+                title={tr("inProgress")}
+                right={<InProgressViewToggle mode={inProgressViewMode} onChange={setInProgressViewMode} />}
+              />
+              {/* Horizontal rails for both modes — no full-page See All. */}
               {inProgressViewMode === "gallery" ? (
                 <div className="mt-3 pl-6 flex items-start gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
                   {inProgressRowList.map((item) => (
@@ -1565,14 +2237,6 @@ export default function Page() {
                   <div className="w-2 flex-shrink-0" />
                 </div>
               ) : (
-                // items-start — without it, flex's default align-items:
-                // stretch makes every card's outer box (which has no
-                // explicit height of its own) match the tallest sibling's
-                // natural height, e.g. a two-line subtitle on one card
-                // stretching the whole row. The poster itself already has
-                // a fixed 2:3 aspect-ratio (PosterCard) and object-fit:
-                // cover (PosterArt), but that outer stretch still made
-                // cards read as uneven overall.
                 <div className="mt-3 pl-6 flex items-start gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
                   {inProgressList.map((item) => (
                     <PosterCard
@@ -1593,29 +2257,71 @@ export default function Page() {
             </div>
           )}
 
-          {/* ---------- Upcoming ---------- */}
-          {upcomingEpisodes.length > 0 && (
+          {/* ---------- Upcoming (shows + movies) ---------- */}
+          {upcomingItems.length > 0 && (
             <>
-              <div className="mt-8 px-6 text-white text-[19.55px] font-semibold">Upcoming</div>
+              <div className="mt-8 px-6 text-white text-[19.55px] font-semibold">{tr("upcoming")}</div>
               <div className="mt-3 px-6 flex flex-col gap-2.5">
-                {upcomingEpisodes.map((item) => (
-                  <UpcomingRow key={item.id} item={item} onLongPress={handleLongPress} />
+                {upcomingItems.map((item) => (
+                  item.mediaType === "movie" ? (
+                    <UpcomingMovieRow key={item.key} item={item} />
+                  ) : (
+                    <UpcomingRow key={item.key} item={item} onLongPress={handleLongPress} />
+                  )
                 ))}
               </div>
             </>
           )}
+          </div>
+        </div>
 
-          {/* ---------- Upcoming Movies ---------- */}
-          {upcomingMovies.length > 0 && (
-            <>
-              <div className="mt-8 px-6 text-white text-[19.55px] font-semibold">Upcoming Movies</div>
-              <div className="mt-3 px-6 flex flex-col gap-2.5">
-                {upcomingMovies.map((item) => (
-                  <UpcomingMovieRow key={item.id} item={item} />
-                ))}
-              </div>
-            </>
-          )}
+        <HomeDesktopLayout
+          heroShow={heroShow}
+          loaded={loaded}
+          markHeroWatchedAndRate={markHeroWatchedAndRate}
+          goToHeroEpisode={goToHeroEpisode}
+          goToHeroShow={goToHeroShow}
+          inProgressItems={inProgressRowList}
+          inProgressPosterItems={inProgressList}
+          inProgressViewMode={inProgressViewMode}
+          onInProgressViewModeChange={setInProgressViewMode}
+          handleLongPress={handleLongPress}
+          markInProgressWatchedAndRate={markInProgressWatchedAndRate}
+          isFavorite={isFavorite}
+          onToggleFavorite={(id) => toggleFavorite(id, "Home:inProgressDesktop")}
+          upcomingItems={upcomingItems}
+        />
+        </>
+      )}
+
+      {/* Hero episode info — same centered EpisodeDetail overlay as Show Detail. */}
+      {heroEpDetail && !heroEpDetail.loading && heroEpDetail.episode && (
+        <div
+          className="show-ep-detail-overlay fixed inset-0 z-40"
+          onClick={closeHeroEpDetail}
+        >
+          <div className="show-ep-detail-panel" onClick={(event) => event.stopPropagation()}>
+            <EpisodeDetail
+              showTitle={heroEpDetail.showTitle}
+              seasonNumber={heroEpDetail.season}
+              episode={heroEpDetail.episode}
+              watchedDateLabel={heroEpDetail.watchedDateLabel}
+              cast={heroEpDetail.cast}
+              hasEarlierUnwatched={false}
+              breadcrumb={{
+                label: heroEpDetail.showTitle,
+                onClick: () => { setHeroEpDetail(null); router.push(`/show/${heroEpDetail.showId}`); },
+              }}
+              onClose={closeHeroEpDetail}
+              onCastClick={(id) => { setHeroEpDetail(null); router.push(`/person/${id}`); }}
+              onMarkWatched={markHeroEpWatchedFromDetail}
+              onMarkOnlyThis={markHeroEpWatchedFromDetail}
+              onMarkWithPrevious={markHeroEpWatchedFromDetail}
+              onMarkNotWatched={() => setHeroEpWatchCount(0)}
+              onMarkSkipped={() => setHeroEpSkipped(true)}
+              onMarkRewatched={() => setHeroEpWatchCount((heroEpDetail.episode.watchCount || 1) + 1)}
+              onMarkWatchedOnce={() => setHeroEpWatchCount(1)}
+            />
           </div>
         </div>
       )}
@@ -1636,6 +2342,7 @@ export default function Page() {
             posterPath: heroShow.posterPath,
             runtimeMin: heroShow.runtimeMin,
             episodeAirDate: heroShow.episodeAirDate,
+            synopsis: heroShow.overview || "",
             showId: heroShow.showId,
             season: heroShow.season,
             episode: heroShow.episode,

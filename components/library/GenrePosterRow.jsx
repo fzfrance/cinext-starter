@@ -11,27 +11,26 @@ const accent = DEFAULT_ACCENT;
 
 // Poster-view counterpart to Aisle.jsx — same genre heading + ">" link
 // behavior (identical fullListHref construction, including the &type=
-// movies tag for a movie genre shelf), just rendering standard front-
-// facing PosterCards in one horizontal row instead of ShelfCase spines.
-// width=104 + gap 10 (className="flex gap-2.5") is not a new number —
-// it's the exact sizing Profile's own Favorite Shows/Movies rows already
-// use for a horizontal poster row, reused here rather than invented, and
-// lands right in the requested "~3-3.5 visible at once" range on a
-// standard phone width. href-only navigation (no onOpen/CaseOverlay
-// wiring, no long-press menu) — the DVD-case flip-open interaction is
-// specific to that view's own aesthetic; Poster view matches how
-// PosterCard is used everywhere else in the app (Explore/Search/Profile
-// grids: tap navigates straight to the detail page). `favorite` is
-// static/display-only here (no onToggleFavorite), reusing the `favorite`
-// field the existing shows/movies fetch already puts on every item — no
-// new data fetch or context needed just for this view.
-export default function GenrePosterRow({ title, items, shared, mediaType = "tv" }) {
+// movies tag for a movie genre shelf), just rendering front-facing
+// PosterCards in one horizontal row instead of ShelfCase spines.
+// Default width=104 matches mobile Profile favorite rows; desktop Library
+// passes posterWidth=168 to match Watch Next softGlow posters, plus
+// withShelf for the same aisle shelf board under the row.
+export default function GenrePosterRow({
+  title,
+  items,
+  shared,
+  mediaType = "tv",
+  posterWidth = 104,
+  withShelf = false,
+  gap = 10,
+}) {
   const router = useRouter();
   if (!items.length) return null;
   const fullListHref = `/profile/library?genre=${encodeURIComponent(title)}${mediaType === "movie" ? "&type=movies" : ""}`;
   return (
-    <div style={{ marginTop: 35 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 20px 14px" }}>
+    <div className="genre-poster-row" style={{ marginTop: 35 }}>
+      <div className="genre-poster-row-head" style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 20px 14px" }}>
         <Icon name={GENRE_ICON[title] || "tv"} size={16} color={GENRE_COLOR[title] || t.textDim} />
         <span style={{ fontSize: 19, fontWeight: 700, color: "#fff" }}>{title}</span>
         {shared && (
@@ -45,7 +44,7 @@ export default function GenrePosterRow({ title, items, shared, mediaType = "tv" 
         </button>
       </div>
       <div
-        className="no-scrollbar"
+        className="no-scrollbar genre-poster-row-scroll"
         style={{
           overflowX: "auto",
           overflowY: "hidden",
@@ -53,31 +52,25 @@ export default function GenrePosterRow({ title, items, shared, mediaType = "tv" 
           scrollbarWidth: "none",
         }}
       >
-        {/* Match Aisle's proven iOS scroll geometry: the scroller owns only
-            overflow, while one max-content child owns the full row width.
-            Keeping padding on this child also gives Safari an unambiguous
-            scroll extent on wide iPad viewports. */}
-        <div className="flex gap-2.5" style={{ width: "max-content", minWidth: "100%", padding: "0 20px" }}>
-          {items.map((s) => (
-            <PosterCard
-              key={s.id}
-              show={s}
-              href={mediaType === "movie" ? `/movie/${s.id}` : `/show/${s.id}`}
-              width={104}
-              titlePlacement="overlay"
-              favorite={s.favorite}
-              // Unlike a standalone poster, a card inside this native
-              // scroller must not start a transform on touch-down. On iPad
-              // Safari that :active animation can win the gesture's initial
-              // hit-test and make an otherwise-scrollable row feel stuck.
-              pressScale={false}
-              // These cards render at 104 CSS pixels. w342 stays crisp on
-              // a Retina iPad without decoding the default 500px source for
-              // every visible poster while the user is scrolling.
-              tmdbSize="w342"
-              sizes="104px"
-            />
-          ))}
+        <div style={{ width: "max-content", minWidth: "100%" }}>
+          <div className="genre-poster-row-cases" style={{ display: "flex", gap, padding: "0 20px" }}>
+            {items.map((s) => (
+              <div key={s.id} data-lib-ambient={s.posterPath || undefined} style={{ flexShrink: 0 }}>
+                <PosterCard
+                  show={s}
+                  href={mediaType === "movie" ? `/movie/${s.id}` : `/show/${s.id}`}
+                  width={posterWidth}
+                  titlePlacement="overlay"
+                  favorite={s.favorite}
+                  pressScale={false}
+                  tmdbSize={posterWidth >= 140 ? "w342" : "w342"}
+                  sizes={`${posterWidth}px`}
+                />
+              </div>
+            ))}
+            <div style={{ width: 20, flexShrink: 0 }} />
+          </div>
+          {withShelf ? <div className="library-aisle-shelf" aria-hidden="true" /> : null}
         </div>
       </div>
     </div>

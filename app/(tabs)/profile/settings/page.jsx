@@ -4,10 +4,13 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Icon from "@/components/ui/Icon";
 import PageHeader from "@/components/ui/PageHeader";
+import { useIsDesktopSettings } from "@/components/ui/SettingsModal";
+import { useDesktopModals } from "@/lib/desktop-modals-context";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 import { getProfile, upsertProfile } from "@/lib/profile";
 import { accentPalette, contrastText, resolveTheme, DEFAULT_ACCENT } from "@/lib/theme";
+import { useAppLanguage } from "@/lib/languages";
 
 // A true red, deliberately not lib/theme.js's shared `danger` token
 // (#e0567a, actually a pink/rose used for errors/remove actions
@@ -48,6 +51,18 @@ function Row({ label, value, icon, onClick, danger, armed, external, chevron = t
 export default function Page() {
   const router = useRouter();
   const { user } = useAuth();
+  const { t: tr } = useAppLanguage();
+  const isDesktop = useIsDesktopSettings();
+  const { openSettings } = useDesktopModals();
+
+  // Desktop: open floating Settings over the current page and return to
+  // Profile so the screen behind never blanks out.
+  useEffect(() => {
+    if (!isDesktop) return;
+    openSettings();
+    router.replace("/profile");
+  }, [isDesktop, openSettings, router]);
+
   const [theme, setTheme] = useState("dark"); // "dark" | "light" | "system"
   const [systemPrefersDark, setSystemPrefersDark] = useState(true);
   // TODO: once a global ThemeProvider exists (per app/(tabs)/layout.jsx's
@@ -163,32 +178,40 @@ export default function Page() {
     }
   };
 
+  // Desktop hands off to DesktopModalsProvider — nothing to render here.
+  if (isDesktop) return null;
+
   return (
     <>
-      <PageHeader title="Settings" onBack={() => router.back()} t={t} />
+      <PageHeader title={tr("settings")} onBack={() => router.back()} t={t} />
       <div className="px-6">
-        <SectionLabel t={t}>Profile</SectionLabel>
+        <SectionLabel t={t}>{tr("profileSection")}</SectionLabel>
         <div className="flex flex-col gap-2">
-          <Row label="Edit Profile" icon="edit" onClick={() => router.push("/profile/edit")} t={t} accent={accent} />
+          <Row label={tr("editProfile")} icon="edit" onClick={() => router.push("/profile/edit")} t={t} accent={accent} />
         </div>
 
-        <SectionLabel t={t}>Preferences</SectionLabel>
+        <SectionLabel t={t}>{tr("preferencesSection")}</SectionLabel>
         <div className="rounded-2xl" style={{ padding: "14px", background: t.cardFill, border: `1px solid ${t.cardBorder}` }}>
           <div style={{ fontSize: 13, color: t.textDim, marginBottom: 10 }}>Theme</div>
           <div className="flex gap-2">
             {[["dark", "moon"], ["light", "sun"], ["system", "auto"]].map(([id, icon]) => {
               const active = theme === id;
               const comingSoon = id === "light";
+              const darkActive = active && id === "dark";
+              const btnBg = darkActive ? "#0A0A0C" : active ? accent : t.inputBg;
+              const btnBorder = darkActive ? "rgba(255,255,255,0.28)" : active ? accent : t.cardBorder;
+              const btnFg = darkActive ? "#fff" : active ? activeText : t.text;
+              const btnFgDim = darkActive ? "#fff" : active ? activeText : t.textDim;
               return (
                 <button
                   key={id}
                   onClick={() => !comingSoon && chooseTheme(id)}
                   disabled={comingSoon}
                   className="relative flex-1 flex flex-col items-center gap-1.5 rounded-xl active:scale-95 transition"
-                  style={{ padding: "10px 4px", background: active ? accent : t.inputBg, border: `1px solid ${active ? accent : t.cardBorder}`, opacity: comingSoon ? 0.45 : 1 }}
+                  style={{ padding: "10px 4px", background: btnBg, border: `1px solid ${btnBorder}`, opacity: comingSoon ? 0.45 : 1 }}
                 >
-                  <Icon name={icon} size={16} color={active ? activeText : t.text} />
-                  <span style={{ fontSize: 11, fontWeight: 500, color: active ? activeText : t.textDim, textTransform: "capitalize" }}>{id}</span>
+                  <Icon name={icon} size={16} color={btnFg} />
+                  <span style={{ fontSize: 11, fontWeight: 500, color: btnFgDim, textTransform: "capitalize" }}>{id}</span>
                   {comingSoon && (
                     <span style={{ position: "absolute", top: -7, right: -4, fontSize: 8, fontWeight: 700, color: t.textDim, background: t.bg, border: `1px solid ${t.cardBorder}`, borderRadius: 999, padding: "2px 5px", letterSpacing: "0.02em" }}>SOON</span>
                   )}
@@ -215,16 +238,16 @@ export default function Page() {
         {/* Still under Preferences — no separate SectionLabel here, same
             grouping as Appearance right above it. */}
         <div className="flex flex-col gap-2" style={{ marginTop: 10 }}>
-          <Row label="Language Settings" icon="globe" onClick={() => router.push("/profile/settings/language")} t={t} accent={accent} />
+          <Row label={tr("languageSettings")} icon="globe" onClick={() => router.push("/profile/settings/language")} t={t} accent={accent} />
         </div>
 
         <SectionLabel t={t}>Data &amp; Privacy</SectionLabel>
         <Row label="Data Export" icon="export" t={t} accent={accent} />
 
-        <SectionLabel t={t}>Account</SectionLabel>
+        <SectionLabel t={t}>{tr("accountSection")}</SectionLabel>
         <div className="flex flex-col gap-2">
           <Row
-            label={signOutArmed ? "Tap again to sign out" : "Sign Out"}
+            label={signOutArmed ? tr("tapAgainSignOut") : tr("signOut")}
             icon="logout"
             armed={signOutArmed}
             onClick={handleSignOutTap}

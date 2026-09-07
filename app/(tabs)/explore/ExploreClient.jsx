@@ -17,6 +17,7 @@ import { resolveShowStatus } from "@/lib/statusResolver";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { hrefForMedia, mediaKey } from "@/lib/media";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
+import { tmdbImage } from "@/lib/tmdb";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -59,6 +60,15 @@ function GenreChip({ label, active, onClick }) {
   );
 }
 
+function MediaTypeLabel({ mediaType }) {
+  if (mediaType !== "movie" && mediaType !== "tv") return null;
+  return (
+    <span className="explore-media-type-label" aria-hidden="true">
+      {mediaType === "movie" ? "Movie" : "TV Show"}
+    </span>
+  );
+}
+
 function TrendingCard({ item, rank, status }) {
   const { getCustomPoster } = useShowCustomizations();
   return (
@@ -84,6 +94,7 @@ function RecommendedCard({ item, status }) {
     <Link href={hrefForMedia(item)} className="block flex-shrink-0 active:scale-95 transition cursor-pointer" style={{ width: 116 }}>
       <div className="relative rounded-2xl overflow-hidden" style={{ width: 116, height: 164, boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
         <PosterArt posterPath={item.posterPath} overrideSrc={item.mediaType === "movie" ? undefined : getCustomPoster(item.id)} base={item.base} glow={item.glow} alt={item.title} />
+        <MediaTypeLabel mediaType={item.mediaType} />
         {status ? <MediaStatusBadge status={status} /> : <MediaFavoriteBadge item={item} source="Explore:favoriteBadge" />}
       </div>
       {/* Fixed 2-line height (not just line-clamp) — same reasoning as
@@ -292,12 +303,13 @@ function SectionHeader({ title, onOpen }) {
 }
 
 // ---------- Section detail (grid) overlay — reused for Trending Shows / Trending Movies / For You ----------
-function GridPosterCard({ item }) {
+function GridPosterCard({ item, showMediaLabel = false }) {
   const { getCustomPoster } = useShowCustomizations();
   return (
     <Link href={hrefForMedia(item)} className="block active:scale-95 transition cursor-pointer">
       <div className="relative rounded-xl overflow-hidden" style={{ aspectRatio: "2 / 3", boxShadow: "0 6px 16px rgba(0,0,0,0.45)" }}>
         <PosterArt posterPath={item.posterPath} overrideSrc={item.mediaType === "movie" ? undefined : getCustomPoster(item.id)} base={item.base} glow={item.glow} alt={item.title} />
+        {showMediaLabel ? <MediaTypeLabel mediaType={item.mediaType} /> : null}
         {item.status ? <MediaStatusBadge status={item.status} /> : <MediaFavoriteBadge item={item} source="Explore:favoriteBadge" />}
       </div>
       <div className="mt-1.5 text-[11.5px] font-semibold text-white leading-tight">{item.title}</div>
@@ -306,7 +318,7 @@ function GridPosterCard({ item }) {
   );
 }
 
-function SectionGridPage({ title, subtitle, items, onBack }) {
+function SectionGridPage({ title, subtitle, items, onBack, showMediaLabel = false }) {
   return (
     <div className="fixed inset-0 z-40" style={{ background: t.bg }}>
       <div className="h-full overflow-y-auto pb-24" style={{ scrollbarWidth: "none" }}>
@@ -321,16 +333,215 @@ function SectionGridPage({ title, subtitle, items, onBack }) {
         </div>
 
         <div className="px-6 grid grid-cols-3 gap-x-3 gap-y-5" style={{ marginTop: 22 }}>
-          {items.map((item) => <GridPosterCard key={mediaKey(item)} item={item} />)}
+          {items.map((item) => <GridPosterCard key={mediaKey(item)} item={item} showMediaLabel={showMediaLabel} />)}
         </div>
       </div>
     </div>
   );
 }
 
-export default function ExploreClient({ trendingShows: trendingShowsRaw, trendingMovies: trendingMoviesRaw, heroSlides: heroSlidesRaw }) {
+function ExploreDesktopLayout({ heroSlides, trendingShows, trendingMovies, genreRails = [], providers, resolvedStatusMap, recommended, recommendedLoading, onToggleWatchlist }) {
   const router = useRouter();
-  const { user } = useAuth();
+  const hero = heroSlides[0];
+  const showItems = trendingShows.slice(0, 10);
+  const movieItems = trendingMovies.slice(0, 10);
+  const heroKey = hero ? mediaKey(hero) : null;
+  const heroStatus = heroKey ? resolvedStatusMap[heroKey] : undefined;
+  const heroSaved = Boolean(heroStatus);
+  const heroWatchlisted = heroStatus === "watchlist";
+  return (
+    <div className="explore-desktop-layout">
+      {hero && (
+        <section className="explore-desktop-hero">
+          <Link href={hrefForMedia(hero)} className="explore-desktop-hero-hit" aria-label={hero.title}>
+            <span className="explore-desktop-hero-art">
+              <PosterArt posterPath={hero.posterPath} alt="" tmdbSize="w1280" sizes="100vw" />
+            </span>
+            <span className="explore-desktop-hero-scrim" />
+          </Link>
+          <div className="explore-desktop-hero-copy">
+            <HeroTitleLogo item={hero} />
+            {hero.overview ? <p className="explore-desktop-hero-overview">{hero.overview}</p> : null}
+            <div className="explore-desktop-hero-actions">
+              <button
+                type="button"
+                className="explore-desktop-hero-button"
+                onClick={() => {
+                  if (heroSaved && !heroWatchlisted) { router.push(hrefForMedia(hero)); return; }
+                  onToggleWatchlist?.(hero);
+                }}
+              >
+                <Icon name={heroSaved ? "check" : "plus"} size={16} color="#111" strokeWidth={2.2} />
+                Watchlist
+              </button>
+              <Link href={hrefForMedia(hero)} className="explore-desktop-hero-info">
+                <Icon name="info" size={17} /> View details
+              </Link>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {recommendedLoading ? (
+        <section className="explore-desktop-section explore-desktop-shelf">
+          <h2>For You</h2>
+          <div className="explore-desktop-poster-row" aria-busy="true">
+            {Array.from({ length: 8 }, (_, i) => (
+              <div className="explore-desktop-poster-card explore-desktop-poster-skeleton" key={i}>
+                <div className="explore-desktop-poster-wrap"><div className="explore-desktop-poster-art" /></div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : recommended.length > 0 ? (
+        <DesktopShelf title="For You" items={recommended} resolvedStatusMap={resolvedStatusMap} showRank={false} showMediaLabel />
+      ) : (
+        <section className="explore-desktop-section explore-desktop-shelf">
+          <h2>For You</h2>
+          <div className="explore-desktop-empty">Your personalized movie and show picks will appear here.</div>
+        </section>
+      )}
+
+      <section className="explore-desktop-section explore-desktop-providers">
+        <h2>Streaming Services</h2>
+        {providers.length > 0 ? (
+          <div className="explore-provider-row">
+            {providers.map((provider) => (
+              <ProviderMark key={provider.provider_id} provider={provider} />
+            ))}
+          </div>
+        ) : (
+          <div className="explore-desktop-empty">Streaming services will appear here.</div>
+        )}
+      </section>
+
+      <DesktopShelf title="Top 10 TV Shows" items={showItems} resolvedStatusMap={resolvedStatusMap} />
+      <DesktopShelf title="Top 10 Movies" items={movieItems} resolvedStatusMap={resolvedStatusMap} />
+
+      {genreRails.map((rail) => (
+        <DesktopShelf
+          key={rail.name}
+          title={rail.name}
+          items={rail.items}
+          resolvedStatusMap={resolvedStatusMap}
+          showRank={false}
+          showMediaLabel
+        />
+      ))}
+    </div>
+  );
+}
+
+function ProviderMark({ provider }) {
+  const src = tmdbImage(provider.logo_path, "original");
+  const [shape, setShape] = useState(src ? "pending" : "missing");
+  const imgRef = useRef(null);
+
+  const classify = (img) => {
+    const width = img?.naturalWidth;
+    const height = img?.naturalHeight;
+    if (!width || !height) {
+      setShape("missing");
+      return;
+    }
+    // TMDB/JustWatch often ships 1:1 brand tiles. Wide wordmarks stay
+    // uncropped as marks; square tiles render as the tile itself.
+    setShape(width / height >= 1.35 ? "wordmark" : "tile");
+  };
+
+  useEffect(() => {
+    if (imgRef.current?.complete && imgRef.current.naturalWidth) classify(imgRef.current);
+  }, [src]);
+
+  if (!src || shape === "missing") {
+    return <span className="explore-provider-name">{provider.provider_name}</span>;
+  }
+
+  return (
+    <div className={`explore-provider-card is-${shape}`} title={provider.provider_name}>
+      <img
+        ref={imgRef}
+        src={src}
+        alt={provider.provider_name}
+        onLoad={(event) => classify(event.currentTarget)}
+        onError={() => setShape("missing")}
+      />
+    </div>
+  );
+}
+
+function HeroTitleLogo({ item }) {
+  const readableLanguages = useReadableLanguages();
+  const [logoPath, setLogoPath] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setFailed(false);
+    setLoaded(false);
+    setLogoPath(null);
+    const url = item.mediaType === "movie" ? "/api/movies/logos" : "/api/shows/logos";
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [item.id], readableLanguages }),
+    })
+      .then((r) => r.json())
+      .then(({ results }) => { if (!cancelled) { setLogoPath(results?.[0]?.logoPath ?? null); setLoaded(true); } })
+      .catch(() => { if (!cancelled) { setLogoPath(null); setLoaded(true); } });
+    return () => { cancelled = true; };
+  }, [item.id, item.mediaType, readableLanguages]);
+  const src = !failed && logoPath ? tmdbImage(logoPath, "w500") : null;
+  if (src) return <img className="explore-desktop-hero-logo" src={src} alt={item.title} onError={() => setFailed(true)} />;
+  // Hold the title slot while the logo request is in flight so a wordmark
+  // doesn't flash in after plain text. Fall back to the title only when
+  // TMDB has no usable logo for this item.
+  if (!loaded) return <div className="explore-desktop-hero-logo-slot" aria-hidden="true" />;
+  return <h1>{item.title}</h1>;
+}
+
+function desktopItemYear(item) {
+  if (item.year) return String(item.year);
+  if (item.date) return String(item.date).slice(0, 4);
+  if (item.meta) {
+    const match = String(item.meta).match(/\b(19|20)\d{2}\b/);
+    if (match) return match[0];
+  }
+  return "";
+}
+
+function DesktopShelf({ title, items, resolvedStatusMap, showRank = true, showMediaLabel = false }) {
+  return (
+    <section className="explore-desktop-section explore-desktop-shelf">
+      <h2>{title}</h2>
+      <div className="explore-desktop-poster-row">
+        {items.map((item, index) => {
+          const year = desktopItemYear(item);
+          return (
+            <Link href={hrefForMedia(item)} className="explore-desktop-poster-card" key={mediaKey(item)}>
+              <div className="explore-desktop-poster-wrap">
+                <div className="explore-desktop-poster-art">
+                  <PosterArt posterPath={item.posterPath} alt={item.title} />
+                </div>
+                {showRank && <div className="explore-desktop-rank">{index + 1}</div>}
+                {showMediaLabel ? <MediaTypeLabel mediaType={item.mediaType} /> : null}
+                {resolvedStatusMap[mediaKey(item)]
+                  ? <MediaStatusBadge status={resolvedStatusMap[mediaKey(item)]} />
+                  : <MediaFavoriteBadge item={item} source="Explore:desktopBadge" />}
+              </div>
+              <div className="explore-desktop-poster-title">{item.title}</div>
+              {year ? <div className="explore-desktop-poster-year">{year}</div> : null}
+            </Link>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+export default function ExploreClient({ trendingShows: trendingShowsRaw, trendingMovies: trendingMoviesRaw, heroSlides: heroSlidesRaw, genreRails: genreRailsRaw = [], providers = [] }) {
+  const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   const readableLanguages = useReadableLanguages();
   // Resolved once here, per the signed-in user's Readable Languages —
   // every downstream reference just reads `.title` normally after this.
@@ -341,6 +552,13 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
   // on the Browse All entry card).
   const trendingShows = trendingShowsRaw.map((item) => ({ ...item, title: resolveTitle(item, readableLanguages) }));
   const trendingMovies = trendingMoviesRaw.map((item) => ({ ...item, title: resolveTitle(item, readableLanguages) }));
+  const genreRails = useMemo(
+    () => genreRailsRaw.map((rail) => ({
+      ...rail,
+      items: rail.items.map((item) => ({ ...item, title: resolveTitle(item, readableLanguages) })),
+    })),
+    [genreRailsRaw, readableLanguages]
+  );
   const trendingAll = useMemo(() => [...trendingShows, ...trendingMovies], [trendingShows, trendingMovies]);
 
   // Real per-user "Shows For You"/"Movies For You" (app/api/shows/
@@ -349,6 +567,7 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
   // for how these get populated, and combinedHeroSlides for the mix.
   const [recommendedShows, setRecommendedShows] = useState([]);
   const [recommendedMovies, setRecommendedMovies] = useState([]);
+  const [recommendedReady, setRecommendedReady] = useState(false);
   // Keep the server-provided hero order fixed for this mount. Personalized
   // recommendations arrive after first paint; reshuffling the entire array
   // at that moment used to replace the poster already on screen and looked
@@ -460,25 +679,44 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
   // preferring Watching/Completed across both (the strongest recent-taste
   // signal) — and excludes anything already in either library, plus
   // whatever's currently trending, from the results.
+  const authSettled = !authLoading || Boolean(user);
   useEffect(() => {
-    if (!user) { setRecommendedShows([]); setRecommendedMovies([]); return; }
+    if (!authSettled) {
+      setRecommendedReady(false);
+      return;
+    }
+    if (!user) {
+      setRecommendedShows([]);
+      setRecommendedMovies([]);
+      setRecommendedReady(true);
+      return;
+    }
+    setRecommendedReady(false);
     let cancelled = false;
+    const safety = setTimeout(() => {
+      if (!cancelled) setRecommendedReady(true);
+    }, 10000);
     // Same reasoning as the status-map effect above — getUserMovies fails
     // independently so shows-side recommendations still populate even
-    // when user_movies doesn't exist yet.
+    // when user_movies doesn't exist yet. getUserShows is caught the same
+    // way so a library read failure cannot leave For You spinning forever.
     Promise.all([
-      getUserShows(user.id),
+      getUserShows(user.id).catch((err) => { console.error(err); return {}; }),
       getUserMovies(user.id).catch((err) => { console.error(err); return {}; }),
     ]).then(([byShow, byMovie]) => {
       if (cancelled) return;
-      const showEntries = Object.entries(byShow).map(([id, s]) => ({ id: Number(id), mediaType: "tv", ...s }));
-      const movieEntries = Object.entries(byMovie).map(([id, s]) => ({ id: Number(id), mediaType: "movie", ...s }));
+      const showEntries = Object.entries(byShow ?? {}).map(([id, s]) => ({ id: Number(id), mediaType: "tv", ...s }));
+      const movieEntries = Object.entries(byMovie ?? {}).map(([id, s]) => ({ id: Number(id), mediaType: "movie", ...s }));
       const entries = [...showEntries, ...movieEntries];
-      if (entries.length === 0) return;
+      if (entries.length === 0) {
+        setRecommendedShows([]);
+        setRecommendedMovies([]);
+        return;
+      }
       const preferred = entries.filter((s) => s.status === "watching" || s.status === "completed");
       const seedPool = preferred.length > 0 ? preferred : entries;
       const seedIds = seedPool
-        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
         .slice(0, 3)
         .map((s) => ({ id: s.id, mediaType: s.mediaType }));
       // Also excludes whatever's currently shown in either Trending row —
@@ -495,16 +733,33 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ seedIds, excludeIds }),
       })
-        .then((res) => res.json())
+        .then((res) => {
+          if (!res.ok) throw new Error(`recommended-for-you failed (${res.status})`);
+          return res.json();
+        })
         .then((data) => {
           if (cancelled) return;
-          setRecommendedShows((data.tvItems ?? []).map((item) => ({ ...item, mode: "recommended" })));
-          setRecommendedMovies((data.movieItems ?? []).map((item) => ({ ...item, mode: "recommended" })));
+          const withYear = (item) => ({
+            ...item,
+            mode: "recommended",
+            year: item.date ? String(item.date).slice(0, 4) : (item.year ?? ""),
+          });
+          setRecommendedShows((data.tvItems ?? []).map(withYear));
+          setRecommendedMovies((data.movieItems ?? []).map(withYear));
         });
-    }).catch(console.error);
-    return () => { cancelled = true; };
+    }).catch((err) => {
+      console.error(err);
+      if (!cancelled) {
+        setRecommendedShows([]);
+        setRecommendedMovies([]);
+      }
+    }).finally(() => {
+      clearTimeout(safety);
+      if (!cancelled) setRecommendedReady(true);
+    });
+    return () => { cancelled = true; clearTimeout(safety); };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- trendingAll is a derived useMemo over trendingShows/trendingMovies (themselves derived from stable props), not something this effect should re-run on identity changes of
-  }, [user]);
+  }, [user, authSettled]);
 
   // Watchlist is definitionally zero watched episodes (lib/statusResolver.js)
   // — landing there while progress already exists would recreate the exact
@@ -584,6 +839,7 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
     title: "For You",
     subtitle: "Based on what you watch.",
     items: recommendedAllResolved.map((t) => ({ ...t, meta: t.genre, status: resolvedStatusMap[mediaKey(t)] ?? null })),
+    showMediaLabel: true,
   });
 
   const watchlist = new Set(Object.entries(resolvedStatusMap).filter(([, s]) => s === "watchlist").map(([key]) => key));
@@ -592,10 +848,17 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
   // previously changed the array under ExploreHero and could replace its
   // first poster immediately on open. Saved items remain stable and simply
   // render the existing saved/checkmark state.
-  const visibleHeroSlides = heroSlides;
+  // Never promote something the user has already watched or started into the
+  // cinematic hero. Watchlist-only entries remain eligible, since they have
+  // no viewing progress yet. The map is keyed by media type + ID so a movie
+  // and TV title sharing a numeric TMDB ID cannot exclude each other.
+  const watchedHeroStatuses = new Set(["watching", "completed", "paused", "drop", "dropped"]);
+  const visibleHeroSlides = heroSlides.filter((slide) => !watchedHeroStatuses.has(resolvedStatusMap[mediaKey(slide)]));
 
   return (
     <>
+      <ExploreDesktopLayout heroSlides={visibleHeroSlides} trendingShows={trendingShows} trendingMovies={trendingMovies} genreRails={genreRails} providers={providers} resolvedStatusMap={resolvedStatusMap} recommended={recommendedAllResolved} recommendedLoading={!recommendedReady && (authLoading || Boolean(user))} onToggleWatchlist={toggleWatchlist} />
+      <div className="explore-mobile-layout">
       {/* ---------- Hero (stays mixed-type) ---------- */}
       <ExploreHero heroSlides={visibleHeroSlides} watchlist={watchlist} libraryKeys={libraryKeys} onToggleWatchlist={toggleWatchlist} onOpenSlide={(slide) => router.push(hrefForMedia(slide))} />
 
@@ -675,9 +938,12 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
           title={sectionView.title}
           subtitle={sectionView.subtitle}
           items={sectionView.items}
+          showMediaLabel={Boolean(sectionView.showMediaLabel)}
           onBack={() => setSectionView(null)}
         />
       )}
+
+      </div>
 
     </>
   );

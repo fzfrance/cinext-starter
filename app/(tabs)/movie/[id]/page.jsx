@@ -13,6 +13,39 @@ function formatAirDate(dateStr) {
   return `${MONTH_NAMES[m - 1]} ${d}, ${y}`;
 }
 
+function formatRuntime(mins) {
+  if (!mins || mins <= 0) return null;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h <= 0) return `${m}m`;
+  if (m <= 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+// Prefer US/GB certification for the desktop meta line (e.g. "PG-13").
+// TMDB movie certs live under release_dates, not content_ratings.
+function pickMovieCertification(releaseDates) {
+  const results = releaseDates?.results ?? [];
+  const certFor = (iso) => {
+    const entry = results.find((r) => r.iso_3166_1 === iso);
+    if (!entry) return null;
+    const dated = entry.release_dates ?? [];
+    return dated.map((d) => d.certification).find((c) => c && String(c).trim()) || null;
+  };
+  return (
+    certFor("US")
+    || certFor("GB")
+    || results
+      .filter((r) => r.iso_3166_1 !== "TH")
+      .map((r) => (r.release_dates ?? []).map((d) => d.certification).find((c) => c && String(c).trim()))
+      .find(Boolean)
+    || results
+      .map((r) => (r.release_dates ?? []).map((d) => d.certification).find((c) => c && String(c).trim()))
+      .find(Boolean)
+    || null
+  );
+}
+
 // TMDB's raw movie.status strings, cleaned up for the Details tab's
 // Runtime row (only shown when not "Released" — a released movie's status
 // isn't interesting to call out next to its runtime).
@@ -94,6 +127,12 @@ async function getMovieData(movieId) {
   const genres = (movie.genres ?? []).map((g) => g.name).join(", ");
   const year = movie.release_date ? movie.release_date.slice(0, 4) : "";
   const overview = movie.overview ?? "";
+  const originCountry =
+    (movie.origin_country ?? [])[0]
+    || (movie.production_countries ?? [])[0]?.iso_3166_1
+    || null;
+  const contentRating = pickMovieCertification(movie.release_dates);
+  const runtimeLabel = formatRuntime(movie.runtime);
 
   // Same trailer/bonus-video shaping as Show Detail's page.jsx, verbatim.
   let rawVideos = (movie.videos?.results ?? []).filter((v) => v.site === "YouTube");
@@ -112,6 +151,7 @@ async function getMovieData(movieId) {
     originalTitle: s.original_title ?? null,
     originalLanguage: s.original_language ?? null,
     posterPath: s.poster_path,
+    year: s.release_date ? String(s.release_date).slice(0, 4) : "",
   }));
 
   return {
@@ -132,8 +172,11 @@ async function getMovieData(movieId) {
       posterPath: movie.poster_path,
       backdropPath: movie.backdrop_path ?? movie.poster_path,
       runtime: movie.runtime ?? null,
+      runtimeLabel,
       director,
       productionCompany,
+      originCountry,
+      contentRating,
       status: movie.status ?? "",
       statusLabel: STATUS_LABELS[movie.status] ?? movie.status ?? "",
       releaseDate: formatAirDate(movie.release_date),

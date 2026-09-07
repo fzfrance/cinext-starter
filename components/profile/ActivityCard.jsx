@@ -31,7 +31,7 @@ const POSTER_WIDTH = 87; // 76 * 1.15
 // "added to collection" aren't tied to any specific season or episode,
 // so they show neither), 3) poster (fixed thumbnail size, nudged right so
 // its left edge lines up with the name text, not flush under the avatar)
-// — rating badge in its bottom-LEFT corner, 4) timestamp. Every event is
+// — rating badge in its top-RIGHT corner, 4) timestamp. Every event is
 // currently the signed-in user's own (no friends/following system exists
 // yet — see lib/activity.js's header comment), so avatar/name are always
 // the real signed-in profile, not a stand-in "You".
@@ -82,7 +82,7 @@ export default function ActivityCard({ event, show, avatarUrl, displayName, now 
       <div className="relative rounded-2xl overflow-hidden flex-shrink-0" style={{ marginTop: 8, marginLeft: AVATAR_SIZE + AVATAR_GAP, width: POSTER_WIDTH, aspectRatio: "2 / 3" }}>
         <PosterArt posterPath={show.posterPath} base={show.base} glow={show.glow} alt={show.title} tmdbSize="w342" />
         {rating != null && (
-          <div className="absolute flex items-center gap-1 rounded-lg" style={{ bottom: 8, left: 8, padding: "3px 6px", background: "rgba(0,0,0,0.6)" }}>
+          <div className="absolute flex items-center gap-1 rounded-lg" style={{ top: 8, right: 8, padding: "3px 6px", background: "rgba(0,0,0,0.6)" }}>
             <Icon name="star" size={10} color={accent} />
             <span style={{ fontSize: 11, fontWeight: 700, color: "#fff" }}>{event.type === "rated" ? Number(rating).toFixed(1) : rating}</span>
           </div>

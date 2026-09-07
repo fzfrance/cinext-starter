@@ -150,9 +150,9 @@ export default function MiniDatePicker({ value, onChange, onClose }) {
         className="absolute z-50 rounded-2xl"
         style={{
           top: "calc(100% + 8px)", left: 0, width: 264, padding: 12,
-          background: "rgba(28,22,16,0.97)", border: `1px solid ${t.glassBorder}`,
-          backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)",
-          boxShadow: "0 20px 44px rgba(0,0,0,0.55)",
+          background: "rgba(48, 50, 54, 0.88)", border: `1px solid ${t.glassBorder}`,
+          backdropFilter: "blur(28px) saturate(140%)", WebkitBackdropFilter: "blur(28px) saturate(140%)",
+          boxShadow: "0 16px 40px rgba(0,0,0,0.5)",
         }}
         onClick={(e) => e.stopPropagation()}
       >

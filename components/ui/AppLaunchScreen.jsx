@@ -64,7 +64,7 @@ export default function AppLaunchScreen() {
   if (phase === "hidden") return null;
 
   return (
-    <div className={`${styles.launch} ${phase === "exiting" ? styles.exiting : ""}`} aria-label="Loading Cinext" aria-live="polite">
+    <div data-launch-screen className={`${styles.launch} ${phase === "exiting" ? styles.exiting : ""}`} aria-label="Loading Cinext" aria-live="polite">
       <div className={styles.posterCanvas} aria-hidden="true">
         {POSTERS.map((poster, index) => (
           <div className={styles.posterTile} key={poster.path}>

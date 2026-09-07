@@ -104,12 +104,26 @@ function MiniStars({ value }) {
 // straight into editing (encourages actually rating it). Real data only —
 // no mock cast/mood beyond MOOD_LIST, which is intentionally fixed
 // everywhere a mood is entered or shown.
-export default function SeasonRatingScreen({ showTitle, season, manual, auto, cast, backdropPath, logoUrl, showGenre, initialEditing, onClose, onSave, onDelete, onShare }) {
+export default function SeasonRatingScreen({ showTitle, season, manual, auto, cast, backdropPath, logoUrl, showGenre, showSynopsis, initialEditing, onClose, onSave, onDelete, onShare, presentation = "auto" }) {
   // Sampled once per season (backdropPath/season.posterPath change) —
   // neutral near-black until it resolves, same fallback Home's own
   // heroEdgeRGB uses.
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(min-width: 900px)").matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 900px)");
+    const apply = () => setIsDesktop(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+  // Same centered-card presentation as EpisodeRatingFlow on desktop.
+  const isModal = presentation === "modal" || (presentation !== "fullscreen" && isDesktop);
+
   const [atmoRGB, setAtmoRGB] = useState([10, 10, 12]);
   useEffect(() => {
+    // Same as mobile — landscape backdrop drives the atmosphere tint.
     const src = backdropPath ?? season.posterPath;
     if (!src) { setAtmoRGB([10, 10, 12]); return; }
     let cancelled = false;
@@ -132,6 +146,9 @@ export default function SeasonRatingScreen({ showTitle, season, manual, auto, ca
   // it sits on the page or what's rendered underneath.
   const mixRGB = (amt) => atmoRGB.map((c) => Math.round(c * amt + 12 * (1 - amt))).join(",");
   const CARD_BG = `linear-gradient(180deg, rgb(${mixRGB(0.32)}) 0%, rgb(${mixRGB(0.14)}) 55%, #141414 100%)`;
+  const ATMOS_BG = `linear-gradient(180deg, #0A0A0C 0%, rgba(${atmoRGB.map((c) => Math.round(c * 0.22)).join(",")},0.9) 20%, rgba(${atmoRGB.map((c) => Math.round(c * 0.42)).join(",")},0.95) 55%, #0A0A0C 100%)`;
+  const HERO_VEIL = "linear-gradient(180deg, rgba(10,8,6,0.15) 0%, rgba(10,8,6,0.35) 45%, #0A0A0C 100%)";
+  const leftSynopsis = (season.overview || showSynopsis || "").trim();
 
   // FloatingNav sits at zIndex:100 (deliberately dominant over ordinary
   // in-page overlays) — this full-screen overlay is only z-40, so without
@@ -139,12 +156,28 @@ export default function SeasonRatingScreen({ showTitle, season, manual, auto, ca
   // open, same fix CaseOverlay already needed.
   const [, setNavHidden] = useNavVisibility();
   useEffect(() => {
+    if (isModal) return undefined;
     setNavHidden(true);
     return () => setNavHidden(false);
-  }, [setNavHidden]);
+  }, [setNavHidden, isModal]);
+
+  useEffect(() => {
+    if (!isModal) return undefined;
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtml = html.style.overflow;
+    const prevBody = body.style.overflow;
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    return () => {
+      html.style.overflow = prevHtml;
+      body.style.overflow = prevBody;
+    };
+  }, [isModal]);
 
   const [editing, setEditing] = useState(initialEditing);
   const [draftRating, setDraftRating] = useState(manual ? manual.rating : 0);
+  const [previewRating, setPreviewRating] = useState(null);
   // Multiple moods can be selected at once — stored back as a single
   // comma-joined string in the same `mood` text column (moodIdsFromField/
   // moodMetasFromField in SeasonBanner.jsx parse it back out), so no
@@ -166,10 +199,11 @@ export default function SeasonRatingScreen({ showTitle, season, manual, auto, ca
 
   const readMoodMetas = manual ? moodMetasFromField(manual.mood) : [];
   const viewingAuto = !editing && !manual && auto; // read-only view of an auto score, no manual saved yet
-  // 0 is now a legitimate, explicit rating ("no stars"), not just "nothing
-  // entered yet" — so Save is always available in editing, not gated on
-  // a nonzero value the way it used to be.
-  const canSave = true;
+  // 0 stars means "no rating" — Save stays disabled until a real score is set.
+  const canSave = !editing || draftRating > 0;
+  const liveScore = previewRating != null
+    ? previewRating
+    : (editing ? draftRating : viewingAuto ? auto.avg10 : (manual?.rating ?? 0));
 
   const toggleDraftMood = (id) => {
     setDraftMoods((prev) => (prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]));
@@ -177,6 +211,7 @@ export default function SeasonRatingScreen({ showTitle, season, manual, auto, ca
 
   const loadDraftFromManual = () => {
     setDraftRating(manual ? manual.rating : 0);
+    setPreviewRating(null);
     setDraftMoods(moodIdsFromField(manual?.mood));
     setDraftCharacterId(manual?.characterId || null);
     setDraftCharacterName(manual?.characterName || null);
@@ -208,6 +243,7 @@ export default function SeasonRatingScreen({ showTitle, season, manual, auto, ca
         reviewDate: manual ? draftReviewDate : todayISO(),
       });
       setEditing(false);
+      setPreviewRating(null);
       setJustSaved(true);
     } finally {
       setSaving(false);
@@ -225,6 +261,361 @@ export default function SeasonRatingScreen({ showTitle, season, manual, auto, ca
     }
   };
 
+  if (isModal) {
+    const scoreForStars = editing ? draftRating : viewingAuto ? auto.avg10 : (manual?.rating ?? 0);
+    const panelClass = justSaved
+      ? "ep-rating-panel ep-rating-panel-desktop season-rating-panel-desktop is-saved-confirm"
+      : editing
+        ? "ep-rating-panel ep-rating-panel-desktop season-rating-panel-desktop"
+        : "ep-rating-panel season-rating-finished-panel";
+
+    return (
+      <div className="fixed inset-0 z-50 ep-rating-overlay" onClick={onClose}>
+        <div className={panelClass} onClick={(event) => event.stopPropagation()}>
+          {justSaved ? (
+            <div className="ep-rating-desktop-done">
+              <div className="ep-rating-desktop-done-check">
+                <Icon name="check" size={22} color={accent} strokeWidth={2.4} />
+              </div>
+              <div className="ep-rating-desktop-done-title">Rating Saved!</div>
+              <div className="ep-rating-desktop-done-meta">
+                <span>{showTitle}</span>
+                <span>·</span>
+                <span>{season.title}</span>
+              </div>
+              <div className="ep-rating-desktop-done-stars">
+                <StarInput value={draftRating || manual?.rating || 0} onChange={() => {}} size={22} color={accent} gap={3} maxStars={10} readOnly />
+              </div>
+              <button type="button" onClick={onClose} className="ep-rating-desktop-save is-ready">Done</button>
+            </div>
+          ) : !editing ? (
+            <div className="season-rating-finished" style={{ ["--rating-card-bg"]: CARD_BG, ["--rating-card-border"]: CARD_BORDER }}>
+              <button type="button" className="season-rating-desktop-close" onClick={onClose} aria-label="Close">
+                <Icon name="x" size={16} />
+              </button>
+              <div className="season-rating-finished-scroll">
+                <div className="season-rating-finished-hero">
+                  <PosterArt posterPath={backdropPath ?? season.posterPath} base={season.base} glow={season.glow} alt={season.title} tmdbSize="w780" />
+                  <div className="season-rating-finished-hero-veil" style={{ background: HERO_VEIL }} />
+                  <div className="season-rating-finished-hero-copy">
+                    {logoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- resolved TMDB CDN URL
+                      <img src={logoUrl} alt={showTitle} className="season-rating-finished-logo" />
+                    ) : (
+                      <div className="season-rating-finished-kicker">{showTitle.toUpperCase()}</div>
+                    )}
+                    <div className="season-rating-finished-title">{season.title}</div>
+                    <div className="season-rating-finished-meta">
+                      {season.episodes.length} Episode{season.episodes.length === 1 ? "" : "s"}
+                    </div>
+                    {showGenre ? <div className="season-rating-finished-genre">{showGenre}</div> : null}
+                    {(manual || auto) ? (
+                      <div className="season-rating-finished-score-row">
+                        <div className={`season-rating-finished-score-pill${viewingAuto ? " is-auto" : ""}`}>
+                          {viewingAuto ? <Icon name="sparkle" size={10} color={accent} /> : null}
+                          <Icon name="star" size={12} color={accent} />
+                          <span>{(manual ? manual.rating : auto.avg10).toFixed(1)}<span>/10</span></span>
+                        </div>
+                        <span className="season-rating-finished-date">
+                          {manual ? fmtISODate(manual.reviewDate) : `${auto.ratedCount}/${auto.total} episodes rated`}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="season-rating-finished-body">
+                  <div className="season-rating-finished-atmos" style={{ background: ATMOS_BG }} aria-hidden="true" />
+                  <div className="season-rating-finished-stack">
+                    <div className="season-rating-finished-card is-center">
+                      <div className="season-rating-finished-card-title">
+                        {viewingAuto ? "Auto Rating" : "Your Rating"}
+                      </div>
+                      <div className="season-rating-finished-stars">
+                        <StarInput
+                          value={scoreForStars}
+                          onChange={() => {}}
+                          readOnly
+                          maxStars={10}
+                          autoFit
+                          autoFitMin={26}
+                          autoFitMax={36}
+                          autoFitGapMin={3}
+                          autoFitGapMax={6}
+                          rowPaddingInline={4}
+                        />
+                      </div>
+                      {!viewingAuto && manual ? (
+                        <div className="season-rating-finished-score-num">{manual.rating.toFixed(1)}/10</div>
+                      ) : null}
+                      {viewingAuto ? (
+                        <button type="button" onClick={startEdit} className="ep-rating-desktop-save is-ready" style={{ marginTop: 14, width: "auto", padding: "10px 18px" }}>
+                          Rate This Season Yourself
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {readMoodMetas.length > 0 ? (
+                      <div className="season-rating-finished-card is-center">
+                        <div className="season-rating-finished-card-title">Your Mood</div>
+                        <div className="season-rating-finished-moods">
+                          {readMoodMetas.map((meta) => (
+                            <div key={meta.id} className="ep-rating-desktop-mood is-active">
+                              <span className="ep-rating-desktop-mood-emoji">{meta.emoji}</span>
+                              <span className="ep-rating-desktop-mood-label">{meta.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {manual?.characterName ? (
+                      <div className="season-rating-finished-card is-center">
+                        <div className="season-rating-finished-card-title">Favorite Character</div>
+                        <div className="flex items-center justify-center gap-2 mt-3">
+                          {(() => {
+                            const c = cast.find((x) => x.id === manual.characterId);
+                            return (
+                              <div className="relative overflow-hidden" style={{ width: 40, height: 40, borderRadius: "50%", background: c?.grad || "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                {c?.profilePath ? (
+                                  // eslint-disable-next-line @next/next/no-img-element -- TMDB CDN path
+                                  <img src={tmdbImage(c.profilePath, "w185")} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} />
+                                ) : (
+                                  <span style={{ fontSize: 11.5, fontWeight: 700, color: "#fff" }}>{initialsOf((c ? c.role : manual.characterName) || "?")}</span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                          <span style={{ fontSize: 14, color: "#fff", fontWeight: 500 }}>{manual.characterName}</span>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {manual?.text ? (
+                      <div className="season-rating-finished-card is-center">
+                        <div className="season-rating-finished-card-title">Your Review</div>
+                        <div className="season-rating-finished-review">{manual.text}</div>
+                      </div>
+                    ) : null}
+
+                    {auto ? (
+                      <div className="season-rating-finished-card">
+                        <div className="season-rating-finished-card-title is-left">
+                          {manual ? "Auto Rating" : "Rating Breakdown"}
+                        </div>
+                        {manual ? (
+                          <>
+                            <div className="ep-rating-desktop-score" style={{ marginTop: 8, justify: "flex" }}>
+                              <span className="ep-rating-desktop-score-n">{auto.avg10.toFixed(1)}<span>/10</span></span>
+                            </div>
+                            <div className="ep-rating-desktop-section-sub" style={{ textAlign: "left" }}>
+                              Based on {auto.ratedCount} of {auto.total} rated episodes
+                            </div>
+                          </>
+                        ) : null}
+                        <div className="season-rating-finished-breakdown">
+                          {season.episodes.map((e) => (
+                            <div key={e.n} className="season-rating-finished-breakdown-row">
+                              <span style={{ color: e.myRating ? "#fff" : "rgba(255,255,255,0.4)" }}>Episode {e.n}</span>
+                              {e.myRating ? <MiniStars value={e.myRating} /> : <span style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", fontStyle: "italic" }}>Not rated</span>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {manual ? (
+                      <div className="season-rating-view-actions">
+                        <button type="button" onClick={remove} disabled={deleting} className="season-rating-action-btn is-danger">
+                          <Icon name="trash" size={13} color="currentColor" />
+                          {deleting ? "Deleting…" : "Delete review"}
+                        </button>
+                        <div className="season-rating-view-actions-right">
+                          <button type="button" onClick={onShare} className="season-rating-action-btn is-ghost">
+                            <Icon name="share" size={13} />
+                            Share
+                          </button>
+                          <button type="button" onClick={startEdit} className="season-rating-action-btn is-solid">
+                            <Icon name="edit" size={13} color="#111" />
+                            Edit review
+                          </button>
+                        </div>
+                      </div>
+                    ) : auto ? (
+                      <div className="season-rating-view-actions">
+                        <div />
+                        <div className="season-rating-view-actions-right">
+                          <button type="button" onClick={onShare} className="season-rating-action-btn is-ghost">
+                            <Icon name="share" size={13} />
+                            Share
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="ep-rating-desktop">
+              <aside className="season-rating-left">
+                <div className="season-rating-poster is-backdrop">
+                  <PosterArt posterPath={backdropPath ?? season.posterPath} base={season.base} glow={season.glow} alt={season.title} tmdbSize="w780" />
+                  <div className="season-rating-poster-fade" style={{ background: HERO_VEIL }} />
+                </div>
+                <div className="season-rating-left-body" style={{ background: ATMOS_BG }}>
+                  {logoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- resolved TMDB CDN URL
+                    <img src={logoUrl} alt={showTitle} className="season-rating-left-logo" />
+                  ) : (
+                    <div className="ep-rating-desktop-eyebrow">{showTitle}</div>
+                  )}
+                  <h2 className="season-rating-left-title">{season.title}</h2>
+                  {showGenre ? <div className="season-rating-left-genre">{showGenre}</div> : null}
+                  <div className="season-rating-left-badges">
+                    <div className="ep-rating-desktop-badge">
+                      {season.episodes.length} Episode{season.episodes.length === 1 ? "" : "s"}
+                    </div>
+                    {manual ? (
+                      <div className="relative" style={{ width: "fit-content" }}>
+                        <button
+                          type="button"
+                          onClick={() => setDateEditorOpen((v) => !v)}
+                          className="ep-rating-desktop-badge"
+                          style={{ cursor: "pointer" }}
+                        >
+                          <Icon name="calendar" size={11} color="rgba(255,255,255,0.7)" />
+                          {fmtISODate(draftReviewDate)}
+                        </button>
+                        {dateEditorOpen && (
+                          <MiniDatePicker
+                            value={draftReviewDate}
+                            onChange={setDraftReviewDate}
+                            onClose={() => setDateEditorOpen(false)}
+                          />
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                  {leftSynopsis ? (
+                    <p className="season-rating-left-synopsis">{leftSynopsis}</p>
+                  ) : null}
+
+                  <div className="season-rating-stars-block">
+                    <div className="season-rating-stars-block-title">Rate this season</div>
+                    <div className="season-rating-stars-row">
+                      <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+                        <StarInput
+                          value={draftRating}
+                          onChange={setDraftRating}
+                          onPreviewChange={setPreviewRating}
+                          maxStars={10}
+                          autoFit
+                          autoFitMin={22}
+                          autoFitMax={30}
+                          autoFitGapMin={2}
+                          autoFitGapMax={5}
+                          rowPaddingInline={0}
+                          hitPaddingBlock={6}
+                        />
+                      </div>
+                      {liveScore > 0 && (
+                        <div className="ep-rating-desktop-score">
+                          <span className="ep-rating-desktop-score-n">{Number(liveScore).toFixed(1)}<span>/10</span></span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </aside>
+
+              <div className="season-rating-right">
+                <button type="button" className="season-rating-desktop-close" onClick={onClose} aria-label="Close">
+                  <Icon name="x" size={16} />
+                </button>
+
+                <section className="ep-rating-desktop-section">
+                  <div className="ep-rating-desktop-section-title">How did it make you feel?</div>
+                  <div className="ep-rating-desktop-moods">
+                    {SEASON_MOOD_LIST.map((m) => {
+                      const active = draftMoods.includes(m.id);
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => toggleDraftMood(m.id)}
+                          className={`ep-rating-desktop-mood${active ? " is-active" : ""}`}
+                        >
+                          <span className="ep-rating-desktop-mood-emoji">{m.emoji}</span>
+                          <span className="ep-rating-desktop-mood-label">{m.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section className="ep-rating-desktop-section ep-rating-desktop-section-cast">
+                  <div className="ep-rating-desktop-section-title">Favorite character?</div>
+                  <div className="ep-rating-desktop-cast">
+                    {cast.length === 0 ? (
+                      <div style={{ fontSize: 12, color: t.textDim, padding: "8px 0" }}>No cast listed for this show yet.</div>
+                    ) : cast.map((c) => {
+                      const active = draftCharacterId === c.id;
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => { setDraftCharacterId(active ? null : c.id); setDraftCharacterName(active ? null : c.role); }}
+                          className={`ep-rating-desktop-cast-item${active ? " is-active" : ""}`}
+                        >
+                          <div className="ep-rating-desktop-cast-avatar-wrap">
+                            <div className={`ep-rating-desktop-cast-ring${active ? " is-active" : ""}`}>
+                              <div className="relative overflow-hidden" style={{ width: 44, height: 44, borderRadius: "50%", background: c.grad, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                {c.profilePath ? (
+                                  // eslint-disable-next-line @next/next/no-img-element -- TMDB CDN path
+                                  <img src={tmdbImage(c.profilePath, "w185")} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} />
+                                ) : (
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: "#fff" }}>{initialsOf(c.role)}</span>
+                                )}
+                              </div>
+                            </div>
+                            {active && (
+                              <div className="ep-rating-desktop-cast-crown">
+                                <Icon name="crown" size={10} color="#1a1108" />
+                              </div>
+                            )}
+                          </div>
+                          <span className="ep-rating-desktop-cast-name">{c.role}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section className="ep-rating-desktop-section">
+                  <div className="ep-rating-desktop-section-title">
+                    Write your review
+                    <span style={{ fontSize: 12, color: t.textDim, fontWeight: 500 }}> (optional)</span>
+                  </div>
+                  <div className="season-rating-review-editor">
+                    <textarea value={draftText} onChange={(e) => setDraftText(e.target.value)} placeholder="Share your thoughts..." rows={3} />
+                  </div>
+                </section>
+
+                <div className="season-rating-actions">
+                  <button type="button" onClick={save} disabled={!canSave || saving} className={`ep-rating-desktop-save${canSave && !saving ? " is-ready" : ""}`}>
+                    {saving ? "Saving…" : "Save rating"}
+                  </button>
+                  <button type="button" onClick={onClose} className="ep-rating-desktop-dismiss">Not now</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // Flat neutral — NOT a gradient. This is the outermost fixed viewport
   // layer, sitting behind literally everything (hero, content, cards), so
   // any color painted here shows through anywhere those don't fully cover
@@ -240,8 +631,14 @@ export default function SeasonRatingScreen({ showTitle, season, manual, auto, ca
   // the atmosphere layer, scoped behind the hero/top-card area; this root
   // layer is just a solid neutral backstop, matching the app's own black.
   return (
-    <div className="fixed inset-0 z-40" style={{ background: "#0A0A0C" }}>
-      <div className="h-full overflow-y-auto pb-12" style={{ scrollbarWidth: "none" }}>
+    <div
+      className="fixed inset-0 z-40"
+      style={{ background: "#0A0A0C" }}
+    >
+      <div
+        className="h-full overflow-y-auto pb-12"
+        style={{ scrollbarWidth: "none" }}
+      >
         {/* backdrop — the show's own landscape cover art (not the vertical
             season poster), stretching to nearly half the screen so the
             real art carries the color down instead of cutting to black */}
@@ -404,6 +801,7 @@ export default function SeasonRatingScreen({ showTitle, season, manual, auto, ca
               <StarInput
                 value={editing ? draftRating : viewingAuto ? auto.avg10 : (manual?.rating ?? 0)}
                 onChange={setDraftRating}
+                onPreviewChange={editing ? setPreviewRating : undefined}
                 readOnly={!editing}
                 maxStars={10}
                 autoFit
@@ -414,7 +812,7 @@ export default function SeasonRatingScreen({ showTitle, season, manual, auto, ca
                 rowPaddingInline={4}
               />
             </div>
-            {editing && <div style={{ fontSize: 15.73, fontWeight: 700, color: accent, marginTop: 9 }}>{draftRating.toFixed(1)}/10</div>}
+            {editing && <div style={{ fontSize: 15.73, fontWeight: 700, color: accent, marginTop: 9 }}>{Number(liveScore).toFixed(1)}/10</div>}
             {!editing && !viewingAuto && manual && <div style={{ fontSize: 15.73, fontWeight: 700, color: accent, marginTop: 9 }}>{manual.rating.toFixed(1)}/10</div>}
             {viewingAuto && (
               <>

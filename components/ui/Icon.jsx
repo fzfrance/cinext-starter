@@ -128,6 +128,12 @@ export default function Icon({ name, size = 18, color = "#fff", strokeWidth = 1.
           <path d="M12 2.5l2.9 6.1 6.6.7-4.9 4.6 1.3 6.6L12 17.3 5.9 20.5l1.3-6.6-4.9-4.6 6.6-.7z" />
         </svg>
       );
+    case "starOutline":
+      return (
+        <svg {...p}>
+          <path d="M12 2.5l2.9 6.1 6.6.7-4.9 4.6 1.3 6.6L12 17.3 5.9 20.5l1.3-6.6-4.9-4.6 6.6-.7z" />
+        </svg>
+      );
     case "heart":
       return (
         <svg {...p} fill={color} stroke="none">
@@ -348,9 +354,11 @@ export default function Icon({ name, size = 18, color = "#fff", strokeWidth = 1.
         </svg>
       );
     case "sparkle":
+      // Fuller 4-point star so optical weight matches other 24×24 nav icons
+      // (the old path sat small/high in the viewBox and read as short).
       return (
         <svg {...p}>
-          <path d="M12 3c.6 3.6 2.4 5.4 6 6-3.6.6-5.4 2.4-6 6-.6-3.6-2.4-5.4-6-6 3.6-.6 5.4-2.4 6-6z" />
+          <path d="M12 2.2c.85 4.2 2.95 6.3 7.15 7.15-4.2.85-6.3 2.95-7.15 7.15-.85-4.2-2.95-6.3-7.15-7.15 4.2-.85 6.3-2.95 7.15-7.15z" />
         </svg>
       );
     case "bookmark":
@@ -522,10 +530,12 @@ export default function Icon({ name, size = 18, color = "#fff", strokeWidth = 1.
         </svg>
       );
     case "logo":
+      // Wordmark-style mark (no filled plate) — readable at 16px next to
+      // the plain outline icons in the ••• "Change logo" row.
       return (
         <svg {...p}>
-          <rect x="3" y="6" width="18" height="12" rx="2.5" />
-          <path d="M9 9v6M9 9h2.5a2 2 0 1 1 0 4H9" />
+          <path d="M5 17L9.5 6h1.2L15.2 17M6.4 13.6h7.2" />
+          <path d="M17 17V9.2M17 6.6v.01" />
         </svg>
       );
     case "select":

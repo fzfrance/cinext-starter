@@ -88,6 +88,7 @@ export default function MoviePosterQuickStatusMenu({ show, userId, currentStatus
           direction={direction}
           removeLabel={removeLabel}
           options={options}
+          anchored
           style={{ opacity: busy ? 0.5 : 1, pointerEvents: busy ? "none" : "auto" }}
         />
       </div>

@@ -19,7 +19,8 @@ import { computeTopShows, computeTopMovies, computeTopGenres, computeRewatchCoun
 import { parseISODate } from "@/lib/watchDate";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { bangkokNow as getBangkokNow } from "@/lib/bangkokDate";
-import { themes, DEFAULT_ACCENT, statIconGold, statCardBg } from "@/lib/theme";
+import { themes, DEFAULT_ACCENT } from "@/lib/theme";
+import { tmdbImage } from "@/lib/tmdb";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -918,9 +919,102 @@ export default function Page() {
   const activeDayCount = useMemo(() => new Set(dayKeyed.map((e) => e.dayKey)).size, [dayKeyed]);
   const rewatchCount = useMemo(() => computeRewatchCount(monthRows), [monthRows]);
   const personality = useMemo(() => computePersonality({ entries: monthEntriesWithDayKey, monthRows }), [monthEntriesWithDayKey, monthRows]);
-  const topShows = useMemo(() => computeTopShows(monthEntries, 5, showRatingMap), [monthEntries, showRatingMap]);
-  const topMovies = useMemo(() => computeTopMovies(monthMovieEntries, 5, movieRatingMap), [monthMovieEntries, movieRatingMap]);
-  const topGenres = useMemo(() => computeTopGenres(monthEntries), [monthEntries]);
+  const topShows = useMemo(() => computeTopShows(monthEntries, 12, showRatingMap), [monthEntries, showRatingMap]);
+  const topMovies = useMemo(() => computeTopMovies(monthMovieEntries, 12, movieRatingMap), [monthMovieEntries, movieRatingMap]);
+  const topGenres = useMemo(() => computeTopGenres(monthEntries, 4), [monthEntries]);
+
+  const defaultAmbientPath = useMemo(() => {
+    const fromShows = topShows.find((s) => s.posterPath)?.posterPath;
+    if (fromShows) return fromShows;
+    return topMovies.find((m) => m.posterPath)?.posterPath || null;
+  }, [topShows, topMovies]);
+
+  const [activeAmbientPath, setActiveAmbientPath] = useState(null);
+  const [ambientLayers, setAmbientLayers] = useState([]);
+  const pageRef = useRef(null);
+
+  useEffect(() => {
+    setActiveAmbientPath(defaultAmbientPath);
+  }, [defaultAmbientPath, year, month]);
+
+  useEffect(() => {
+    const path = activeAmbientPath || defaultAmbientPath;
+    const url = path ? tmdbImage(path, "w780") : null;
+    if (!url) {
+      setAmbientLayers((prev) => prev.map((layer) => ({ ...layer, visible: false })));
+      return undefined;
+    }
+
+    let cancelled = false;
+    setAmbientLayers((prev) => {
+      const already = prev.find((layer) => layer.url === url);
+      if (already) {
+        return prev.map((layer) => ({ ...layer, visible: layer.url === url }));
+      }
+      return [
+        ...prev.map((layer) => ({ ...layer, visible: false })),
+        { url, visible: false },
+      ].slice(-2);
+    });
+
+    const raf = window.requestAnimationFrame(() => {
+      if (cancelled) return;
+      setAmbientLayers((prev) => prev.map((layer) => ({ ...layer, visible: layer.url === url })));
+    });
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+      setAmbientLayers((prev) => prev.filter((layer) => layer.visible || layer.url === url).slice(-2));
+    }, 900);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
+  }, [activeAmbientPath, defaultAmbientPath]);
+
+  useEffect(() => {
+    if (monthStatus !== "ready" || monthEntries.length === 0) return undefined;
+    const root = pageRef.current;
+    if (!root) return undefined;
+
+    const pickAmbient = () => {
+      const nodes = root.querySelectorAll("[data-hl-ambient]");
+      if (!nodes.length) return;
+      const focusY = window.innerHeight * 0.38;
+      let best = null;
+      let bestDist = Infinity;
+      nodes.forEach((node) => {
+        const path = node.getAttribute("data-hl-ambient");
+        if (!path) return;
+        const rect = node.getBoundingClientRect();
+        if (rect.bottom < 80 || rect.top > window.innerHeight - 40) return;
+        const mid = (rect.top + rect.bottom) / 2;
+        const dist = Math.abs(mid - focusY);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = path;
+        }
+      });
+      if (best) setActiveAmbientPath(best);
+    };
+
+    pickAmbient();
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(() => {
+        ticking = false;
+        pickAmbient();
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [monthStatus, monthEntries.length, topShows, topMovies, year, month, selectedDay]);
 
   // Calendar day cells mix TV + movie activity — a day with one episode
   // and one movie shows the same dot intensity a day with two episodes
@@ -1028,9 +1122,16 @@ export default function Page() {
   const trailingDays = Array.from({ length: trailingCount }, (_, i) => i + 1);
 
   const header = (
-    <div className="px-6 relative flex items-center justify-between" style={{ paddingTop: "calc(env(safe-area-inset-top) + 13.2px)" }}>
-      <div style={{ fontSize: 28, fontWeight: 800, color: "#fff" }}>Highlights</div>
+    <div className="highlights-header px-6 relative flex items-center justify-between" style={{ paddingTop: "calc(env(safe-area-inset-top) + 13.2px)" }}>
+      <div>
+        <div className="highlights-header-title" style={{ fontSize: 28, fontWeight: 800, color: "#fff" }}>Highlights</div>
+        <div className="highlights-header-sub">Your viewing journey at a glance.</div>
+      </div>
+    </div>
+  );
 
+  const yearSelector = (
+    <div className="highlights-year relative flex-shrink-0">
       <button
         onClick={() => setYearMenuOpen((v) => !v)}
         className="flex items-center gap-1.5 rounded-full active:scale-95 transition"
@@ -1043,14 +1144,14 @@ export default function Page() {
 
       {yearMenuOpen && (
         <>
-          <div className="absolute" onClick={() => setYearMenuOpen(false)} style={{ top: 0, left: -24, right: -24, bottom: -600, zIndex: 35 }} />
-          <div className="absolute rounded-2xl overflow-hidden" style={{ top: 48, right: 0, width: 132, background: "#18181b", border: `1px solid ${t.glassBorder}`, boxShadow: "0 20px 50px rgba(0,0,0,0.5)", zIndex: 40 }}>
+          <div className="fixed inset-0" onClick={() => setYearMenuOpen(false)} style={{ zIndex: 35 }} />
+          <div className="absolute rounded-2xl overflow-hidden" style={{ top: "calc(100% + 8px)", right: 0, width: 132, background: "#18181b", border: `1px solid ${t.glassBorder}`, boxShadow: "0 20px 50px rgba(0,0,0,0.5)", zIndex: 40 }}>
             {years.map((y) => {
               const active = y === year;
               return (
-                <button key={y} onClick={() => changeYear(y)} className="w-full flex items-center justify-between" style={{ padding: "11px 14px", background: active ? "rgba(232,162,76,0.12)" : "transparent" }}>
-                  <span style={{ fontSize: 13.5, fontWeight: active ? 700 : 500, color: active ? accent : "#fff" }}>{y}</span>
-                  {active && <Icon name="check" size={13} color={accent} strokeWidth={2.2} />}
+                <button key={y} onClick={() => changeYear(y)} className="w-full flex items-center justify-between" style={{ padding: "11px 14px", background: active ? "rgba(255,255,255,0.08)" : "transparent" }}>
+                  <span style={{ fontSize: 13.5, fontWeight: active ? 700 : 500, color: active ? "#fff" : "rgba(255,255,255,0.72)" }}>{y}</span>
+                  {active && <Icon name="check" size={13} color="#fff" strokeWidth={2.2} />}
                 </button>
               );
             })}
@@ -1060,17 +1161,28 @@ export default function Page() {
     </div>
   );
 
-  const monthSelector = (
-    <div ref={monthRowRef} className="flex gap-2 px-6 overflow-x-auto" style={{ marginTop: 20, scrollbarWidth: "none" }}>
-      {MONTH_ABBRS.map((label, i) => {
-        const m = i + 1;
-        const active = m === month;
-        return (
-          <button key={m} onClick={() => setMonth(m)} className="flex-shrink-0 rounded-full active:scale-95 transition" style={{ padding: "8px 16px", background: active ? "#fff" : "transparent", border: "1px solid transparent" }}>
-            <span style={{ fontSize: 13.9, fontWeight: 600, color: active ? "#111" : t.textDim }}>{label}</span>
-          </button>
-        );
-      })}
+  // Mobile: title above, months + year below. Desktop CSS pulls the title
+  // onto the same row as the month chips (left | months | year).
+  const selectorsRow = (
+    <div className="highlights-selectors relative flex items-center px-6" style={{ marginTop: 20 }}>
+      {effectiveYearStatus === "ready" ? (
+        <div ref={monthRowRef} className="highlights-months flex gap-2 overflow-x-auto w-full" style={{ scrollbarWidth: "none" }}>
+          {MONTH_ABBRS.map((label, i) => {
+            const m = i + 1;
+            const active = m === month;
+            return (
+              <button key={m} onClick={() => setMonth(m)} className={`highlights-month-chip flex-shrink-0 rounded-full active:scale-95 transition${active ? " is-active" : ""}`} style={{ padding: "8px 16px", background: active ? "#fff" : "transparent", border: "1px solid transparent" }}>
+                <span style={{ fontSize: 13.9, fontWeight: 600, color: active ? "#111" : t.textDim }}>{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="w-full" style={{ height: 36 }} />
+      )}
+      <div className="highlights-year-slot absolute right-6 top-1/2" style={{ transform: "translateY(-50%)" }}>
+        {yearSelector}
+      </div>
     </div>
   );
 
@@ -1087,44 +1199,26 @@ export default function Page() {
   }
 
   return (
-    <div className="relative">
-      {/* Warm gold/amber glow behind the header + "hours watched" stat only
-          — a deliberate, isolated exception to the app's usual neutral
-          black-only background, since Highlights is a celebratory summary
-          screen rather than a browsing one; every other screen keeps the
-          plain black background unchanged. Low-medium intensity (0.18
-          alpha, fading out well before the TV Personality card starts) so
-          it reads as a soft warm light source behind the content, not a
-          saturated color wash. Purely amber — no secondary accent hue —
-          so it stays a single warm glow. A fixed-height layer, not one
-          that tracks content height, so it reads as one continuous wash
-          that quietly hands off to the plain flat t.bg black (already
-          nearly identical to this gradient's own #050505 floor) rather
-          than following the whole page's scroll length. position: absolute
-          at zIndex: -1 (not 0) — a positioned element at z-index 0 still
-          paints above plain non-positioned siblings per CSS's own paint
-          order, so 0 would cover every card below it; -1 is what actually
-          keeps it behind ordinary content (the same fix already used for
-          the login page's poster backdrop). pointerEvents: none so it
-          never intercepts taps meant for the header/year picker/month
-          chips sitting on top of it. */}
-      <div
-        className="absolute inset-x-0 top-0 pointer-events-none"
-        style={{
-          height: 420,
-          zIndex: -1,
-          background: `
-            radial-gradient(circle at 50% 0%, rgba(232,162,76,0.4), transparent 62%),
-            linear-gradient(180deg, #120d09 0%, #070605 45%, #050505 100%)
-          `,
-        }}
-      />
-      {header}
+    <div className="relative highlights-page" ref={pageRef}>
+      <div className="highlights-ambient" aria-hidden="true">
+        {ambientLayers.map((layer) => (
+          <div
+            key={layer.url}
+            className={`highlights-ambient-art${layer.visible ? " is-visible" : " is-exit"}`}
+            style={{ backgroundImage: `url(${layer.url})` }}
+          />
+        ))}
+        <div className="highlights-ambient-veil" />
+      </div>
+      <div className="highlights-glow absolute inset-x-0 top-0 pointer-events-none" aria-hidden="true" />
+      <div className="highlights-toolbar">
+        {header}
+        {selectorsRow}
+      </div>
 
       {yearStatus === "loading" && (
         <div className="px-6" style={{ marginTop: 20 }}>
-          <SkeletonBlock height={36} width={220} />
-          <div className="flex flex-col gap-2" style={{ marginTop: 22 }}>
+          <div className="flex flex-col gap-2" style={{ marginTop: 2 }}>
             <SkeletonBlock height={64} />
             <SkeletonBlock height={140} />
             <SkeletonBlock height={90} />
@@ -1153,8 +1247,6 @@ export default function Page() {
 
       {effectiveYearStatus === "ready" && (
         <>
-          {monthSelector}
-
           {monthStatus === "loading" && (
             <div className="px-6 flex flex-col gap-2" style={{ marginTop: 22 }}>
               <SkeletonBlock height={64} />
@@ -1183,248 +1275,145 @@ export default function Page() {
 
           {monthStatus === "ready" && monthEntries.length > 0 && (
             <>
-              {/* headline stat — same concise "N hours watched" copy, just
-                  a stronger size hierarchy: the number is the dominant
-                  element now (clamp so it scales with viewport width
-                  instead of a single fixed px), the label bumped up
-                  slightly but stays clearly secondary, and the gap between
-                  them tightened so they read as one unit. */}
-              <div className={`highlights-overview${personality ? "" : " highlights-overview-without-personality"}`}>
-              <div className="highlights-hours px-6" style={{ marginTop: 22 }}>
-                <div className="flex items-baseline" style={{ gap: 6 }}>
-                  <span style={{ fontSize: "clamp(51px, 12vw, 64px)", fontWeight: 700, letterSpacing: "-0.04em", color: "#fff", lineHeight: 1 }}>{hours}</span>
-                  <span style={{ fontSize: 22, fontWeight: 600, color: "rgba(255,255,255,0.62)" }}>hours watched</span>
+              <div
+                className={`highlights-overview${personality ? "" : " highlights-overview-without-personality"}`}
+                data-hl-ambient={defaultAmbientPath || undefined}
+              >
+                <div className="highlights-hours-stack">
+                  <div className="highlights-stat-widget">
+                    <div className="highlights-hours">
+                      <span className="highlights-hours-n">{hours}</span>
+                      <span className="highlights-hours-label">hours watched</span>
+                    </div>
+                    <div className="highlights-summary-stats" style={{ scrollbarWidth: "none" }}>
+                      {[["episodes", monthEntries.length, "Episodes"], ["tv", uniqueShowCount, "Shows"], ["clapperboard", monthMovieEntries.length, "Movies"], ["refresh", rewatchCount, "Rewatched"]].map(([icon, n, l], i) => (
+                        <div key={i} className="highlights-summary-stat">
+                          <div className="highlights-summary-stat-icon">
+                            <Icon name={icon} size={15} color={accent} strokeWidth={1.4} />
+                          </div>
+                          <div className="highlights-summary-stat-n">{n}</div>
+                          <div className="highlights-summary-stat-l" style={{ color: t.textDim }}>{l}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              </div>
 
-              {/* TV personality — was sized at ~1.56x the original card
-                  (1.3x, then another 20% on top); scaled back down 10%
-                  from that (padding, icon badge, icon, and the name text
-                  together, so it still reads as one card shrinking, not
-                  just smaller text) plus a new "YOUR TV PERSONALITY"
-                  eyebrow label above the name. The description line below
-                  the name is reduced a further 30% off its own prior
-                  size, independent of that 10% — called out as its own
-                  size rather than following the card-wide scale.
-                  Surface refined to a "liquid glass" treatment (soft
-                  diagonal tint, blur, hairline border, bigger radius, a
-                  faint inset highlight + a wide soft shadow instead of a
-                  hard one) so this stays the visual focus point of the
-                  page relative to the quieter stat cards below — same
-                  content, same padding/gap/text sizes, just the card's
-                  own surface. The icon's amber glow sits behind the badge
-                  in its own absolutely-positioned layer, oversized and
-                  centered on it; both the glow and the badge are
-                  `position: relative`/`absolute` with explicit z-index
-                  (0 and 1) so they stack correctly by z-index rather than
-                  relying on DOM order, since two positioned siblings need
-                  that to paint in the right order. */}
-                  {personality && (
-                    <div className="highlights-personality-wrap px-6" style={{ marginTop: 18 }}>
+                {personality && (
+                  <div className="highlights-personality-wrap px-6" style={{ marginTop: 18 }}>
                     <div
-                    className="highlights-personality-panel flex items-center rounded-2xl"
-                    style={{
-                      gap: 16.8,
-                      padding: 22.5,
-                      background: "linear-gradient(135deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018))",
-                      backdropFilter: "blur(24px)",
-                      WebkitBackdropFilter: "blur(24px)",
-                      border: "1px solid rgba(255,255,255,0.09)",
-                      borderRadius: 28,
-                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 48px rgba(0,0,0,0.28)",
-                    }}
-                  >
-                    <div className="relative flex items-center justify-center flex-shrink-0" style={{ width: 61.7, height: 61.7 }}>
-                      <div
-                        className="absolute"
-                        style={{ width: 112, height: 112, left: "50%", top: "50%", transform: "translate(-50%, -50%)", borderRadius: "50%", background: "radial-gradient(circle, rgba(232,162,76,0.22), transparent 68%)", zIndex: 0 }}
-                      />
-                      <div className="relative flex items-center justify-center rounded-full" style={{ width: 61.7, height: 61.7, background: "rgba(232,162,76,0.14)", zIndex: 1 }}>
-                        <span style={{ fontSize: 28.1, lineHeight: 1 }}>{personality.emoji}</span>
+                      className="highlights-personality-panel flex items-center rounded-2xl"
+                      style={{
+                        gap: 14,
+                        padding: "33px 24px",
+                        borderRadius: 24,
+                      }}
+                    >
+                      <div className="relative flex items-center justify-center flex-shrink-0 highlights-personality-icon" style={{ width: 52, height: 52 }}>
+                        <div
+                          className="absolute highlights-personality-glow"
+                          style={{ width: 96, height: 96, left: "50%", top: "50%", transform: "translate(-50%, -50%)", borderRadius: "50%", background: "radial-gradient(circle, rgba(232,162,76,0.22), transparent 68%)", zIndex: 0 }}
+                        />
+                        <div className="relative flex items-center justify-center rounded-full highlights-personality-badge" style={{ width: 52, height: 52, background: "rgba(232,162,76,0.14)", zIndex: 1 }}>
+                          <span style={{ fontSize: 24, lineHeight: 1 }}>{personality.emoji}</span>
+                        </div>
+                      </div>
+                      <div className="min-w-0 highlights-personality-copy" style={{ textAlign: "left" }}>
+                        <div className="highlights-personality-eyebrow" style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: "0.08em", color: accent }}>YOUR TV PERSONALITY</div>
+                        <div className="highlights-personality-name" style={{ fontSize: 19, fontWeight: 700, color: "#fff", marginTop: 2 }}>{personality.name}</div>
+                        <div className="highlights-personality-desc" style={{ fontSize: 12, color: t.textDim, marginTop: 2, lineHeight: 1.35 }}>{personality.description}</div>
                       </div>
                     </div>
-                    <div className="min-w-0">
-                      <div style={{ fontSize: 13.2, fontWeight: 700, letterSpacing: "0.08em", color: accent }}>YOUR TV PERSONALITY</div>
-                      <div style={{ fontSize: 22.3, fontWeight: 700, color: "#fff", marginTop: 2 }}>{personality.name}</div>
-                      <div style={{ fontSize: 12.5, color: t.textDim, marginTop: 2.8, lineHeight: 1.35 }}>{personality.description}</div>
-                    </div>
-                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="highlights-tops">
+                <div className="highlights-tops-primary">
+                  {topShows.length > 0 && (
+                    <div className="highlights-panel highlights-tops-shows">
+                      <div className="highlights-tops-head">
+                        <div className="highlights-section-title" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 0 }}>Top Shows</div>
+                      </div>
+                      <div className="flex gap-3 overflow-x-auto highlights-poster-row" style={{ scrollbarWidth: "none" }}>
+                        {topShows.map((s) => {
+                          const title = resolveTitle(s, readableLanguages);
+                          return (
+                            <button
+                              key={s.showId}
+                              onClick={() => router.push(`/show/${s.showId}`)}
+                              className="flex-shrink-0 text-left active:scale-95 transition highlights-poster-card"
+                              style={{ width: 126 }}
+                              data-hl-ambient={s.posterPath || undefined}
+                            >
+                              <div className="relative rounded-2xl overflow-hidden highlights-poster-art" style={{ aspectRatio: "2 / 3", borderRadius: 14, boxShadow: "0 10px 24px rgba(0,0,0,0.34)", filter: "contrast(1.06) saturate(1.05)" }}>
+                                <PosterArt posterPath={s.posterPath} alt={title} />
+                                {s.rating != null && (
+                                  <div className="highlights-poster-rating-badge">
+                                    <Icon name="star" size={9} color={accent} />
+                                    <span>{s.rating.toFixed(1)}</span>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="highlights-poster-title">{title}</div>
+                              <div className="highlights-poster-stat">{s.hours}h · {s.episodeCount} ep</div>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
-              </div>
+                </div>
 
-              <div className="highlights-stats-section px-6" style={{ marginTop: 14 }}>
-                  {/* summary stat cards — colors sampled directly from a
-                  supplied reference image (statIconGold/statCardBg in
-                  lib/theme.js), deliberately distinct from the app's usual
-                  vibrant amber accent so this row reads as its own quieter
-                  "antique brushed gold" moment. Fixed comfortable sizes
-                  (~64% of the reference's own 68px badge/48px number, two
-                  20% reductions compounded), not computed/shrunk to
-                  force-fit the screen — the row scrolls horizontally if
-                  all 4 don't fit rather than squeezing each card down to
-                  whatever width is left. */}
-              {/* items-start — without it, flexbox's default cross-axis
-                  stretch makes every card match the tallest one (the
-                  2-line-wrapping "Active Days" label), leaving visible
-                  dead space below the shorter single-line labels in the
-                  other 3 cards. Each card now sizes to its own content. */}
-                  <div className="highlights-summary-stats flex items-start gap-2.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                {/* Widget scaled down another 5% on top of the previous
-                    pass (width/padding/icon badge/border-radius/margins),
-                    plus the number reduced another 10% on top of its own
-                    previous pass. */}
-                {/* Active Days dropped from this row per explicit request —
-                    it now surfaces as inline text next to the "Watch
-                    History" heading below instead (see activeDayCount's
-                    other usage). Profile's own separate this-month stats
-                    row (app/(tabs)/profile/page.jsx) is untouched — it has
-                    its own independent ["Shows","Movies","Active Days",
-                    "Rewatched"] tuple, not this one. */}
-                {[["episodes", monthEntries.length, "Episodes"], ["layers", uniqueShowCount, "Shows"], ["clapperboard", monthMovieEntries.length, "Movies"], ["refresh", rewatchCount, "Rewatched"]].map(([icon, n, l], i) => (
-                  <div key={i} className="highlights-summary-stat flex-shrink-0 flex flex-col items-center text-center" style={{ width: 86.36, padding: "12.70px 11.29px", background: statCardBg, border: "1px solid rgba(255,255,255,0.05)", borderRadius: 12.23 }}>
-                    <div className="flex items-center justify-center rounded-full flex-shrink-0" style={{ width: 37.62, height: 37.62, background: `${statIconGold}12` }}>
-                      <Icon name={icon} size={16.93} color={accent} strokeWidth={1.4} />
+                {topMovies.length > 0 && (
+                  <div className="highlights-panel highlights-tops-movies">
+                    <div className="highlights-tops-head">
+                      <div className="highlights-section-title" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 0 }}>Top Movies</div>
                     </div>
-                    <div style={{ fontSize: 24.95, fontWeight: 800, color: "#fff", marginTop: 6.75, lineHeight: 1 }}>{n}</div>
-                    <div style={{ fontSize: 10.26, fontWeight: 500, color: t.textDim, marginTop: 3.59, textAlign: "center", lineHeight: 1.2 }}>{l}</div>
+                    <div className="flex gap-3 overflow-x-auto highlights-poster-row" style={{ scrollbarWidth: "none" }}>
+                      {topMovies.map((m) => {
+                        const title = resolveTitle(m, readableLanguages);
+                        return (
+                          <button
+                            key={m.movieId}
+                            onClick={() => router.push(`/movie/${m.movieId}`)}
+                            className="flex-shrink-0 text-left active:scale-95 transition highlights-poster-card"
+                            style={{ width: 126 }}
+                            data-hl-ambient={m.posterPath || undefined}
+                          >
+                            <div className="relative rounded-2xl overflow-hidden highlights-poster-art" style={{ aspectRatio: "2 / 3", borderRadius: 14, boxShadow: "0 10px 24px rgba(0,0,0,0.34)", filter: "contrast(1.06) saturate(1.05)" }}>
+                              <PosterArt posterPath={m.posterPath} alt={title} />
+                              {m.rating != null && (
+                                <div className="highlights-poster-rating-badge">
+                                  <Icon name="star" size={9} color={accent} />
+                                  <span>{m.rating.toFixed(1)}</span>
+                                </div>
+                              )}
+                            </div>
+                            <div className="highlights-poster-title">{title}</div>
+                            <div className="highlights-poster-stat">{formatDuration(m.runtimeMinutes)}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                ))}
-                  </div>
+                )}
               </div>
-
-              {/* top shows — one horizontal-scrolling row of large
-                  posters (matching Home/Explore's existing row pattern),
-                  not a wrapping gallery grid: even capped at 5, a grid
-                  would still be 2 rows tall, whereas a single scrollable
-                  line keeps the section compact regardless of count.
-                  Still in ranked order (computeTopShows' minutes ->
-                  episodes -> recency sort), just without a visible rank
-                  number on the poster. */}
-              {topShows.length > 0 && (
-                <div style={{ marginTop: 26 }}>
-                  <div className="px-6" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 12 }}>Top Shows</div>
-                  <div className="flex gap-3 pl-6 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                    {topShows.map((s) => {
-                      const title = resolveTitle(s, readableLanguages);
-                      return (
-                        <button key={s.showId} onClick={() => router.push(`/show/${s.showId}`)} className="flex-shrink-0 text-left active:scale-95 transition" style={{ width: 156 }}>
-                          {/* Same poster size/count/scroll behavior — just a
-                              bigger radius, a deeper/softer shadow, and a
-                              touch more contrast on the image itself. */}
-                          <div className="relative rounded-2xl overflow-hidden" style={{ aspectRatio: "2 / 3", borderRadius: 22, boxShadow: "0 14px 32px rgba(0,0,0,0.34)", filter: "contrast(1.06) saturate(1.05)" }}>
-                            <PosterArt posterPath={s.posterPath} alt={title} />
-                            {/* This is the same `rating` computeTopShows already
-                                resolves for ranking (whichever touched season had
-                                the most watched episodes this month) — shown only
-                                when one exists, never a placeholder for an unrated
-                                show. */}
-                            {s.rating != null && (
-                              <div className="absolute flex items-center gap-1 rounded-full" style={{ left: 6, bottom: 6, padding: "3px 6px", background: "rgba(0,0,0,0.68)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)" }}>
-                                <Icon name="star" size={9} color={accent} />
-                                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff" }}>{s.rating.toFixed(1)}</span>
-                              </div>
-                            )}
-                          </div>
-                          <div className="mt-2 leading-tight" style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
-                          <div style={{ fontSize: 11, color: t.textDim, marginTop: 2 }}>{s.hours}h · {s.episodeCount} ep</div>
-                        </button>
-                      );
-                    })}
-                    <div className="w-2 flex-shrink-0" />
-                  </div>
-                </div>
-              )}
-
-              {/* top movies — directly below Top Shows, same card/row
-                  pattern. No episode-count equivalent for a movie, so the
-                  subtext is just its runtime. */}
-              {topMovies.length > 0 && (
-                <div style={{ marginTop: 26 }}>
-                  <div className="px-6" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 12 }}>Top Movies</div>
-                  <div className="flex gap-3 pl-6 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                    {topMovies.map((m) => {
-                      const title = resolveTitle(m, readableLanguages);
-                      return (
-                        <button key={m.movieId} onClick={() => router.push(`/movie/${m.movieId}`)} className="flex-shrink-0 text-left active:scale-95 transition" style={{ width: 156 }}>
-                          <div className="relative rounded-2xl overflow-hidden" style={{ aspectRatio: "2 / 3", borderRadius: 22, boxShadow: "0 14px 32px rgba(0,0,0,0.34)", filter: "contrast(1.06) saturate(1.05)" }}>
-                            <PosterArt posterPath={m.posterPath} alt={title} />
-                            {/* Same rating computeTopMovies already resolves for
-                                ranking — shown only when one exists. */}
-                            {m.rating != null && (
-                              <div className="absolute flex items-center gap-1 rounded-full" style={{ left: 6, bottom: 6, padding: "3px 6px", background: "rgba(0,0,0,0.68)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)" }}>
-                                <Icon name="star" size={9} color={accent} />
-                                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff" }}>{m.rating.toFixed(1)}</span>
-                              </div>
-                            )}
-                          </div>
-                          <div className="mt-2 leading-tight" style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
-                          <div style={{ fontSize: 11, color: t.textDim, marginTop: 2 }}>{formatDuration(m.runtimeMinutes)}</div>
-                        </button>
-                      );
-                    })}
-                    <div className="w-2 flex-shrink-0" />
-                  </div>
-                </div>
-              )}
-
-              {/* top genres — now a horizontal-scroll row of GenreTag
-                  pills (components/GenreTag.jsx) instead of an inline
-                  3-column grid. Each genre gets its own accent color
-                  (lib/highlights.js's genreColor) rather than sharing
-                  the single Highlights accent, per GenreTag's one-color-
-                  per-genre design contract. No action in its header —
-                  Watch History is its own section below now, not a link
-                  tucked into this one. */}
-              {topGenres.length > 0 && (
-                <div style={{ marginTop: 26 }}>
-                  <div className="px-6" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 12 }}>Top Genres</div>
-                  <GenreTagRow genres={topGenres.map((g) => ({ name: g.genre, color: g.color, icon: g.icon, emoji: g.emoji }))} />
-                </div>
-              )}
             </>
           )}
 
-          {/* "Year only" precision watches — no month to attach to at
-              all (never invented, per episode_watches' schema comment),
-              so these can never appear in any month-scoped section above
-              regardless of which month is selected. This is exactly why
-              this block used to live *inside* the monthEntries.length > 0
-              branch above — a real bug: a month with zero watch activity
-              of its own (August, say, right after a July that did have
-              some) hid this entire section too, even though it has
-              nothing to do with the selected month at all. It's scoped to
-              the whole selected YEAR, so it now renders independently of
-              monthStatus/monthEntries — shown in every month as long as
-              there's actually year-only data somewhere in the year. */}
-          {yearOnlyEntries.length > 0 && (
-            <div style={{ marginTop: 30 }}>
-              <div className="px-6 flex items-baseline gap-2" style={{ marginBottom: 12 }}>
-                <span style={{ fontSize: 16.5, fontWeight: 700, color: "#fff" }}>Watched in {year}</span>
-                <span style={{ fontSize: 12, color: t.textDim }}>no specific date · {yearOnlyHours}h</span>
+          {/* Top Genres sits just above Watch History (mobile-style bars),
+              not beside Top Shows — keeps the overview row as stats |
+              personality only. */}
+          {monthStatus === "ready" && monthEntries.length > 0 && topGenres.length > 0 && (
+            <div className="highlights-panel highlights-tops-genres highlights-genres-before-history">
+              <div className="highlights-tops-head">
+                <div className="highlights-section-title" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 0 }}>Top Genres</div>
               </div>
-              {yearOnlyTopShows.length > 0 && (
-                <div className="flex gap-3 pl-6 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                  {yearOnlyTopShows.map((s) => {
-                    const title = resolveTitle(s, readableLanguages);
-                    return (
-                      <button key={s.showId} onClick={() => router.push(`/show/${s.showId}`)} className="flex-shrink-0 text-left active:scale-95 transition" style={{ width: 156 }}>
-                        <div className="relative rounded-2xl overflow-hidden" style={{ aspectRatio: "2 / 3", boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
-                          <PosterArt posterPath={s.posterPath} alt={title} />
-                        </div>
-                        <div className="mt-2 leading-tight" style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
-                        <div style={{ fontSize: 11, color: t.textDim, marginTop: 2 }}>{s.hours}h · {s.episodeCount} ep</div>
-                      </button>
-                    );
-                  })}
-                  <div className="w-2 flex-shrink-0" />
-                </div>
-              )}
-              {yearOnlyTopGenres.length > 0 && (
-                <div style={{ marginTop: 14 }}>
-                  <GenreTagRow genres={yearOnlyTopGenres.map((g) => ({ name: g.genre, color: g.color, icon: g.icon, emoji: g.emoji }))} />
-                </div>
-              )}
+              <GenreTagRow
+                className="highlights-genre-tag-row"
+                genres={topGenres.map((g) => ({ name: g.genre, color: g.color, icon: g.icon, emoji: g.emoji }))}
+              />
             </div>
           )}
 
@@ -1436,22 +1425,22 @@ export default function Page() {
               honest empty state, same as the day-detail panel's own
               "No watch activity" copy below. */}
           {monthStatus === "ready" && (
-            <div className="px-6" style={{ marginTop: 26 }}>
-              <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
-                <span style={{ fontSize: 16.5, fontWeight: 700, color: "#fff" }}>Watch History</span>
-                {/* Active Days moved here from the stat-card row above — same
-                    number (activeDayCount), just relocated to sit next to
-                    the calendar it actually describes. */}
-                <span style={{ fontSize: 12, fontWeight: 500, color: t.textDim }}>{activeDayCount} Active day{activeDayCount === 1 ? "" : "s"}</span>
-              </div>
+            <div className="highlights-panel highlights-history">
               <style>{`
                 @keyframes highlightsCalSlide { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: translateX(0); } }
                 @keyframes highlightsDayFade { from { opacity: 0; } to { opacity: 1; } }
               `}</style>
 
-              {/* Calendar card — exact spec: 24px radius, matte #171717,
-                  hairline border, no gradients/glassmorphism. */}
-              <div className="rounded-[24px]" style={{ padding: 24, background: "#171717", border: "1px solid rgba(255,255,255,0.05)" }}>
+              <div className="highlights-history-head" style={{ marginBottom: 12 }}>
+                <span className="highlights-section-title" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 0, padding: 0 }}>Watch History</span>
+              </div>
+
+              <div className="highlights-history-body">
+              <div className="highlights-calendar-col">
+              <div className="highlights-calendar-active" style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+                <span className="highlights-history-sub">{activeDayCount} Active day{activeDayCount === 1 ? "" : "s"}</span>
+              </div>
+              <div className="highlights-calendar">
                 <div className="flex items-center justify-between">
                   <button
                     onClick={goToPrevMonth}
@@ -1527,11 +1516,10 @@ export default function Page() {
                   ))}
                 </div>
               </div>
+              </div>
 
-              {/* selected day header — no toggle here anymore; bulk
-                  select is entered via a tap-and-hold on an episode row
-                  below instead (see the menu/circles there). */}
-              <div key={`${selectedDay}-header`} style={{ marginTop: 20, animation: "highlightsDayFade 200ms ease" }}>
+              <div className="highlights-day-detail">
+              <div key={`${selectedDay}-header`} className="highlights-day-header" style={{ marginTop: 0, animation: "highlightsDayFade 200ms ease" }}>
                 <div style={{ fontSize: 22, fontWeight: 600, color: "#fff" }}>
                   {activeDay ? `${MONTH_ABBRS[month - 1]} ${activeDay.day}` : "Select a date"}
                 </div>
@@ -1542,21 +1530,15 @@ export default function Page() {
                       const parts = [];
                       if (epCount > 0) parts.push(`${epCount} episode${epCount !== 1 ? "s" : ""}`);
                       if (dayMovieEntries.length > 0) parts.push(`${dayMovieEntries.length} movie${dayMovieEntries.length !== 1 ? "s" : ""}`);
-                      return `${parts.join(", ")} · ${formatDuration(dayMinutes)} watched`;
+                      return `${parts.join(" · ")} · ${formatDuration(dayMinutes)} watched`;
                     })()}
                   </div>
                 )}
               </div>
 
-              {/* grouped episode rows — one container, not separate
-                  floating cards, per spec, and (per explicit follow-up
-                  request) grouped by show within it: a "Show Title >"
-                  header per show, collapsible, with that show's episode
-                  cards revealed underneath rather than one flat list
-                  mixing every show together. */}
               {activeDay && activeDay.entries.length > 0 ? (
-                <div key={`${selectedDay}-list`} className="rounded-2xl overflow-hidden" style={{ marginTop: 14, background: "#171717", border: "1px solid rgba(255,255,255,0.05)", animation: "highlightsDayFade 200ms ease" }}>
-                  {dayShowGroups.map((group, gi) => {
+                <div key={`${selectedDay}-list`} className="highlights-day-list" style={{ animation: "highlightsDayFade 200ms ease" }}>
+                  {dayShowGroups.map((group) => {
                     const collapsed = collapsedShowIds.has(group.showId);
                     const selectColor = bulkMode === "remove" ? "#e0567a" : accent;
                     const checkColor = bulkMode === "remove" ? "#fff" : "#1a1108";
@@ -1570,7 +1552,11 @@ export default function Page() {
                     const bulkActiveHere = bulkMode && bulkMediaType === "tv";
                     const groupAllSelected = bulkActiveHere && groupIds.length > 0 && groupIds.every((id) => bulkSelectedIds.has(id));
                     return (
-                      <div key={group.showId} style={{ borderTop: gi > 0 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
+                      <div
+                        key={group.showId}
+                        className="highlights-day-group"
+                        data-hl-ambient={group.entries[0]?.posterPath || group.entries[0]?.backdropPath || undefined}
+                      >
                         {/* Two separate tap targets, not one row-wide
                             button: the title/count navigates to the show
                             (per explicit request — episode rows already
@@ -1655,11 +1641,7 @@ export default function Page() {
                               >
                                 <div className="relative flex-shrink-0 rounded-xl overflow-hidden" style={{ width: 88, height: 50 }}>
                                   <PosterArt posterPath={stillSrc(e)} alt={e.showTitle} />
-                                  {/* Personal rating badge — same corner/style
-                                      convention Show Detail's own episode
-                                      thumbnails already use. Play icon
-                                      overlay removed per explicit request
-                                      now that this badge is here. */}
+                                  {/* Personal rating badge — bottom-left on the still. */}
                                   {e.rating != null && (
                                     <div className="absolute flex items-center gap-1 rounded-full" style={{ left: 5, bottom: 5, padding: "2px 6px", background: "rgba(0,0,0,0.55)" }}>
                                       <Icon name="star" size={8} color={accent} />
@@ -1711,13 +1693,16 @@ export default function Page() {
                   {dayMovieEntries.length > 0 && (() => {
                     const bulkActiveHereMovie = bulkMode && bulkMediaType === "movie";
                     return (
-                      <div style={{ borderTop: dayShowGroups.length > 0 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
-                        {dayMovieEntries.map((e) => {
+                      <div
+                        className="highlights-day-group"
+                        data-hl-ambient={dayMovieEntries[0]?.posterPath || dayMovieEntries[0]?.backdropPath || undefined}
+                      >
+                        {dayMovieEntries.map((e, mi) => {
                           const isPressed = pressedEntryId === entryPressKey(e);
                           const isSelected = bulkSelectedIds.has(e.movieId);
                           const movieRating = movieRatingMap.get(e.movieId);
                           return (
-                            <div key={e.movieId} className="w-full flex items-center gap-3" style={{ padding: "0 16px 16px" }}>
+                            <div key={e.movieId} className="w-full flex items-center gap-3" style={{ padding: mi === 0 ? "14px 16px 16px" : "0 16px 16px" }}>
                               <button
                                 onPointerDown={(ev) => !bulkMode && startLongPress(e, ev)}
                                 onPointerMove={handlePressMove}
@@ -1740,12 +1725,7 @@ export default function Page() {
                               >
                                 <div className="relative flex-shrink-0 rounded-xl overflow-hidden" style={{ width: 88, height: 50 }}>
                                   <PosterArt posterPath={e.backdropPath ?? e.posterPath} alt={resolveTitle(e, readableLanguages)} />
-                                  {/* Personal rating badge — same corner/
-                                      style convention as the episode
-                                      thumbnails' own badge above, just the
-                                      movie's real 0-10 scale (movieRatingMap,
-                                      same source Top Movies' ranking reads
-                                      from) instead of an episode's 0-5 stars. */}
+                                  {/* Personal rating badge — bottom-left on the still. */}
                                   {movieRating != null && (
                                     <div className="absolute flex items-center gap-1 rounded-full" style={{ left: 5, bottom: 5, padding: "2px 6px", background: "rgba(0,0,0,0.55)" }}>
                                       <Icon name="star" size={8} color={accent} />
@@ -1782,10 +1762,53 @@ export default function Page() {
                   })()}
                 </div>
               ) : (
-                <div key={`${selectedDay}-empty`} className="flex flex-col items-center text-center rounded-2xl" style={{ marginTop: 14, padding: "36px 20px", background: "#171717", border: "1px solid rgba(255,255,255,0.05)", animation: "highlightsDayFade 200ms ease" }}>
+                <div key={`${selectedDay}-empty`} className="highlights-day-empty flex flex-col items-center text-center" style={{ animation: "highlightsDayFade 200ms ease" }}>
                   <Icon name="calendar" size={22} color={t.textDim} strokeWidth={1.5} />
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: "#fff", marginTop: 12 }}>No watch activity</div>
                   <div style={{ fontSize: 12, color: t.textDim, marginTop: 4 }}>Looks like you took the day off.</div>
+                </div>
+              )}
+              </div>
+              </div>
+            </div>
+          )}
+
+          {/* Year-only watches (no month/day) — below Watch History on
+              desktop; left-aligned to the same content column as posters. */}
+          {yearOnlyEntries.length > 0 && (
+            <div className="highlights-year-only">
+              <div className="highlights-year-only-head flex items-baseline gap-2" style={{ marginBottom: 12 }}>
+                <span className="highlights-section-title" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 0 }}>Watched in {year}</span>
+                <span className="highlights-year-only-sub" style={{ fontSize: 12, color: t.textDim }}>no specific date · {yearOnlyHours}h</span>
+              </div>
+              {yearOnlyTopShows.length > 0 && (
+                <div className="highlights-year-only-posters flex gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                  {yearOnlyTopShows.map((s) => {
+                    const title = resolveTitle(s, readableLanguages);
+                    return (
+                      <button
+                        key={s.showId}
+                        onClick={() => router.push(`/show/${s.showId}`)}
+                        className="flex-shrink-0 text-left active:scale-95 transition highlights-poster-card highlights-year-only-card"
+                        style={{ width: 126 }}
+                        data-hl-ambient={s.posterPath || undefined}
+                      >
+                        <div className="relative rounded-2xl overflow-hidden highlights-poster-art" style={{ aspectRatio: "2 / 3", borderRadius: 14, boxShadow: "0 10px 24px rgba(0,0,0,0.34)" }}>
+                          <PosterArt posterPath={s.posterPath} alt={title} />
+                        </div>
+                        <div className="highlights-poster-title">{title}</div>
+                        <div className="highlights-poster-stat">{s.hours}h · {s.episodeCount} ep</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {yearOnlyTopGenres.length > 0 && (
+                <div className="highlights-year-only-genres" style={{ marginTop: 14 }}>
+                  <GenreTagRow
+                    className="highlights-genre-tag-row"
+                    genres={yearOnlyTopGenres.map((g) => ({ name: g.genre, color: g.color, icon: g.icon, emoji: g.emoji }))}
+                  />
                 </div>
               )}
             </div>
@@ -1807,10 +1830,20 @@ export default function Page() {
           to multi-select for a single movie's single watched_on). */}
       {menuForEntry && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setMenuForEntry(null)} />
+          <div className="fixed inset-0 z-40" style={{ background: "rgba(0,0,0,0.45)" }} onClick={() => setMenuForEntry(null)} />
           <div
-            className="fixed z-50 rounded-2xl overflow-hidden"
-            style={{ left: "50%", top: "50%", transform: "translate(-50%, -50%)", width: 240, background: "rgba(22,18,14,0.97)", border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)", boxShadow: "0 20px 50px rgba(0,0,0,0.6)" }}
+            className="fixed z-50 rounded-[22px] overflow-hidden"
+            style={{
+              left: "50%",
+              top: "50%",
+              transform: "translate(-50%, -50%)",
+              width: "min(280px, 88vw)",
+              background: "rgba(255,255,255,0.14)",
+              border: "1px solid rgba(255,255,255,0.16)",
+              backdropFilter: "blur(40px) saturate(140%)",
+              WebkitBackdropFilter: "blur(40px) saturate(140%)",
+              boxShadow: "0 28px 64px rgba(0,0,0,0.55)",
+            }}
           >
             {menuForEntry.entryType === "movie" ? (
               <button
@@ -1867,6 +1900,10 @@ export default function Page() {
             posterPath: stillSrc(ratingEntry),
             runtimeMin: ratingEntry.runtimeMinutes,
             episodeAirDate: ratingEntry.episodeAirDate,
+            showId: ratingEntry.showId,
+            season: ratingEntry.season,
+            episode: ratingEntry.episode,
+            synopsis: ratingEntry.overview || ratingEntry.synopsis || "",
             watch: {
               id: ratingEntry.id,
               watchDatePrecision: ratingEntry.watchDatePrecision,
@@ -1948,47 +1985,53 @@ export default function Page() {
         />
       )}
 
-      {/* Persistent bulk-action bar — REPLACES the global FloatingNav at
-          this same bottom screen position for as long as bulk select is on
-          (see the useNavVisibility effect above, which hides FloatingNav
-          for exactly this window), rather than floating a second fixed
-          bottom element alongside it. zIndex 60 only needs to clear this
-          page's own menuForEntry backdrop/popup (z-40/z-50) above — it no
-          longer has to out-rank FloatingNav, since FloatingNav isn't
-          mounted at all while this is showing. Same bar for both actions,
-          just re-labeled/re-colored per bulkMode: "Remove" hides these from
-          Highlights only (see hideFromHighlights) — the episodes stay
-          watched everywhere else. "Change" opens the shared Watch Date
-          sheet below instead of applying anything directly. */}
+      {/* Mid-screen bulk-action popup — floating liquid-glass card (no
+          blocking scrim) so users can keep selecting history rows underneath. */}
       {bulkMode && (
         <div
-          className="fixed left-0 right-0 flex items-center justify-between"
-          style={{ bottom: 0, zIndex: 60, padding: "12px 16px calc(env(safe-area-inset-bottom, 0px) + 12px)", background: "rgba(10,10,12,0.97)", borderTop: `1px solid ${t.glassBorder}`, backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)" }}
+          className="highlights-bulk-popup"
+          role="dialog"
+          aria-modal="false"
+          aria-label={bulkMode === "remove" ? "Remove from Highlights" : "Change watch date"}
         >
-          <button onClick={cancelBulkSelect} style={{ fontSize: 13.5, fontWeight: 600, color: t.textDim, padding: "10px 16px" }}>Cancel</button>
-          {bulkMode === "remove" ? (
+          <div className="highlights-bulk-popup-title">
+            {bulkMode === "remove" ? "Remove from Highlights" : "Change watch date"}
+          </div>
+          <div className="highlights-bulk-popup-sub">
+            {bulkSelectedIds.size === 0
+              ? "Select items below, then confirm."
+              : `${bulkSelectedIds.size} item${bulkSelectedIds.size === 1 ? "" : "s"} selected`}
+          </div>
+          <div className="highlights-bulk-popup-actions">
             <button
-              onClick={confirmBulkRemove}
-              disabled={bulkSelectedIds.size === 0 || bulkBusy}
-              className="rounded-full active:scale-95 transition"
-              style={{ padding: "12px 22px", background: "#e0567a", opacity: (bulkSelectedIds.size === 0 || bulkBusy) ? 0.5 : 1 }}
+              type="button"
+              className="highlights-bulk-popup-cancel"
+              onClick={cancelBulkSelect}
             >
-              <span style={{ fontSize: 13.5, fontWeight: 700, color: "#fff" }}>
-                {bulkBusy ? "Removing…" : `Remove (${bulkSelectedIds.size} item${bulkSelectedIds.size === 1 ? "" : "s"})`}
-              </span>
+              Cancel
             </button>
-          ) : (
-            <button
-              onClick={() => setBulkDateSheetOpen(true)}
-              disabled={bulkSelectedIds.size === 0 || bulkBusy}
-              className="rounded-full active:scale-95 transition"
-              style={{ padding: "12px 22px", background: accent, opacity: (bulkSelectedIds.size === 0 || bulkBusy) ? 0.5 : 1 }}
-            >
-              <span style={{ fontSize: 13.5, fontWeight: 700, color: "#1a1108" }}>
-                {bulkBusy ? "Updating…" : `Change (${bulkSelectedIds.size} item${bulkSelectedIds.size === 1 ? "" : "s"})`}
-              </span>
-            </button>
-          )}
+            {bulkMode === "remove" ? (
+              <button
+                type="button"
+                onClick={confirmBulkRemove}
+                disabled={bulkSelectedIds.size === 0 || bulkBusy}
+                className="highlights-bulk-popup-confirm is-danger"
+                style={{ opacity: (bulkSelectedIds.size === 0 || bulkBusy) ? 0.5 : 1 }}
+              >
+                {bulkBusy ? "Removing…" : `Remove (${bulkSelectedIds.size})`}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setBulkDateSheetOpen(true)}
+                disabled={bulkSelectedIds.size === 0 || bulkBusy}
+                className="highlights-bulk-popup-confirm"
+                style={{ opacity: (bulkSelectedIds.size === 0 || bulkBusy) ? 0.5 : 1 }}
+              >
+                {bulkBusy ? "Updating…" : `Change (${bulkSelectedIds.size})`}
+              </button>
+            )}
+          </div>
         </div>
       )}
 

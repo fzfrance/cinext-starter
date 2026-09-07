@@ -124,6 +124,18 @@ export default function MovieWatchDateSheet({ current, movieReleaseDate, onClose
   const releaseParts = useMemo(() => parseISODate(movieReleaseDate), [movieReleaseDate]);
   const hasReleaseDate = !!releaseParts;
 
+  // Desktop: mid-screen floating panel. Mobile keeps the bottom sheet.
+  const [floating, setFloating] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(min-width: 900px)").matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 900px)");
+    const onChange = () => setFloating(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
   const initialOptionId = selectedWatchDateOptionId(current);
   const [optionId, setOptionId] = useState(initialOptionId);
 
@@ -232,8 +244,23 @@ export default function MovieWatchDateSheet({ current, movieReleaseDate, onClose
     <>
       <div className="fixed inset-0 z-[70]" style={{ background: "rgba(0,0,0,0.5)" }} onClick={onClose} />
       <div
-        className="fixed left-0 right-0 z-[71] flex flex-col"
-        style={{
+        className="fixed z-[71] flex flex-col"
+        style={floating ? {
+          left: "50%",
+          top: "50%",
+          transform: "translate(-50%, -50%)",
+          width: "min(420px, 92vw)",
+          maxHeight: "min(720px, 86vh)",
+          borderRadius: 26,
+          background: "rgba(255,255,255,0.14)",
+          backdropFilter: "blur(40px) saturate(140%)",
+          WebkitBackdropFilter: "blur(40px) saturate(140%)",
+          border: "1px solid rgba(255,255,255,0.16)",
+          boxShadow: "0 28px 64px rgba(0,0,0,0.55)",
+          animation: "watchDateFloatIn 220ms cubic-bezier(0.2, 0.8, 0.2, 1)",
+        } : {
+          left: 0,
+          right: 0,
           bottom: 0,
           height: "75vh",
           borderTopLeftRadius: 20,
@@ -249,6 +276,7 @@ export default function MovieWatchDateSheet({ current, movieReleaseDate, onClose
       >
         <style>{`
           @keyframes watchDateSheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+          @keyframes watchDateFloatIn { from { opacity: 0; transform: translate(-50%, -46%) scale(0.97); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
           @keyframes watchDateFade { from { opacity: 0; } to { opacity: 1; } }
         `}</style>
 
@@ -273,15 +301,17 @@ export default function MovieWatchDateSheet({ current, movieReleaseDate, onClose
           <Icon name="check" size={18} color={hasChanges ? "#1a1108" : "rgba(255,255,255,0.4)"} strokeWidth={2.6} />
         </button>
 
-        <div className="flex justify-center flex-shrink-0" style={{ paddingTop: 8 }}>
-          <div style={{ width: 34, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.22)" }} />
-        </div>
+        {!floating && (
+          <div className="flex justify-center flex-shrink-0" style={{ paddingTop: 8 }}>
+            <div style={{ width: 34, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.22)" }} />
+          </div>
+        )}
 
-        <div className="flex items-center justify-center flex-shrink-0" style={{ height: 52, padding: "0 14px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+        <div className="flex items-center justify-center flex-shrink-0" style={{ height: 52, padding: floating ? "8px 14px 0" : "0 14px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
           <span style={{ fontSize: 16, fontWeight: 600, color: "#fff" }}>Watch Date</span>
         </div>
 
-        <div className="overflow-y-auto" style={{ padding: "14px 14px 20px", scrollbarWidth: "none" }}>
+        <div className="overflow-y-auto" style={{ padding: "14px 14px 20px", scrollbarWidth: "none", minHeight: 0 }}>
           <div className="rounded-2xl overflow-hidden" style={{ background: t.cardFill, border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" }}>
             {OPTIONS.map((opt, i) => {
               const selected = optionId === opt.id;

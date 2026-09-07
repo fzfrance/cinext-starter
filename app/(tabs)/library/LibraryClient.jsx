@@ -6,12 +6,13 @@ import Icon from "@/components/ui/Icon";
 import RecommendedRow from "@/components/library/RecommendedRow";
 import StatusFilterRow, { MOVIE_STATUS_ITEMS } from "@/components/library/StatusFilterRow";
 import LibraryTabMenu, { TAB_LABEL } from "@/components/library/LibraryTabMenu";
-import ViewModeMenu, { VIEW_MODE_ICON } from "@/components/library/ViewModeMenu";
+import ViewModeToggle from "@/components/library/ViewModeToggle";
 import Aisle from "@/components/library/Aisle";
 import GenrePosterRow from "@/components/library/GenrePosterRow";
 import CollectionRow from "@/components/library/CollectionRow";
 import CaseOverlay from "@/components/library/CaseOverlay";
 import MovieCaseOverlay from "@/components/library/MovieCaseOverlay";
+import LibraryDesktop from "@/components/library/LibraryDesktop";
 import { useAuth } from "@/lib/auth-context";
 import { getUserShows } from "@/lib/userShows";
 import { getUserMovies } from "@/lib/userMovies";
@@ -25,7 +26,7 @@ import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
 const librarySessionCache = new Map();
-const LIBRARY_SNAPSHOT_PREFIX = "cinext:librarySnapshot:v1:";
+const LIBRARY_SNAPSHOT_PREFIX = "cinext:librarySnapshot:v2:";
 
 
 // Library — Shows/Movies/Collections, wired to the signed-in user's real
@@ -177,7 +178,6 @@ export default function LibraryClient() {
   // app/(tabs)/explore/library/LibraryClient.jsx already uses for its own
   // filter persistence, reused here rather than inventing a new mechanism.
   const [viewMode, setViewModeState] = useState("dvd");
-  const [viewMenuOpen, setViewMenuOpen] = useState(false);
   useEffect(() => {
     try {
       const saved = localStorage.getItem(LIBRARY_VIEW_MODE_KEY);
@@ -188,153 +188,158 @@ export default function LibraryClient() {
   }, []);
   const selectViewMode = (mode) => {
     setViewModeState(mode);
-    setViewMenuOpen(false);
     try { localStorage.setItem(LIBRARY_VIEW_MODE_KEY, mode); } catch (err) { console.error("Failed to save library view mode:", err); }
   };
 
   const libraryLoadUserRef = useRef(null);
   useEffect(() => {
     if (!user) return;
+    // Only skip when a prior run for this user actually finished. Setting the
+    // ref before the async work used to break React Strict Mode: mount →
+    // mark loaded → cleanup cancels fetch → remount sees the ref and never
+    // retries, leaving Shows/Movies permanently empty.
     if (libraryLoadUserRef.current === user.id) return;
-    libraryLoadUserRef.current = user.id;
     let cancelled = false;
     (async () => {
-      const [byShow, cols] = await Promise.all([getUserShows(user.id), getCollections(user.id)]);
-      if (cancelled) return;
-      const trackedIds = Object.keys(byShow).map(Number);
-      const collectionIds = cols.flatMap((c) => c.showIds);
-      const allIds = [...new Set([...trackedIds, ...collectionIds])];
+      try {
+        const [byShow, cols] = await Promise.all([getUserShows(user.id), getCollections(user.id)]);
+        if (cancelled) return;
+        const trackedIds = Object.keys(byShow).map(Number);
+        const collectionIds = cols.flatMap((c) => c.showIds);
+        const allIds = [...new Set([...trackedIds, ...collectionIds])];
 
-      setCollectionsRaw(cols);
-      setCollectionsLoaded(true);
+        setCollectionsRaw(cols);
+        setCollectionsLoaded(true);
 
-      if (allIds.length === 0) {
-        setShows([]);
-        setLoaded(true);
-        return;
-      }
+        if (allIds.length === 0) {
+          setShows([]);
+          setLoaded(true);
+          libraryLoadUserRef.current = user.id;
+          return;
+        }
 
-      // Real status (resolveShowStatus) needs live episode-progress counts
-      // to know when a show that was never explicitly marked "Completed"
-      // has actually had every released episode watched — otherwise a show
-      // finished purely by checking off episodes stays stuck showing
-      // whichever explicit status it last had (e.g. still "Watching"),
-      // same bug Show Detail/Profile/Explore already avoid by resolving
-      // through this function instead of reading the raw column. paused/
-      // drop/completed are unconditional overrides inside resolveShowStatus
-      // itself, so those don't need the (expensive, per-show season) fetch.
-      const resolvableIds = trackedIds.filter((id) => {
-        const st = byShow[id].status;
-        return st !== "paused" && st !== "drop" && st !== "completed";
-      });
-      // Start the history read in parallel, but do not make posters/title
-      // metadata wait for it or for the much slower season-by-season TMDB
-      // progress resolution below.
-      const summaryPromise = getShowWatchSummary(user.id, resolvableIds).catch((err) => {
-        console.error("Failed to load Library watch summary:", err);
-        return {};
-      });
+        // Real status (resolveShowStatus) needs live episode-progress counts
+        // to know when a show that was never explicitly marked "Completed"
+        // has actually had every released episode watched — otherwise a show
+        // finished purely by checking off episodes stays stuck showing
+        // whichever explicit status it last had (e.g. still "Watching"),
+        // same bug Show Detail/Profile/Explore already avoid by resolving
+        // through this function instead of reading the raw column. paused/
+        // drop/completed are unconditional overrides inside resolveShowStatus
+        // itself, so those don't need the (expensive, per-show season) fetch.
+        const resolvableIds = trackedIds.filter((id) => {
+          const st = byShow[id].status;
+          return st !== "paused" && st !== "drop" && st !== "completed";
+        });
+        // Start the history read in parallel, but do not make posters/title
+        // metadata wait for it or for the much slower season-by-season TMDB
+        // progress resolution below.
+        const summaryPromise = getShowWatchSummary(user.id, resolvableIds).catch((err) => {
+          console.error("Failed to load Library watch summary:", err);
+          return {};
+        });
 
-      const res = await fetch("/api/shows/library-detail", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          shows: allIds.map((id) => ({ id, needsProgress: false })),
-        }),
-      });
-      const { results } = await res.json();
-      if (cancelled) return;
-      const byId = Object.fromEntries(results.map((r) => [r.id, r]));
-
-      const merged = allIds.map((id) => {
-        const detail = byId[id];
-        if (!detail) return null;
-        const tracked = byShow[id];
-        const { base, glow } = fallbackPalette(id);
-        return {
-          id,
-          // Stored language-neutral. The memoized display projection below
-          // resolves this without re-running the entire network pipeline
-          // when the user's language preference finishes loading.
-          title: detail.title,
-          // Kept separately so the inline search below still matches an
-          // international show by its English name even when it's
-          // currently displaying under its original-language title, OR
-          // by its original-language name when it's currently displaying
-          // under English (the reverse case — resolveTitle picks ONE of
-          // these to show, but search needs to match either regardless
-          // of which one won).
-          englishTitle: detail.title,
-          originalTitle: detail.originalTitle,
-          originalLanguage: detail.originalLanguage,
-          year: detail.year,
-          meta: detail.meta,
-          posterPath: detail.posterPath,
-          backdropPath: detail.backdropPath,
-          genres: detail.genres ?? [],
-          keywords: detail.keywords ?? [],
-          logoPath: null, // filled in by the separate logo-fetch effect below
-          tmdbRating: detail.tmdbRating,
-          tagline: detail.tagline,
-          base, glow,
-          status: tracked?.status ?? null,
-          favorite: tracked?.favorite ?? false,
-          addedAt: tracked?.addedAt ?? 0,
-        };
-      }).filter(Boolean);
-
-      // Preserve any logoPath the separate logo-fetch effect below already
-      // resolved for an id still present here, instead of unconditionally
-      // wiping it back to null — this effect can legitimately re-run after
-      // that one already succeeded (e.g. readableLanguages settling from
-      // its default to the real profile value triggers both), and when it
-      // does, the logo effect's own id+language guard correctly sees
-      // nothing meaningful changed and skips re-fetching — which used to
-      // leave every spine's logo permanently blanked out instead of just
-      // skipped-because-already-known.
-      setShows((prev) => {
-        const prevLogoById = Object.fromEntries(prev.filter((s) => s.logoPath != null).map((s) => [s.id, s.logoPath]));
-        return merged.map((s) => (s.id in prevLogoById ? { ...s, logoPath: prevLogoById[s.id] } : s));
-      });
-      setLoaded(true);
-
-      // Status auto-resolution is progressive: shelves are already usable
-      // while this slower history + season work finishes in the background.
-      if (resolvableIds.length === 0) return;
-      const summary = await summaryPromise;
-      if (cancelled) return;
-      const progressRes = await fetch("/api/shows/library-detail", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          shows: resolvableIds.map((id) => ({
-            id,
-            needsProgress: true,
-            watched: summary[id]?.watchedKeys ?? [],
-          })),
-        }),
-      });
-      const { results: progressResults } = await progressRes.json();
-      if (cancelled) return;
-      const progressById = Object.fromEntries((progressResults ?? []).map((detail) => [detail.id, detail]));
-      setShows((prev) => prev.map((show) => {
-        const detail = progressById[show.id];
-        const tracked = byShow[show.id];
-        if (!detail || !tracked) return show;
-        return {
-          ...show,
-          status: resolveShowStatus({
-            explicitStatus: tracked.status,
-            watchedReleasedEpisodes: detail.watchedReleasedEpisodes ?? 0,
-            releasedEpisodes: detail.releasedEpisodes ?? 0,
-            resolvedReleasedEpisodes: detail.resolvedReleasedEpisodes ?? detail.watchedReleasedEpisodes ?? 0,
+        const res = await fetch("/api/shows/library-detail", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            shows: allIds.map((id) => ({ id, needsProgress: false })),
           }),
-        };
-      }));
-    })().catch((err) => {
-      console.error(err);
-      if (libraryLoadUserRef.current === user.id) libraryLoadUserRef.current = null;
-    });
+        });
+        const { results } = await res.json();
+        if (cancelled) return;
+        const byId = Object.fromEntries(results.map((r) => [r.id, r]));
+
+        const merged = allIds.map((id) => {
+          const detail = byId[id];
+          if (!detail) return null;
+          const tracked = byShow[id];
+          const { base, glow } = fallbackPalette(id);
+          return {
+            id,
+            // Stored language-neutral. The memoized display projection below
+            // resolves this without re-running the entire network pipeline
+            // when the user's language preference finishes loading.
+            title: detail.title,
+            // Kept separately so the inline search below still matches an
+            // international show by its English name even when it's
+            // currently displaying under its original-language title, OR
+            // by its original-language name when it's currently displaying
+            // under English (the reverse case — resolveTitle picks ONE of
+            // these to show, but search needs to match either regardless
+            // of which one won).
+            englishTitle: detail.title,
+            originalTitle: detail.originalTitle,
+            originalLanguage: detail.originalLanguage,
+            year: detail.year,
+            meta: detail.meta,
+            posterPath: detail.posterPath,
+            backdropPath: detail.backdropPath,
+            genres: detail.genres ?? [],
+            keywords: detail.keywords ?? [],
+            logoPath: null, // filled in by the separate logo-fetch effect below
+            tmdbRating: detail.tmdbRating,
+            tagline: detail.tagline,
+            base, glow,
+            status: tracked?.status ?? null,
+            favorite: tracked?.favorite ?? false,
+            addedAt: tracked?.addedAt ?? 0,
+          };
+        }).filter(Boolean);
+
+        // Preserve any logoPath the separate logo-fetch effect below already
+        // resolved for an id still present here, instead of unconditionally
+        // wiping it back to null — this effect can legitimately re-run after
+        // that one already succeeded (e.g. readableLanguages settling from
+        // its default to the real profile value triggers both), and when it
+        // does, the logo effect's own id+language guard correctly sees
+        // nothing meaningful changed and skips re-fetching — which used to
+        // leave every spine's logo permanently blanked out instead of just
+        // skipped-because-already-known.
+        setShows((prev) => {
+          const prevLogoById = Object.fromEntries(prev.filter((s) => s.logoPath != null).map((s) => [s.id, s.logoPath]));
+          return merged.map((s) => (s.id in prevLogoById ? { ...s, logoPath: prevLogoById[s.id] } : s));
+        });
+        setLoaded(true);
+        libraryLoadUserRef.current = user.id;
+
+        // Status auto-resolution is progressive: shelves are already usable
+        // while this slower history + season work finishes in the background.
+        if (resolvableIds.length === 0) return;
+        const summary = await summaryPromise;
+        if (cancelled) return;
+        const progressRes = await fetch("/api/shows/library-detail", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            shows: resolvableIds.map((id) => ({
+              id,
+              needsProgress: true,
+              watched: summary[id]?.watchedKeys ?? [],
+            })),
+          }),
+        });
+        const { results: progressResults } = await progressRes.json();
+        if (cancelled) return;
+        const progressById = Object.fromEntries((progressResults ?? []).map((detail) => [detail.id, detail]));
+        setShows((prev) => prev.map((show) => {
+          const detail = progressById[show.id];
+          const tracked = byShow[show.id];
+          if (!detail || !tracked) return show;
+          return {
+            ...show,
+            status: resolveShowStatus({
+              explicitStatus: tracked.status,
+              watchedReleasedEpisodes: detail.watchedReleasedEpisodes ?? 0,
+              releasedEpisodes: detail.releasedEpisodes ?? 0,
+              resolvedReleasedEpisodes: detail.resolvedReleasedEpisodes ?? detail.watchedReleasedEpisodes ?? 0,
+            }),
+          };
+        }));
+      } catch (err) {
+        console.error(err);
+      }
+    })();
     return () => { cancelled = true; };
   }, [user]);
 
@@ -351,7 +356,8 @@ export default function LibraryClient() {
   useEffect(() => {
     if (shows.length === 0) return;
     const ids = shows.map((s) => s.id);
-    const key = `${ids.join(",")}|${readableLanguages.join(",")}`;
+    // v2 — pickBestLogo prefers original/EN over unrelated readable langs
+    const key = `v2|${ids.join(",")}|${readableLanguages.join(",")}`;
     if (logoIdsRef.current === key) return;
     logoIdsRef.current = key;
     let cancelled = false;
@@ -381,68 +387,74 @@ export default function LibraryClient() {
     if (!user || !collectionsLoaded) return;
     const collectionMovieIds = collectionsRaw.flatMap((c) => c.movieIds ?? []);
     const loadKey = `${user.id}|${[...new Set(collectionMovieIds)].sort((a, b) => a - b).join(",")}`;
+    // Same Strict Mode guard as shows — only skip after a finished load.
     if (movieLoadKeyRef.current === loadKey) return;
-    movieLoadKeyRef.current = loadKey;
     let cancelled = false;
     (async () => {
-      const byMovie = await getUserMovies(user.id);
-      const trackedIds = Object.keys(byMovie).map(Number);
-      const allIds = [...new Set([...trackedIds, ...collectionMovieIds])];
+      try {
+        const byMovie = await getUserMovies(user.id);
+        const trackedIds = Object.keys(byMovie).map(Number);
+        const allIds = [...new Set([...trackedIds, ...collectionMovieIds])];
 
-      if (allIds.length === 0) {
-        if (!cancelled) { setMovies([]); setMoviesLoaded(true); }
-        return;
+        if (allIds.length === 0) {
+          if (!cancelled) {
+            setMovies([]);
+            setMoviesLoaded(true);
+            movieLoadKeyRef.current = loadKey;
+          }
+          return;
+        }
+
+        const res = await fetch("/api/movies/library-detail", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: allIds }),
+        });
+        const { results } = await res.json();
+        if (cancelled) return;
+        const byId = Object.fromEntries(results.map((r) => [r.id, r]));
+
+        const merged = allIds.map((id) => {
+          const detail = byId[id];
+          if (!detail) return null;
+          const tracked = byMovie[id];
+          const { base, glow } = fallbackPalette(id);
+          return {
+            id,
+            title: detail.title,
+            englishTitle: detail.title,
+            originalTitle: detail.originalTitle,
+            originalLanguage: detail.originalLanguage,
+            year: detail.year,
+            meta: detail.meta,
+            posterPath: detail.posterPath,
+            backdropPath: detail.backdropPath,
+            genres: detail.genres ?? [],
+            logoPath: null, // filled in by the separate logo-fetch effect below
+            tmdbRating: detail.tmdbRating,
+            tagline: detail.tagline,
+            base, glow,
+            status: tracked?.status ?? null,
+            favorite: tracked?.favorite ?? false,
+            addedAt: tracked?.addedAt ?? 0,
+          };
+        }).filter(Boolean);
+
+        // Preserve any logoPath the logo-fetch effect below already resolved
+        // — see the shows effect's identical comment above for why (this
+        // effect re-running after that one succeeded used to permanently
+        // blank every spine's logo back to null instead of leaving it alone).
+        setMovies((prev) => {
+          const prevLogoById = Object.fromEntries(prev.filter((s) => s.logoPath != null).map((s) => [s.id, s.logoPath]));
+          return merged.map((s) => (s.id in prevLogoById ? { ...s, logoPath: prevLogoById[s.id] } : s));
+        });
+        setMoviesLoaded(true);
+        movieLoadKeyRef.current = loadKey;
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) setMoviesLoaded(true);
       }
-
-      const res = await fetch("/api/movies/library-detail", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: allIds }),
-      });
-      const { results } = await res.json();
-      if (cancelled) return;
-      const byId = Object.fromEntries(results.map((r) => [r.id, r]));
-
-      const merged = allIds.map((id) => {
-        const detail = byId[id];
-        if (!detail) return null;
-        const tracked = byMovie[id];
-        const { base, glow } = fallbackPalette(id);
-        return {
-          id,
-          title: detail.title,
-          englishTitle: detail.title,
-          originalTitle: detail.originalTitle,
-          originalLanguage: detail.originalLanguage,
-          year: detail.year,
-          meta: detail.meta,
-          posterPath: detail.posterPath,
-          backdropPath: detail.backdropPath,
-          genres: detail.genres ?? [],
-          logoPath: null, // filled in by the separate logo-fetch effect below
-          tmdbRating: detail.tmdbRating,
-          tagline: detail.tagline,
-          base, glow,
-          status: tracked?.status ?? null,
-          favorite: tracked?.favorite ?? false,
-          addedAt: tracked?.addedAt ?? 0,
-        };
-      }).filter(Boolean);
-
-      // Preserve any logoPath the logo-fetch effect below already resolved
-      // — see the shows effect's identical comment above for why (this
-      // effect re-running after that one succeeded used to permanently
-      // blank every spine's logo back to null instead of leaving it alone).
-      setMovies((prev) => {
-        const prevLogoById = Object.fromEntries(prev.filter((s) => s.logoPath != null).map((s) => [s.id, s.logoPath]));
-        return merged.map((s) => (s.id in prevLogoById ? { ...s, logoPath: prevLogoById[s.id] } : s));
-      });
-      setMoviesLoaded(true);
-    })().catch((err) => {
-      console.error(err);
-      if (movieLoadKeyRef.current === loadKey) movieLoadKeyRef.current = null;
-      if (!cancelled) setMoviesLoaded(true);
-    });
+    })();
     return () => { cancelled = true; };
   }, [user, collectionsLoaded, collectionsRaw]);
 
@@ -450,7 +462,7 @@ export default function LibraryClient() {
   useEffect(() => {
     if (movies.length === 0) return;
     const ids = movies.map((s) => s.id);
-    const key = `${ids.join(",")}|${readableLanguages.join(",")}`;
+    const key = `v2|${ids.join(",")}|${readableLanguages.join(",")}`;
     if (movieLogoIdsRef.current === key) return;
     movieLogoIdsRef.current = key;
     let cancelled = false;
@@ -597,6 +609,9 @@ export default function LibraryClient() {
   const movieStatusCounts = {
     all: trackedMovies.length,
     watchlist: trackedMovies.filter((s) => s.status === "watchlist").length,
+    watching: trackedMovies.filter((s) => s.status === "watching").length,
+    paused: trackedMovies.filter((s) => s.status === "paused").length,
+    drop: trackedMovies.filter((s) => s.status === "drop").length,
     completed: trackedMovies.filter((s) => s.status === "completed").length,
   };
   const movieRecommended = trackedMovies.filter((s) => s.status === "watchlist" && s.tmdbRating != null).sort((a, b) => b.tmdbRating - a.tmdbRating).slice(0, 3);
@@ -631,7 +646,35 @@ export default function LibraryClient() {
   }
 
   return (
-    <div style={{ minHeight: "100dvh", background: t.bg, color: "#fff", position: "relative" }}>
+    <div className="library-page" style={{ minHeight: "100dvh", background: t.bg, color: "#fff", position: "relative" }}>
+      <LibraryDesktop
+        tab={tab}
+        statusFilter={statusFilter}
+        onStatusFilter={setStatusFilter}
+        movieStatusFilter={movieStatusFilter}
+        onMovieStatusFilter={setMovieStatusFilter}
+        statusCounts={statusCounts}
+        movieStatusCounts={movieStatusCounts}
+        recommended={recommended}
+        movieRecommended={movieRecommended}
+        filtered={filtered}
+        movieFiltered={movieFiltered}
+        trackedCount={trackedShows.length}
+        trackedMovieCount={trackedMovies.length}
+        collectionsRaw={collectionsRaw}
+        localizedShows={localizedShows}
+        localizedMovies={localizedMovies}
+        loaded={loaded}
+        moviesLoaded={moviesLoaded}
+        nothingToShow={nothingToShow}
+        movieNothingToShow={movieNothingToShow}
+        onOpen={handleOpen}
+        onNewCollection={() => setNewCollectionOpen(true)}
+        viewMode={viewMode}
+        onSelectViewMode={selectViewMode}
+      />
+
+      <div className="library-mobile-chrome">
       {/* The static "Library" heading is gone — the title itself now names
           whichever tab is active ("Shows"/"Movies"/"Collections") and IS
           the Shows/Movies/Collections switcher's own trigger (a small ▾
@@ -656,25 +699,8 @@ export default function LibraryClient() {
           )}
         </div>
         <div className="flex items-center gap-2.5">
-          {/* View — DVD Case / Poster switcher, immediately left of
-              Search, matching its size/border/background/blur exactly.
-              Own icon always reflects the current mode. */}
-          <div style={{ position: "relative" }}>
-            <button
-              onClick={() => setViewMenuOpen((v) => !v)}
-              className="active:scale-90 transition"
-              style={{ width: 38, height: 38, borderRadius: "50%", background: t.cardFill, border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
-            >
-              <Icon name={VIEW_MODE_ICON[viewMode]} size={16} color="#fff" />
-            </button>
-            {viewMenuOpen && (
-              <ViewModeMenu
-                viewMode={viewMode}
-                onSelect={selectViewMode}
-                onClose={() => setViewMenuOpen(false)}
-              />
-            )}
-          </div>
+          {/* Sort is elsewhere on mobile; view toggle mirrors Home's pill */}
+          <ViewModeToggle viewMode={viewMode} onSelect={selectViewMode} />
           {/* Search — searches THIS library in place (title match against
               the same shelves below) rather than navigating to the separate
               global TMDB search — reveals an inline input instead of a new
@@ -726,7 +752,7 @@ export default function LibraryClient() {
           </div>
           {genreGroups.map(([genre, items]) => (
             viewMode === "poster"
-              ? <GenrePosterRow key={genre} title={genre} items={items} />
+              ? <GenrePosterRow key={genre} title={genre} items={items} withShelf />
               : <Aisle key={genre} title={genre} items={items} onOpen={handleOpen} />
           ))}
           {loaded && nothingToShow && (
@@ -753,7 +779,7 @@ export default function LibraryClient() {
           </div>
           {movieGenreGroups.map(([genre, items]) => (
             viewMode === "poster"
-              ? <GenrePosterRow key={genre} title={genre} items={items} mediaType="movie" />
+              ? <GenrePosterRow key={genre} title={genre} items={items} mediaType="movie" withShelf />
               : <Aisle key={genre} title={genre} items={items} onOpen={(s, rect) => handleOpen(s, rect, "movie")} mediaType="movie" />
           ))}
           {moviesLoaded && movieNothingToShow && (
@@ -782,11 +808,13 @@ export default function LibraryClient() {
         </div>
       )}
 
+      </div>{/* /.library-mobile-chrome */}
+
       {tab === "collections" && (
         <button
           onClick={() => setNewCollectionOpen(true)}
           aria-label="New collection"
-          className="fixed rounded-full flex items-center justify-center active:scale-90 transition"
+          className="library-mobile-fab fixed rounded-full flex items-center justify-center active:scale-90 transition"
           style={{
             bottom: "calc(88px + env(safe-area-inset-bottom))",
             right: "max(21px, env(safe-area-inset-right))",
@@ -805,31 +833,69 @@ export default function LibraryClient() {
       )}
 
       {newCollectionOpen && (
-        <div className="fixed inset-0 flex items-center justify-center px-8" style={{ zIndex: 110, background: "rgba(0,0,0,0.6)" }} onClick={() => setNewCollectionOpen(false)}>
-          <div className="w-full rounded-3xl" style={{ maxWidth: 420, padding: 22, background: "#1a1512", border: `1px solid ${t.glassBorder}`, boxShadow: "0 30px 60px rgba(0,0,0,0.6)" }} onClick={(event) => event.stopPropagation()}>
-            <div style={{ fontSize: 17, fontWeight: 700, color: "#fff", marginBottom: 14 }}>New Collection</div>
-            <input
-              autoFocus
-              value={newCollectionName}
-              onChange={(event) => setNewCollectionName(event.target.value)}
-              onKeyDown={(event) => { if (event.key === "Enter") createCollection(); }}
-              placeholder="Collection name"
-              className="w-full rounded-2xl outline-none"
-              style={{ padding: "13px 16px", background: t.cardFill, border: `1px solid ${t.cardBorder}`, fontSize: 14.5, color: "#fff" }}
-            />
-            <div className="flex gap-2.5" style={{ marginTop: 18 }}>
-              <button onClick={() => { setNewCollectionOpen(false); setNewCollectionName(""); }} className="flex-1 rounded-full active:scale-95 transition" style={{ padding: 12, background: t.cardFill, border: `1px solid ${t.glassBorder}` }}>
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: "#fff" }}>Cancel</span>
+        <div
+          className="settings-modal-scrim"
+          role="presentation"
+          style={{ zIndex: 220 }}
+          onClick={() => { setNewCollectionOpen(false); setNewCollectionName(""); }}
+        >
+          <div
+            className="settings-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="New collection"
+            onClick={(event) => event.stopPropagation()}
+            style={{ width: "min(400px, 100%)", maxHeight: "none" }}
+          >
+            <div className="settings-modal-head">
+              <div>
+                <div className="settings-modal-title">New collection</div>
+                <div className="settings-modal-sub">Name a list for titles you want together.</div>
+              </div>
+              <button
+                type="button"
+                className="settings-modal-close"
+                onClick={() => { setNewCollectionOpen(false); setNewCollectionName(""); }}
+                aria-label="Close"
+              >
+                <Icon name="x" size={16} color="#fff" />
               </button>
-              <button onClick={createCollection} disabled={!newCollectionName.trim()} className="flex-1 rounded-full active:scale-95 transition" style={{ padding: 12, background: newCollectionName.trim() ? accent : t.cardFill }}>
-                <span style={{ fontSize: 13.5, fontWeight: 700, color: newCollectionName.trim() ? "#1a1108" : t.textDim }}>Create</span>
-              </button>
+            </div>
+            <div className="settings-modal-body" style={{ paddingBottom: 8 }}>
+              <input
+                autoFocus
+                value={newCollectionName}
+                onChange={(event) => setNewCollectionName(event.target.value)}
+                onKeyDown={(event) => { if (event.key === "Enter") createCollection(); }}
+                placeholder="Collection name"
+                className="w-full rounded-2xl outline-none"
+                style={{ padding: "13px 16px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", fontSize: 14.5, color: "#fff" }}
+              />
+              <div className="flex gap-2.5" style={{ marginTop: 16 }}>
+                <button
+                  type="button"
+                  onClick={() => { setNewCollectionOpen(false); setNewCollectionName(""); }}
+                  className="flex-1 rounded-full active:scale-95 transition"
+                  style={{ padding: 12, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}
+                >
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: "#fff" }}>Cancel</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={createCollection}
+                  disabled={!newCollectionName.trim()}
+                  className="flex-1 rounded-full active:scale-95 transition"
+                  style={{ padding: 12, background: newCollectionName.trim() ? accent : "rgba(255,255,255,0.06)" }}
+                >
+                  <span style={{ fontSize: 13.5, fontWeight: 700, color: newCollectionName.trim() ? "#1a1108" : t.textDim }}>Create</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      <div style={{ height: 30 }} />
+      <div className="library-mobile-chrome" style={{ height: 30 }} />
 
       {openShow && (
         openMediaType === "movie" ? (

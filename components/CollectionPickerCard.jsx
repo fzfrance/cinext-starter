@@ -21,14 +21,14 @@ export default function CollectionPickerCard({ collection, accent, onClick }) {
         style={{
           top: 12,
           right: 12,
-          width: 26,
-          height: 26,
+          width: 22,
+          height: 22,
           background: collection.inShow ? accent : "rgba(0,0,0,0.55)",
           border: collection.inShow ? "none" : "1.5px solid rgba(255,255,255,0.55)",
           zIndex: 2,
         }}
       >
-        {collection.inShow && <Icon name="check" size={13} color="#1a1108" strokeWidth={2.8} />}
+        {collection.inShow && <Icon name="check" size={11} color="#1a1108" strokeWidth={2.8} />}
       </div>
     </button>
   );

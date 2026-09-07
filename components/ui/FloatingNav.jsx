@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import Icon from "@/components/ui/Icon";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
-import { pushWithTransition } from "@/lib/viewTransition";
+import { useAppLanguage } from "@/lib/languages";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -23,11 +23,13 @@ const GAP = 10;
 // old icon here) is its own dedicated floating button instead. Library is
 // the new DVD-shelf collection screen (app/(tabs)/library), added right
 // next to See Next per its own request.
+// Desktop top nav lives in components/ui/DesktopGlobalNav.jsx (root layout)
+// so it can morph into Search without remounting on /search.
 const tabs = [
-  { href: "/home", label: "See Next", icon: "playSquare" },
-  { href: "/library", label: "Library", icon: "collection" },
-  { href: "/highlights", label: "Highlights", icon: "sparkle" },
-  { href: "/profile", label: "Profile", icon: "user" },
+  { href: "/home", labelKey: "navSeeNext", icon: "playSquare" },
+  { href: "/library", labelKey: "navLibrary", icon: "collection" },
+  { href: "/highlights", labelKey: "navHighlights", icon: "sparkle" },
+  { href: "/profile", labelKey: "navProfile", icon: "user" },
 ];
 
 /**
@@ -42,6 +44,7 @@ const tabs = [
 export default function FloatingNav({ tintColor }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { t: tr } = useAppLanguage();
   const tint = tintColor || accent;
 
   // Warm the standalone Search route and its Explore payload while the nav
@@ -183,7 +186,7 @@ export default function FloatingNav({ tintColor }) {
       // that span back via wrapRef. There's no fixed/oversized width left
       // anywhere that could push Search past the right edge.
       ref={wrapRef}
-      className="fixed flex items-center"
+      className="floating-nav-shell fixed flex items-center"
       style={{
         left: "max(16px, env(safe-area-inset-left))",
         right: "max(16px, env(safe-area-inset-right))",
@@ -275,7 +278,7 @@ export default function FloatingNav({ tintColor }) {
                 <span className="relative z-10 flex flex-col items-center gap-1">
                   <Icon name={tab.icon} size={20} color={active ? accent : "rgba(255,255,255,0.75)"} />
                   <span style={{ fontSize: 10.5, fontWeight: 600, color: active ? accent : "rgba(255,255,255,0.75)" }}>
-                    {tab.label}
+                    {tr(tab.labelKey)}
                   </span>
                 </span>
               </Link>
@@ -317,7 +320,7 @@ export default function FloatingNav({ tintColor }) {
       <button
         type="button"
         aria-label="Search"
-        onClick={() => pushWithTransition(router, "/search")}
+        onClick={() => router.push("/search")}
         className="flex items-center justify-center active:scale-90 transition flex-shrink-0"
         style={{ ...glassStyle, width: SEARCH_SIZE, height: SEARCH_SIZE, borderRadius: "50%", boxSizing: "border-box" }}
       >

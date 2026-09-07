@@ -157,7 +157,7 @@ export default function ImageCropper({ file, onCancel, onConfirm, aspectRatio = 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: t.bg }}>
+    <div className="fixed inset-0 flex flex-col" style={{ zIndex: 250, background: t.bg }}>
       <div className="flex items-center justify-between px-6" style={{ paddingTop: "env(safe-area-inset-top)" }}>
         <button onClick={onCancel} className="flex items-center justify-center rounded-full active:scale-95 transition" style={{ width: 36, height: 36, background: t.cardFill, border: `1px solid ${t.glassBorder}` }}>
           <Icon name="x" size={16} color="#fff" />

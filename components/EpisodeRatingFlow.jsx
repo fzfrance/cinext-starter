@@ -12,6 +12,7 @@ import { formatWatchDateLabel } from "@/lib/watchDate";
 import { tmdbImage } from "@/lib/tmdb";
 import { themes, DEFAULT_ACCENT, initialsOf } from "@/lib/theme";
 import { useNavVisibility } from "@/lib/nav-visibility-context";
+import { useAppLanguage } from "@/lib/languages";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -95,7 +96,7 @@ function CastAvatar({ person, size = 56 }) {
       {imageUrl ? (
         <Image src={imageUrl} alt="" fill sizes={`${size}px`} style={{ objectFit: "cover" }} />
       ) : (
-        <span style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.9)" }}>{initialsOf(person.role || person.name)}</span>
+        <span style={{ fontSize: size > 44 ? 13 : 11, fontWeight: 700, color: "rgba(255,255,255,0.9)" }}>{initialsOf(person.role || person.name)}</span>
       )}
     </div>
   );
@@ -137,9 +138,10 @@ function WatchDateBadge({ watch, onClick }) {
  *
  * props:
  *   subject: { eyebrow, title, posterPath, base, glow, runtimeMin,
- *     episodeAirDate, showId, season, episode, watch }
+ *     episodeAirDate, synopsis, showId, season, episode, watch }
  *     — episodeAirDate: TMDB "YYYY-MM-DD" | null, backs the sheet's
  *       Release date/Release month options (disabled when null).
+ *     — synopsis: optional short episode description (desktop modal left column).
  *     — showId/season/episode: identifies which watch row to resolve
  *       when `watch` isn't already known (see below).
  *     — watch: { id, watchDatePrecision, watchedOn, watchedYear,
@@ -158,26 +160,87 @@ function WatchDateBadge({ watch, onClick }) {
  *   onWatchDateChange: (watch) => void — called after a successful Watch
  *     Date save with the row's new state, so a caller keeping its own
  *     list (Highlights) can update it in place without a full refetch.
+ *   presentation: "fullscreen" | "modal" | "auto" — "auto" (default) uses
+ *     the centered 2-column card on desktop (≥900px) and the full-page
+ *     sheet on mobile/PWA. Pass "modal" / "fullscreen" to force either.
  */
-export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave, onWatchDateChange }) {
+export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave, onWatchDateChange, presentation = "auto" }) {
   const { user } = useAuth();
+  const { t: tr } = useAppLanguage();
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(min-width: 900px)").matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 900px)");
+    const apply = () => setIsDesktop(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+  // Same centered card from every entry point on desktop (Home, Show
+  // Detail, Highlights, standalone episode page). Mobile/PWA keeps the
+  // full-page sheet. "fullscreen" forces the sheet even on desktop;
+  // "modal" forces the card even on narrow viewports.
+  const isModal = presentation === "modal" || (presentation !== "fullscreen" && isDesktop);
   // FloatingNav sits at zIndex:100, above this flow's own z-50 — without
   // hiding it, the nav renders on top of this entire screen for as long as
   // it's open, silently swallowing taps on anything underneath it,
   // including the "Not now" button whenever it happens to land in that
   // same bottom region. Same fix CaseOverlay/SeasonRatingScreen/
   // ShareRatingCard already needed for the identical reason.
+  // Modal presentation keeps the nav visible (card sits below it), matching
+  // the desktop episode-detail card.
   const [, setNavHidden] = useNavVisibility();
   useEffect(() => {
+    if (isModal) return undefined;
     setNavHidden(true);
     return () => setNavHidden(false);
-  }, [setNavHidden]);
+  }, [setNavHidden, isModal]);
+
+  // Lock page scroll while the desktop rating modal is open — background
+  // and card both stay static.
+  useEffect(() => {
+    if (!isModal) return undefined;
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtml = html.style.overflow;
+    const prevBody = body.style.overflow;
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    return () => {
+      html.style.overflow = prevHtml;
+      body.style.overflow = prevBody;
+    };
+  }, [isModal]);
   const [stage, setStage] = useState("rate"); // rate | done
   const [stars, setStars] = useState(0);
+  const [previewStars, setPreviewStars] = useState(null);
   const [moods, setMoods] = useState(new Set());
   const [mvp, setMvp] = useState(null);
   const [watch, setWatchState] = useState(subject.watch ?? null);
   const [dateSheetOpen, setDateSheetOpen] = useState(false);
+  const [fetchedSynopsis, setFetchedSynopsis] = useState("");
+
+  // Desktop left column — pull episode overview when the caller didn't
+  // already pass synopsis (Highlights / In Progress often only have meta).
+  useEffect(() => {
+    const existing = typeof subject.synopsis === "string" ? subject.synopsis.trim() : "";
+    if (existing || !subject.showId || subject.season == null || subject.episode == null) {
+      setFetchedSynopsis("");
+      return undefined;
+    }
+    let cancelled = false;
+    fetch(`/api/shows/${subject.showId}/episode/${subject.season}/${subject.episode}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        setFetchedSynopsis(String(data?.episode?.synopsis || "").trim());
+      })
+      .catch(() => {
+        if (!cancelled) setFetchedSynopsis("");
+      });
+    return () => { cancelled = true; };
+  }, [subject.synopsis, subject.showId, subject.season, subject.episode]);
 
   // Resolves which specific row this session edits, only when the caller
   // didn't already know (subject.watch) — a fresh mark-watched action.
@@ -211,6 +274,8 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
   };
 
   const canSave = stars > 0;
+  const liveStars = previewStars != null ? previewStars : stars;
+  const showScore = liveStars > 0;
 
   const save = () => {
     if (!canSave) return;
@@ -228,9 +293,192 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
       .catch(console.error);
   };
 
-  const watchedBadge = subject.runtimeMin ? `Watched · ${subject.runtimeMin}m` : "Watched";
+  const watchedBadge = subject.runtimeMin ? `${tr("watched")} · ${subject.runtimeMin}m` : tr("watched");
   const mvpPerson = mvp && mvp !== "other" ? cast.find((c) => c.id === mvp) : null;
+  const synopsis = (typeof subject.synopsis === "string" ? subject.synopsis.trim() : "") || fetchedSynopsis;
 
+  const dateSheet = dateSheetOpen && watch ? (
+    <div onClick={(event) => event.stopPropagation()}>
+      <WatchDateSheet
+        current={watch}
+        episodeAirDate={subject.episodeAirDate}
+        onClose={() => setDateSheetOpen(false)}
+        onSave={saveWatchDate}
+      />
+    </div>
+  ) : null;
+
+  // ---------- Desktop modal: wide 2-column rate layout ----------
+  if (isModal) {
+    return (
+      <div className="ep-rating-overlay fixed inset-0 z-50" onClick={onClose}>
+        <div className={`ep-rating-panel ep-rating-panel-desktop${stage === "rate" ? "" : " is-saved-confirm"}`} onClick={(event) => event.stopPropagation()}>
+          {stage === "rate" ? (
+            <div className="ep-rating-desktop">
+              <aside className="ep-rating-desktop-context">
+                <div className="ep-rating-desktop-art">
+                  <PosterArt posterPath={subject.posterPath} base={subject.base} glow={subject.glow} alt={subject.title} flat tmdbSize="w780" />
+                  <div className="ep-rating-desktop-art-fade" />
+                </div>
+                <div className="ep-rating-desktop-meta">
+                  <div className="ep-rating-desktop-eyebrow">{subject.eyebrow}</div>
+                  <h2 className="ep-rating-desktop-title">{subject.title}</h2>
+                  <div className="ep-rating-desktop-badges">
+                    <div className="ep-rating-desktop-badge">
+                      <Icon name="check" size={11} color="rgba(255,255,255,0.55)" strokeWidth={2.2} />
+                      {watchedBadge}
+                    </div>
+                    <WatchDateBadge watch={watch} onClick={() => setDateSheetOpen(true)} />
+                  </div>
+                  {synopsis ? <p className="ep-rating-desktop-synopsis">{synopsis}</p> : null}
+                </div>
+              </aside>
+
+              <div className="ep-rating-desktop-flow">
+                <section className="ep-rating-desktop-section">
+                  <div className="ep-rating-desktop-section-title">{tr("howWasEpisode")}</div>
+                  <div className="ep-rating-desktop-stars">
+                    <StarInput
+                      value={stars}
+                      onChange={setStars}
+                      onPreviewChange={setPreviewStars}
+                      color={accent}
+                      maxStars={5}
+                      size={36}
+                      gap={8}
+                      hitPaddingBlock={12}
+                    />
+                  </div>
+                  {showScore && (
+                    <div className="ep-rating-desktop-score">
+                      <span className="ep-rating-desktop-score-n">{liveStars}<span>/5</span></span>
+                      <span className="ep-rating-desktop-score-label">{ratingLabelFor(liveStars)}</span>
+                    </div>
+                  )}
+                </section>
+
+                <section className="ep-rating-desktop-section">
+                  <div className="ep-rating-desktop-section-title">{tr("howDidYouFeel")}</div>
+                  <div className="ep-rating-desktop-section-sub">{tr("selectAllApply")}</div>
+                  <div className="ep-rating-desktop-moods">
+                    {moodList.map((m) => {
+                      const active = moods.has(m.id);
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => toggleMood(m.id)}
+                          className={`ep-rating-desktop-mood${active ? " is-active" : ""}`}
+                        >
+                          <span className="ep-rating-desktop-mood-emoji">{m.emoji}</span>
+                          <span className="ep-rating-desktop-mood-label">{m.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                {cast.length > 0 && (
+                  <section className="ep-rating-desktop-section ep-rating-desktop-section-cast">
+                    <div className="ep-rating-desktop-section-title">{tr("whoFavorite")}</div>
+                    <div className="ep-rating-desktop-cast">
+                      {cast.map((c) => {
+                        const active = mvp === c.id;
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => setMvp(active ? null : c.id)}
+                            className={`ep-rating-desktop-cast-item${active ? " is-active" : ""}`}
+                          >
+                            <div className="ep-rating-desktop-cast-avatar-wrap">
+                              <div className={`ep-rating-desktop-cast-ring${active ? " is-active" : ""}`}>
+                                <CastAvatar person={c} size={44} />
+                              </div>
+                              {active && (
+                                <div className="ep-rating-desktop-cast-crown">
+                                  <Icon name="crown" size={10} color="#1a1108" />
+                                </div>
+                              )}
+                            </div>
+                            <span className="ep-rating-desktop-cast-name">{c.role}</span>
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={() => setMvp(mvp === "other" ? null : "other")}
+                        className={`ep-rating-desktop-cast-item${mvp === "other" ? " is-active" : ""}`}
+                      >
+                        <div className="ep-rating-desktop-cast-other">
+                          <Icon name="more" size={15} color={t.textDim} />
+                        </div>
+                        <span className="ep-rating-desktop-cast-name">Other</span>
+                      </button>
+                    </div>
+                  </section>
+                )}
+
+                <div className="ep-rating-desktop-actions">
+                  <button
+                    type="button"
+                    onClick={save}
+                    disabled={!canSave}
+                    className={`ep-rating-desktop-save${canSave ? " is-ready" : ""}`}
+                  >
+                    {tr("saveRating")}
+                  </button>
+                  <button type="button" onClick={onClose} className="ep-rating-desktop-dismiss">
+                    {tr("notNow")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="ep-rating-desktop-done">
+              <div className="ep-rating-desktop-done-check">
+                <Icon name="check" size={22} color={accent} strokeWidth={2.4} />
+              </div>
+              <div className="ep-rating-desktop-done-title">{tr("thanksRating")}</div>
+              <div className="ep-rating-desktop-done-meta">
+                <span>{subject.eyebrow}</span>
+                <span>·</span>
+                <span>{subject.title}</span>
+              </div>
+              <div className="ep-rating-desktop-done-stars">
+                <StarInput value={stars} onChange={() => {}} size={24} color={accent} gap={4} maxStars={5} readOnly />
+              </div>
+              {stars > 0 && <div className="ep-rating-desktop-done-label">{ratingLabelFor(stars)}</div>}
+              {moods.size > 0 && (
+                <div className="ep-rating-desktop-done-moods">
+                  {moodList.filter((m) => moods.has(m.id)).map((m) => (
+                    <span key={m.id} className="ep-rating-desktop-done-mood-chip">
+                      {m.emoji} {m.label}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {mvpPerson && (
+                <div className="ep-rating-desktop-done-mvp">
+                  <CastAvatar person={mvpPerson} size={40} />
+                  <div>
+                    <div className="ep-rating-desktop-done-mvp-role">{mvpPerson.role}</div>
+                    <div className="ep-rating-desktop-done-mvp-note">Your MVP</div>
+                  </div>
+                </div>
+              )}
+              <button type="button" onClick={onClose} className="ep-rating-desktop-save is-ready">
+                Done
+              </button>
+            </div>
+          )}
+        </div>
+        {dateSheet}
+      </div>
+    );
+  }
+
+  // ---------- PWA / fullscreen (unchanged hierarchy) ----------
   return (
     <div className="fixed inset-0 z-50" style={{ background: t.bg }}>
       <div className="h-full overflow-y-auto pb-8" style={{ scrollbarWidth: "none" }}>
@@ -249,7 +497,7 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
             how much of the image) is visible. Content within stays
             anchored near the bottom of this box (bottom:18 / pb-6 below)
             exactly as before. */}
-        <div className="relative w-full" style={{ height: 378 }}>
+        <div className="ep-rating-hero relative w-full" style={{ height: 378 }}>
           <PosterArt posterPath={subject.posterPath} base={subject.base} glow={subject.glow} alt={subject.title} />
           <div className="absolute inset-0" style={{ background: stage === "done" ? "linear-gradient(0deg, #0A0A0C 4%, rgba(10,10,12,0.55) 45%, rgba(10,10,12,0.15) 100%)" : "linear-gradient(0deg, #0A0A0C 6%, transparent 55%)" }} />
 
@@ -292,11 +540,12 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
                 (icon + 2x padding) even at the smallest auto-fit size
                 this range can produce. */}
             <Card style={{ marginTop: 24, padding: "18px 8px" }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: "#fff" }}>How was this episode?</div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: "#fff" }}>{tr("howWasEpisode")}</div>
               <div className="mt-5">
                 <StarInput
                   value={stars}
                   onChange={setStars}
+                  onPreviewChange={setPreviewStars}
                   color={accent}
                   maxStars={5}
                   autoFit
@@ -308,10 +557,10 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
                   hitPaddingBlock={10}
                 />
               </div>
-              {stars > 0 && (
+              {showScore && (
                 <div className="mt-3">
-                  <span style={{ fontSize: 22, fontWeight: 700, color: accent, lineHeight: 1 }}>{stars}<span style={{ fontSize: 13, color: t.textDim }}>/5</span></span>
-                  <div style={{ fontSize: 12, color: t.textDim, marginTop: 3 }}>{ratingLabelFor(stars)}</div>
+                  <span style={{ fontSize: 22, fontWeight: 700, color: accent, lineHeight: 1 }}>{liveStars}<span style={{ fontSize: 13, color: t.textDim }}>/5</span></span>
+                  <div style={{ fontSize: 12, color: t.textDim, marginTop: 3 }}>{ratingLabelFor(liveStars)}</div>
                 </div>
               )}
             </Card>
@@ -479,14 +728,7 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
         )}
       </div>
 
-      {dateSheetOpen && watch && (
-        <WatchDateSheet
-          current={watch}
-          episodeAirDate={subject.episodeAirDate}
-          onClose={() => setDateSheetOpen(false)}
-          onSave={saveWatchDate}
-        />
-      )}
+      {dateSheet}
     </div>
   );
 }

@@ -24,8 +24,8 @@ export default function Aisle({ title, items, onOpen, shared, mediaType = "tv" }
   if (!items.length) return null;
   const fullListHref = `/profile/library?genre=${encodeURIComponent(title)}${mediaType === "movie" ? "&type=movies" : ""}`;
   return (
-    <div style={{ marginTop: 35 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 20px 14px" }}>
+    <div className="library-aisle" style={{ marginTop: 35 }}>
+      <div className="library-aisle-head" style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 20px 14px" }}>
         <Icon name={GENRE_ICON[title] || "tv"} size={16} color={GENRE_COLOR[title] || t.textDim} />
         <span style={{ fontSize: 19, fontWeight: 700, color: "#fff" }}>{title}</span>
         {shared && (
@@ -38,28 +38,19 @@ export default function Aisle({ title, items, onOpen, shared, mediaType = "tv" }
           <Icon name="chevronRight" size={16} color={t.textDim} />
         </button>
       </div>
-      <div className="no-scrollbar" style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}>
-        {/* width:max-content moved up to wrap BOTH the case row and the
-            shelf board below, so both size to the actual full scrollable
-            content width — previously the board was a plain sibling
-            inside just the scroll container (which stays at the
-            viewport's own width, unaffected by overflow-x), so its
-            width:auto only ever matched the initially-visible screen,
-            cutting off dead once you scrolled past it instead of
-            continuing under the rest of the shelf. */}
-        <div style={{ width: "max-content" }}>
-          <div style={{ display: "flex", padding: "0 20px" }}>
+      <div className="no-scrollbar library-aisle-scroll" style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}>
+        {/* width:max-content wraps BOTH the case row and the shelf board so
+            the ledge continues under every case as you scroll. */}
+        <div className="library-aisle-track" style={{ width: "max-content", minWidth: "100%" }}>
+          <div className="library-aisle-cases" style={{ display: "flex", padding: "0 20px" }}>
             {items.map((s) => <ShelfCase key={s.id} show={s} onOpen={(rect) => onOpen(s, rect)} />)}
             <div style={{ width: 40, flexShrink: 0 }} />
           </div>
-          {/* Shelf board — a plain <div> sitting right after the row of DVD
-              cases (its very next sibling here), same treatment as
-              Recommended's own ledge so every genre aisle reads as sitting
-              on a real shelf too. Bumped contrast + a crisp top highlight
-              line (like a real shelf's front lip catching light) so it
-              reads as a distinct board rather than blending into the dark
-              background under the cases' own drop shadows. */}
-          <div style={{ margin: "0 20px", height: 14, borderRadius: 4, borderTop: "1px solid rgba(255,255,255,0.22)", background: "linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.03) 60%, rgba(255,255,255,0.01) 100%)", boxShadow: "0 18px 32px rgba(0,0,0,0.6)" }} />
+          {/* Shelf board under the DVD cases — front lip + depth so each
+              aisle reads as sitting on a real shelf. minWidth:100% on the
+              track keeps the ledge spanning the visible aisle even when
+              there aren't enough cases to fill it. */}
+          <div className="library-aisle-shelf" aria-hidden="true" />
         </div>
       </div>
     </div>

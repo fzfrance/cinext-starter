@@ -28,9 +28,12 @@ function seededRandom(seed) {
 const GRID_CLASSES = "grid grid-cols-3 sm:grid-cols-4";
 const TILE_COUNT = 16; // divides evenly into both a 4-col and (close to) a 3-col layout
 
-export default function AuthPosterBackground({ posterPaths = [] }) {
+export default function AuthPosterBackground({ posterPaths = [], backdropPath = null }) {
   return (
     <div className="fixed inset-0" style={{ zIndex: -1, background: "#0A0A0C", overflow: "hidden" }}>
+      {backdropPath && (
+        <Image className="auth-feature-backdrop" src={tmdbImage(backdropPath, "w1280")} alt="" fill priority sizes="100vw" draggable={false} style={{ objectFit: "cover" }} />
+      )}
       {/* gap kept small (not 0) so tiles still read as distinct posters at
           the seams, but each tile's scale(1.18) — bigger than a purely
           gap-filling scale would need — deliberately pushes its rotated
@@ -38,7 +41,7 @@ export default function AuthPosterBackground({ posterPaths = [] }) {
           actually produces the "posters overlap slightly at the edges"
           depth effect; the z-index spread (1-4) then decides which tile
           wins at each overlap. */}
-      <div className={`absolute inset-0 ${GRID_CLASSES}`} style={{ gap: 3, padding: 3 }}>
+      <div className={`auth-poster-grid absolute inset-0 ${GRID_CLASSES}`} style={{ gap: 3, padding: 3 }}>
         {Array.from({ length: TILE_COUNT }, (_, i) => {
           const path = posterPaths[i];
           if (!path) return null;
@@ -61,14 +64,12 @@ export default function AuthPosterBackground({ posterPaths = [] }) {
           );
         })}
       </div>
-      {/* Dark radial gradient on top — ~15% darker at every inner stop
-          than the previous pass (0.88->0.97, 0.55->0.65; the innermost
-          stop was already fully opaque #0A0A0C and can't go darker) so
-          the form area reads crisper, while the outer edge stays
-          transparent — the poster wall is still meant to show there,
-          only the center (where the form sits) needed more contrast. */}
+      {/* A soft directional overlay keeps the content readable while leaving
+          the horizontal backdrop visible through the center. Desktop CSS
+          supplies the edge-to-edge gradient; there is intentionally no
+          radial vignette or center hotspot here. */}
       <div
-        className="absolute inset-0"
+        className="auth-poster-overlay absolute inset-0"
         style={{
           zIndex: 10,
           background: "radial-gradient(circle at 50% 50%, #0A0A0C 18%, rgba(10,10,12,0.97) 48%, rgba(10,10,12,0.65) 72%, transparent 100%)",

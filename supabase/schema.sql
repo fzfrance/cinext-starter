@@ -175,6 +175,11 @@ alter table profiles add column if not exists readable_languages text[] not null
 alter table profiles add column if not exists theme_preference text not null default 'dark';
 alter table profiles add column if not exists accent_color text not null default '#E8A24C';
 
+-- Settings > Language > App Language — UI locale preference for desktop
+-- web (ISO 639-1, matches lib/languages.js). Distinct from readable_languages
+-- (which only controls original vs translated titles).
+alter table profiles add column if not exists app_language text not null default 'en';
+
 -- Profile header's "@handle" (Edit Profile) — a real user-chosen username,
 -- not derived from display name or email. Nullable (not every profile has
 -- picked one yet); unique so two accounts can't collide — re-created via

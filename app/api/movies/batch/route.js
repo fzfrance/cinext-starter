@@ -37,6 +37,7 @@ export async function GET(request) {
     originalLanguage: movie.original_language ?? null,
     posterPath: movie.poster_path,
     backdropPath: movie.backdrop_path ?? null,
+    overview: movie.overview ?? "",
     genre: (movie.genres ?? [])[0]?.name ?? "",
     releaseDate: movie.release_date ?? null,
     tmdbStatus: movie.status ?? null,

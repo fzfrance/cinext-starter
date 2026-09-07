@@ -21,6 +21,9 @@ export function AuthProvider({ children }) {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       setLoading(false);
+    }).catch((err) => {
+      console.error(err);
+      setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -36,6 +39,7 @@ export function AuthProvider({ children }) {
         const next = session?.user ?? null;
         return prev?.id === next?.id ? prev : next;
       });
+      setLoading(false);
     });
 
     return () => subscription.unsubscribe();

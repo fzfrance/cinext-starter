@@ -88,6 +88,9 @@ async function getShowData(showId) {
     // identical "Limited Series" card with no way to tell them apart.
     title: season.season_number === 0 ? "Specials" : isLimitedSeries ? "Limited Series" : season.name,
     posterPath: season.poster_path ?? show.poster_path,
+    // Season overview for the desktop rating left panel (falls back to
+    // the show synopsis in SeasonRatingScreen when empty).
+    overview: season.overview ?? "",
     episodes: (season.episodes ?? []).map((ep) => {
       const airDate = ep.air_date ? new Date(ep.air_date) : null;
       const daysUntil = airDate ? Math.ceil((airDate.getTime() - Date.now()) / 86400000) : null;
@@ -182,6 +185,17 @@ async function getShowData(showId) {
   const endYear = show.last_air_date ? show.last_air_date.slice(0, 4) : "";
   const yearsRange = endYear && endYear !== startYear ? `${startYear}–${endYear}` : startYear;
   const overview = show.overview ?? "";
+  const originCountry = (show.origin_country ?? [])[0] || null;
+  // Prefer an English/US certification for the desktop meta line (e.g.
+  // "TV-18"). TMDB's TH entry is often a local Thai Board of Film string
+  // like "น 18+" which reads as untranslated next to English metadata.
+  const contentRatings = show.content_ratings?.results ?? [];
+  const contentRating =
+    contentRatings.find((r) => r.iso_3166_1 === "US")?.rating
+    || contentRatings.find((r) => r.iso_3166_1 === "GB")?.rating
+    || contentRatings.find((r) => r.iso_3166_1 !== "TH" && r.rating)?.rating
+    || contentRatings.find((r) => r.rating)?.rating
+    || null;
 
   // Every playable YouTube video TMDB has for this show — not just one
   // trailer (plenty of shows have several, or none at all under "Trailer"
@@ -207,6 +221,7 @@ async function getShowData(showId) {
     originalTitle: s.original_name ?? null,
     originalLanguage: s.original_language ?? null,
     posterPath: s.poster_path,
+    year: s.first_air_date ? String(s.first_air_date).slice(0, 4) : "",
   }));
 
   return {
@@ -230,6 +245,8 @@ async function getShowData(showId) {
       backdropPath: show.backdrop_path ?? show.poster_path,
       creator: (show.created_by ?? []).map((p) => p.name).join(", ") || "—",
       network: (show.networks ?? []).map((n) => n.name).join(", ") || "—",
+      originCountry,
+      contentRating,
       // realSeasonNumbers, not the Specials-inclusive seasonNumbers — matches
       // both TMDB's own number_of_seasons (which never counts Specials) and
       // episodeCount right below (show.number_of_episodes, also

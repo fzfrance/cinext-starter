@@ -35,13 +35,14 @@ const socialButtonStyle = {
   WebkitBackdropFilter: "blur(20px)",
 };
 
-export default function LoginClient({ posterPaths = [] }) {
+export default function LoginClient({ posterPaths = [], backdropPath = null }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [socialLoading, setSocialLoading] = useState("");
   const [resetMessage, setResetMessage] = useState("");
 
   const handleSubmit = async (e) => {
@@ -67,28 +68,63 @@ export default function LoginClient({ posterPaths = [] }) {
   };
 
   const handleGoogleSignIn = async () => {
+    setError("");
+    setSocialLoading("google");
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/home`,
-      },
+      options: { redirectTo: `${window.location.origin}/home` },
     });
-    if (error) console.error("Google sign-in error:", error);
+    // OAuth normally leaves the page immediately. If Supabase rejects the
+    // request (provider not configured, blocked redirect, etc.), keep the
+    // user on the form and show the actionable error instead of silently
+    // leaving the button stuck in a loading state.
+    if (error) {
+      setSocialLoading("");
+      setError(error.message);
+    }
   };
 
   const handleAppleSignIn = async () => {
+    setError("");
+    setSocialLoading("apple");
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "apple",
-      options: {
-        redirectTo: `${window.location.origin}/home`,
-      },
+      options: { redirectTo: `${window.location.origin}/home` },
     });
-    if (error) console.error("Apple sign-in error:", error);
+    if (error) {
+      setSocialLoading("");
+      setError(error.message);
+    }
   };
 
   return (
-    <div className="min-h-dvh flex flex-col justify-center px-8 relative" style={{ zIndex: 1, paddingTop: 72 }}>
-      <AuthPosterBackground posterPaths={posterPaths} />
+    <div className="auth-page min-h-dvh flex flex-col justify-center px-8 relative" style={{ zIndex: 1, paddingTop: 72 }}>
+      <AuthPosterBackground posterPaths={posterPaths} backdropPath={backdropPath} />
+
+      <div className="auth-web-nav" aria-label="Cinext navigation">
+        <span className="auth-web-nav-item" aria-hidden="true"><Image src="/cinext-launch-mark.png" alt="Cinext" width={32} height={33} style={{ objectFit: "contain" }} /></span>
+        <span className="auth-web-nav-divider" />
+        <span className="auth-web-nav-item"><Icon name="playSquare" size={15} />See Next</span>
+        <span className="auth-web-nav-item"><Icon name="sparkle" size={15} />Explore</span>
+        <span className="auth-web-nav-item"><Icon name="collection" size={15} />Library</span>
+        <span className="auth-web-nav-item"><Icon name="sparkle" size={15} />Highlights</span>
+        <span className="auth-web-nav-item"><Icon name="user" size={15} />Profile</span>
+        <span className="auth-web-nav-item auth-web-nav-search"><Icon name="search" size={17} />Search</span>
+      </div>
+
+      <div className="auth-hero">
+        <div className="auth-web-copy">
+          <div className="auth-web-kicker">CINEXT</div>
+          <div className="auth-web-headline">See what&apos;s next.<br />Save what matters.</div>
+          <div className="auth-web-subtitle">Your shows, movies, ratings, collections, and watch history — all in one place.</div>
+          <div className="auth-web-features">
+            <span><Icon name="history" size={15} />Watch history</span>
+            <span><Icon name="collection" size={15} />Collections</span>
+            <span><Icon name="star" size={15} />Ratings &amp; reviews</span>
+          </div>
+        </div>
+
+        <div className="auth-form-surface">
 
       {/* Logo file (public/text/logo.png) is a wide wordmark, 681x85 —
           the requested 60-80px width was sized for a squarer mark and
@@ -170,6 +206,8 @@ export default function LoginClient({ posterPaths = [] }) {
 
       <div className="flex items-center justify-center gap-4" style={{ marginTop: 18 }}>
         <button
+          type="button"
+          disabled={Boolean(socialLoading) || loading}
           onClick={handleAppleSignIn}
           aria-label="Continue with Apple"
           className="flex items-center justify-center rounded-full active:scale-95 transition"
@@ -178,6 +216,8 @@ export default function LoginClient({ posterPaths = [] }) {
           <Icon name="apple" size={20} color="#fff" />
         </button>
         <button
+          type="button"
+          disabled={Boolean(socialLoading) || loading}
           onClick={handleGoogleSignIn}
           aria-label="Continue with Google"
           className="flex items-center justify-center rounded-full active:scale-95 transition"
@@ -189,6 +229,8 @@ export default function LoginClient({ posterPaths = [] }) {
 
       <div className="text-center" style={{ marginTop: 24, fontSize: 13, color: t.textDim }}>
         Don&apos;t have an account? <Link href="/signup" style={{ color: accent, fontWeight: 600 }}>Sign Up</Link>
+      </div>
+        </div>
       </div>
     </div>
   );

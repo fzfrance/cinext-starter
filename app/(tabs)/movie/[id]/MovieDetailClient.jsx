@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -13,6 +13,7 @@ import MovieRatingScreen from "@/components/MovieRatingScreen";
 import MovieShareRatingCard from "@/components/MovieShareRatingCard";
 import MovieImagePickerScreen from "@/components/MovieImagePickerScreen";
 import CollectionPickerCard from "@/components/CollectionPickerCard";
+import CollectionQuickRow from "@/components/CollectionQuickRow";
 import { useAuth } from "@/lib/auth-context";
 import { useMovieFavorites } from "@/lib/movie-favorites-context";
 import { useMovieCustomizations } from "@/lib/movie-customizations-context";
@@ -30,22 +31,11 @@ import { useNavVisibility } from "@/lib/nav-visibility-context";
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
 
-// Trimmed port of app/(tabs)/show/[id]/ShowDetailClient.jsx for movies —
-// see the approved plan (movies-as-content-type) for the full mapping.
-// Kept verbatim: hero pattern, StatusMenu/favorite wiring, DetailRow/
-// ProviderGroup/CastGallery, trailer + similar rows, video player modal,
-// and now (movies-parity pass 3) the "..." menu (Collections + cover/
-// poster/logo customization), mirroring ShowDetailClient's own
-// moreMenuItems/collection-sheet/?picker= wiring exactly.
-// Dropped entirely: Episodes tab and all season/episode machinery (a
-// movie has none), resolveShowStatus (no watch-progress to reconcile — a
-// movie's status is exactly what the user picked, no live derivation).
+// Movie Detail mirrors Show Detail's dual mobile/desktop layout (same
+// show-* CSS classes), minus every season/episode surface. Status,
+// favorite, collections, rating, trailers, and image pickers stay
+// movie-scoped via userMovies / movieRatings / movie customizations.
 
-// id maps 1:1 to MovieImagePickerScreen's `type` prop except "tags"
-// (opens the collection sheet, not a picker) and "covers" (labeled
-// "covers" but maps to the "backdrop" TMDB image category) — identical
-// shape to ShowDetailClient's own moreMenuItems, duplicated per the fork
-// convention rather than imported/shared.
 const moreMenuItems = [
   { id: "tags", label: "Add to a Collection", icon: "collection" },
   { id: "covers", label: "Change covers", icon: "image", pickerType: "backdrop" },
@@ -53,12 +43,17 @@ const moreMenuItems = [
   { id: "logo", label: "Change logo", icon: "logo", pickerType: "logo" },
 ];
 
-function GlassButton({ children, onClick, style }) {
+function GlassButton({ children, onClick, style, ...rest }) {
   return (
-    <button onClick={onClick} style={{
-      background: t.cardFill, color: "#fff",
-      border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", ...style
-    }} className="flex items-center justify-center gap-2 rounded-full active:scale-95 transition">
+    <button
+      onClick={onClick}
+      style={{
+        background: t.cardFill, color: "#fff",
+        border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", ...style,
+      }}
+      className="flex items-center justify-center gap-2 rounded-full active:scale-95 transition"
+      {...rest}
+    >
       {children}
     </button>
   );
@@ -124,10 +119,6 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
   const displayTitle = resolveTitle(movie, readableLanguages);
   const resolvedSimilar = similar.map((s) => ({ ...s, title: resolveTitle(s, readableLanguages) }));
 
-  // Status badges for "You May Also Like" — mirrors ShowDetailClient's
-  // own identical addition, one media type over. Raw stored status, not
-  // a live-resolved one (movies have no progress-vs-explicit distinction
-  // to resolve anyway — see lib/userMovies.js).
   const [similarStatusMap, setSimilarStatusMap] = useState({});
   useEffect(() => {
     if (!user) { setSimilarStatusMap({}); return; }
@@ -141,23 +132,23 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
     return () => { cancelled = true; };
   }, [user]);
 
-  // "backdrop" | "poster" | "logo" | null — driven by a `?picker=` query
-  // param, same reasoning as ShowDetailClient's own imagePickerType (see
-  // that file's comment): the device/browser back button should close
-  // just the picker, not leave Movie Detail entirely.
   const imagePickerType = searchParams.get("picker");
   const customBackdropUrl = getCustomBackdrop(movieId);
   const customPosterUrl = getCustomPoster(movieId);
   const customLogoUrl = getCustomLogo(movieId);
 
   const [moreOpen, setMoreOpen] = useState(false);
+  const [desktopMoreOpen, setDesktopMoreOpen] = useState(false);
+  const [desktopMorePos, setDesktopMorePos] = useState(null);
+  const moreMenuRef = useRef(null);
+  const moreMenuBtnRef = useRef(null);
+  const moreMenuPanelRef = useRef(null);
   const [collectionSheetOpen, setCollectionSheetOpen] = useState(false);
+  const [collectionAllOpen, setCollectionAllOpen] = useState(false);
   const [collections, setCollections] = useState([]);
   const [newCollectionOpen, setNewCollectionOpen] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
 
-  // Collections sheet — which of the user's collections this movie is
-  // already in, mirrors ShowDetailClient's identical effect.
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -173,7 +164,7 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
         covers: [],
       }));
       setCollections(mapped);
-      const hydrated = await hydrateCollectionPreviews(mapped, 5);
+      const hydrated = await hydrateCollectionPreviews(mapped, 9);
       if (cancelled) return;
       const coversById = new Map(hydrated.map((c) => [c.id, c.covers]));
       setCollections((prev) => prev.map((c) => ({ ...c, covers: coversById.get(c.id) ?? c.covers })));
@@ -185,13 +176,19 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
     if (!user) { router.push("/login"); return; }
     const target = collections.find((c) => c.id === id);
     if (!target) return;
-    setCollections((cs) => cs.map((c) => {
-      if (c.id !== id) return c;
-      const covers = c.inShow
-        ? (c.covers ?? []).filter((item) => !(item.mediaType === "movie" && item.id === movieId))
-        : [{ id: movieId, title: movie.title, posterPath: movie.posterPath, backdropPath: movie.backdropPath, mediaType: "movie" }, ...(c.covers ?? [])].slice(0, 5);
-      return { ...c, covers, inShow: !c.inShow, count: c.inShow ? Math.max(0, c.count - 1) : c.count + 1 };
-    }));
+    const adding = !target.inShow;
+    setCollections((cs) => {
+      const updated = cs.map((c) => {
+        if (c.id !== id) return c;
+        const covers = c.inShow
+          ? (c.covers ?? []).filter((item) => !(item.mediaType === "movie" && item.id === movieId))
+          : [{ id: movieId, title: movie.title, posterPath: movie.posterPath, backdropPath: movie.backdropPath, mediaType: "movie" }, ...(c.covers ?? [])].slice(0, 9);
+        return { ...c, covers, inShow: !c.inShow, count: c.inShow ? Math.max(0, c.count - 1) : c.count + 1 };
+      });
+      if (!adding) return updated;
+      const bumped = updated.find((c) => c.id === id);
+      return bumped ? [bumped, ...updated.filter((c) => c.id !== id)] : updated;
+    });
     if (target.inShow) removeMovieFromCollection(id, movieId).catch(console.error);
     else addMovieToCollection(id, movieId).catch(console.error);
   };
@@ -218,9 +215,8 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
       .catch(console.error);
   };
 
-  // Auto title logo — same pattern as Show Detail, hitting the movie-scoped
-  // sibling route (app/api/movies/logos) since a movie's images live under
-  // TMDB's /movie/{id}/images, not /tv/{id}/images.
+  const collectionConfirmActive = collections.some((c) => c.inShow);
+
   const [autoLogoPath, setAutoLogoPath] = useState(null);
   const [autoLogoFailed, setAutoLogoFailed] = useState(false);
   useEffect(() => {
@@ -246,13 +242,8 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
 
   const favorite = isFavorite(movieId);
   const [inLibrary, setInLibrary] = useState(false);
-  // A movie's status is always exactly what the user picked — no
-  // resolveShowStatus-style live derivation from watch progress, since a
-  // movie has no episodes to derive progress from. null = nothing chosen
-  // yet (same "Choose Status" fallback Show Detail uses).
   const [status, setStatus] = useState(null);
   const [statusOpen, setStatusOpen] = useState(false);
-
   const [tab, setTab] = useState("details");
 
   useEffect(() => {
@@ -278,6 +269,7 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
       setStatusOpen(false);
       return;
     }
+    setInLibrary(true);
     setStatus(id);
     setMovieStatus(user.id, movieId, id, "MovieDetailClient:selectStatus").catch(console.error);
     setStatusOpen(false);
@@ -289,19 +281,20 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
     setStatusOpen(true);
   };
 
-  // My Rating — one rating per movie (not per-season), see
-  // lib/movieRatings.js. ratingLoaded gates opening the editor the same
-  // way Show Detail's seasonRatingsLoaded does, so it never mounts with a
-  // stale/undefined `manual`.
+  const statusLabel = status == null
+    ? "Add to List"
+    : movieStatusMenuOptions.find((s) => s.id === status)?.label ?? "Add to List";
+  const statusIcon = status == null
+    ? "plus"
+    : status === "watchlist"
+      ? "bookmarkFilled"
+      : movieStatusMenuOptions.find((s) => s.id === status)?.icon ?? "plus";
+
   const [rating, setRatingValue] = useState(null);
   const [ratingLoaded, setRatingLoaded] = useState(false);
   const [ratingOpen, setRatingOpen] = useState(false);
   const [ratingInitialEditing, setRatingInitialEditing] = useState(false);
-  // MovieShareRatingCard's ticket-stub username — same getProfile lookup
-  // ShowDetailClient's own ShareRatingCard wiring uses.
   const [username, setUsername] = useState("you");
-  // No season id to key off (a movie has one rating, period) — just
-  // whether the share card is open at all.
   const [shareCardOpen, setShareCardOpen] = useState(false);
 
   useEffect(() => {
@@ -329,11 +322,6 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
     setRatingOpen(true);
   };
 
-  // Profile's My Ratings row deep-links here as /movie/[id]?tab=reviews,
-  // landing straight in the rating editor/saved-card instead of just the
-  // Details tab — same pattern as ShowDetailClient's own reviewOpenedFromProfile/
-  // deepLinkPending, simplified since a movie has no seasons array to
-  // validate a param against (there's only ever the one rating).
   const [ratingOpenedFromProfile, setRatingOpenedFromProfile] = useState(false);
   const [deepLinkPending, setDeepLinkPending] = useState(() => searchParams.get("tab") === "reviews");
   const deepLinkConsumedRef = useRef(false);
@@ -350,152 +338,527 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
   }, [searchParams, ratingLoaded, rating]);
 
   const [openVideo, setOpenVideo] = useState(null);
+  const openTrailer = () => {
+    if (videos[0]) setOpenVideo(videos[0]);
+  };
 
-  // See ShowDetailClient.jsx's identical effect — the shared bottom nav
-  // floats above these full-screen overlays and stays clickable on top
-  // of them otherwise.
+  const primaryProvider =
+    watchProviders?.flatrate?.[0]
+    || watchProviders?.rent?.[0]
+    || watchProviders?.buy?.[0]
+    || null;
+
+  // Static objective facts only — never the user's personal score.
+  // Personal rating lives exclusively on the Rate action button below.
+  const desktopMetaParts = [
+    movie.year || null,
+    movie.contentRating || null,
+    movie.runtimeLabel || null,
+    movie.rating ? `★ ${movie.rating} (TMDB)` : null,
+  ].filter(Boolean);
+
+  const userRatingScore = rating?.rating != null
+    ? (Number.isInteger(Number(rating.rating))
+      ? String(Number(rating.rating))
+      : Number(rating.rating).toFixed(1))
+    : null;
+
   const [, setNavHidden] = useNavVisibility();
   useEffect(() => {
-    const hidden = collectionSheetOpen || newCollectionOpen || !!openVideo;
+    const hidden = collectionSheetOpen || collectionAllOpen || newCollectionOpen || !!openVideo;
     setNavHidden(hidden);
     return () => setNavHidden(false);
-  }, [collectionSheetOpen, newCollectionOpen, openVideo, setNavHidden]);
+  }, [collectionSheetOpen, collectionAllOpen, newCollectionOpen, openVideo, setNavHidden]);
+
+  useEffect(() => {
+    if (!desktopMoreOpen) return undefined;
+    const onKey = (event) => {
+      if (event.key === "Escape") setDesktopMoreOpen(false);
+    };
+    const onPointer = (event) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(event.target)) setDesktopMoreOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onPointer);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onPointer);
+    };
+  }, [desktopMoreOpen]);
+
+  useLayoutEffect(() => {
+    if (!desktopMoreOpen) {
+      setDesktopMorePos(null);
+      return undefined;
+    }
+
+    const MENU_W = 236;
+    const GAP = 10;
+    const EDGE = 16;
+
+    const place = () => {
+      const btn = moreMenuBtnRef.current;
+      const panel = moreMenuPanelRef.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const menuH = panel?.offsetHeight || 168;
+
+      const spaceRight = vw - rect.right - GAP - EDGE;
+      const spaceLeft = rect.left - GAP - EDGE;
+      const side = spaceRight >= MENU_W || spaceRight >= spaceLeft ? "right" : "left";
+
+      let left = side === "right"
+        ? rect.right + GAP
+        : rect.left - GAP - MENU_W;
+      let top = rect.top + rect.height / 2 - menuH / 2;
+
+      top = Math.min(top, vh - menuH - EDGE);
+      top = Math.max(EDGE, top);
+      left = Math.min(left, vw - MENU_W - EDGE);
+      left = Math.max(EDGE, left);
+
+      setDesktopMorePos({ top, left, side });
+    };
+
+    place();
+    const raf = requestAnimationFrame(place);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [desktopMoreOpen]);
+
+  useEffect(() => {
+    if (!collectionAllOpen) return undefined;
+    const onKey = (event) => {
+      if (event.key === "Escape") setCollectionAllOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [collectionAllOpen]);
+
+  const logoNode = (customLogoUrl || autoLogoUrl) ? (
+    // eslint-disable-next-line @next/next/no-img-element -- resolved TMDB CDN URL
+    <img
+      src={customLogoUrl || autoLogoUrl}
+      alt={displayTitle}
+      onError={() => { if (!customLogoUrl) setAutoLogoFailed(true); }}
+      style={{ maxWidth: "80%", maxHeight: 72, objectFit: "contain" }}
+    />
+  ) : null;
+
+  const renderRatingBanner = () => (
+    <MovieRatingBanner
+      movie={movie}
+      manual={rating}
+      backdropPath={movie.backdropPath}
+      logoUrl={autoLogoUrl}
+      onClick={openRating}
+    />
+  );
 
   return (
     <div className="min-h-dvh" style={{ background: t.bg }}>
       <div className="pb-8">
 
-        {/* hero — same 415px height / floating-poster offset as Show
-            Detail's own hero, verbatim. */}
-        <div className="relative w-full" style={{ height: 415 }}>
-          <PosterArt posterPath={movie.backdropPath} overrideSrc={customBackdropUrl} alt={displayTitle} tmdbSize="original" sizes="100vw" />
-          <div className="absolute inset-0" style={{ background: "linear-gradient(0deg, #0A0A0C 0%, rgba(10,10,12,0.2) 60%, transparent 100%)" }} />
-          <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 z-10" style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}>
-            <GlassButton onClick={() => router.back()} style={{ width: 38, height: 38 }}><Icon name="back" size={16} color={t.text} /></GlassButton>
-            <div className="relative">
-              <GlassButton onClick={() => setMoreOpen((v) => !v)} style={{ width: 38, height: 38 }}><Icon name="more" size={16} color={t.text} /></GlassButton>
-              {moreOpen && (
-                <div className="absolute z-20 rounded-2xl" style={{ right: 0, top: "calc(100% + 8px)", width: 200, padding: "6px", background: "rgba(38,38,42,0.93)", border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(24px)", boxShadow: "0 20px 44px rgba(0,0,0,0.55)" }}>
-                  {moreMenuItems.map((m) => (
-                    <button key={m.id} onClick={() => { setMoreOpen(false); if (m.id === "tags") setCollectionSheetOpen(true); else if (m.pickerType) router.push(`/movie/${movieId}?picker=${m.pickerType}`); }} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "10px 12px" }}>
-                      <Icon name={m.icon} size={16} color="#fff" />
-                      <span style={{ fontSize: 13.5, color: "#fff", fontWeight: 500 }}>{m.label}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+        {/* ---------- Mobile / tablet hero + intro ---------- */}
+        <div className="show-mobile-layout">
+          <div className="relative w-full" style={{ height: 415 }}>
+            <PosterArt posterPath={movie.backdropPath} overrideSrc={customBackdropUrl} alt={displayTitle} tmdbSize="original" sizes="100vw" />
+            <div className="absolute inset-0" style={{ background: "linear-gradient(0deg, #0A0A0C 0%, rgba(10,10,12,0.2) 60%, transparent 100%)" }} />
+            <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 z-10" style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}>
+              <GlassButton onClick={() => router.back()} style={{ width: 38, height: 38 }}><Icon name="back" size={16} color={t.text} /></GlassButton>
+              <div className="relative">
+                <GlassButton onClick={() => setMoreOpen((v) => !v)} style={{ width: 38, height: 38 }}><Icon name="more" size={16} color={t.text} /></GlassButton>
+                {moreOpen && (
+                  <div className="absolute z-20 rounded-2xl" style={{ right: 0, top: "calc(100% + 8px)", width: 200, padding: "6px", background: "rgba(38,38,42,0.93)", border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(24px)", boxShadow: "0 20px 44px rgba(0,0,0,0.55)" }}>
+                    {moreMenuItems.map((m) => (
+                      <button key={m.id} onClick={() => { setMoreOpen(false); if (m.id === "tags") setCollectionSheetOpen(true); else if (m.pickerType) router.push(`/movie/${movieId}?picker=${m.pickerType}`); }} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "10px 12px" }}>
+                        <Icon name={m.icon} size={16} color="#fff" />
+                        <span style={{ fontSize: 13.5, color: "#fff", fontWeight: 500 }}>{m.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="absolute left-1/2" style={{ top: 195, transform: "translateX(-50%)", width: 140, height: 200 }}>
+              <div className="relative w-full h-full rounded-2xl overflow-hidden" style={{ boxShadow: "0 16px 40px rgba(0,0,0,0.6)" }}>
+                <PosterArt posterPath={movie.posterPath} overrideSrc={customPosterUrl} alt={displayTitle} />
+                {!movie.posterPath && !customPosterUrl && (
+                  <div className="absolute inset-0 flex items-end justify-center" style={{ paddingBottom: 12 }}>
+                    <span style={{ fontSize: 16, fontWeight: 800, color: "#f4ead9", letterSpacing: "0.25em" }}>{displayTitle.toUpperCase()}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="absolute left-1/2" style={{ top: 195, transform: "translateX(-50%)", width: 140, height: 200 }}>
-            <div className="relative w-full h-full rounded-2xl overflow-hidden" style={{ boxShadow: "0 16px 40px rgba(0,0,0,0.6)" }}>
-              <PosterArt posterPath={movie.posterPath} overrideSrc={customPosterUrl} alt={displayTitle} />
-              {!movie.posterPath && (
-                <div className="absolute inset-0 flex items-end justify-center" style={{ paddingBottom: 12 }}>
-                  <span style={{ fontSize: 16, fontWeight: 800, color: "#f4ead9", letterSpacing: "0.25em" }}>{displayTitle.toUpperCase()}</span>
-                </div>
+          <div className="px-6" style={{ marginTop: 8, position: "relative", zIndex: 20 }}>
+            {movie.tagline && (
+              <div className="text-center" style={{ fontSize: 13, fontStyle: "italic", color: t.textDim, marginBottom: 18 }}>
+                {movie.tagline}
+              </div>
+            )}
+            {logoNode ? (
+              <div className="flex justify-center">{logoNode}</div>
+            ) : (
+              <div className="text-center" style={{ fontSize: 30, fontWeight: 800, color: "#fff", letterSpacing: "0.01em" }}>{displayTitle}</div>
+            )}
+            <div className="text-center" style={{ fontSize: 12, color: t.textDim, marginTop: 9 }}>
+              {[movie.year, movie.genres, movie.rating ? `★ ${movie.rating}` : null].filter(Boolean).join(" · ")}
+            </div>
+
+            <div className="flex items-center justify-center gap-2.5" style={{ marginTop: 17 }}>
+              {!inLibrary ? (
+                <button onClick={addToLibrary} className="flex items-center gap-2 rounded-full active:scale-95 transition" style={{ padding: "10px 20px", background: "#fff", color: "#111" }}>
+                  <Icon name="plus" size={14} color="#111" />
+                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>Add to List</span>
+                </button>
+              ) : (
+                <>
+                  <div className="relative">
+                    {statusOpen && (
+                      <>
+                        <div className="fixed inset-0 z-20" onClick={() => setStatusOpen(false)} />
+                        <StatusMenu status={status} onSelect={selectStatus} align="center" options={movieStatusMenuOptions} />
+                      </>
+                    )}
+                    <button onClick={() => setStatusOpen((v) => !v)} className="flex items-center gap-2 rounded-full active:scale-95 transition" style={{ padding: "10px 18px", background: "#fff", color: "#111" }}>
+                      <Icon name={statusIcon} size={15} color="#111" />
+                      <span style={{ fontSize: 13.5, fontWeight: 600 }}>{statusLabel}</span>
+                    </button>
+                  </div>
+                  <GlassButton onClick={() => {
+                    if (!user) { router.push("/login"); return; }
+                    toggleFavorite(movieId, "MovieDetailClient:toggleFavorite");
+                  }} style={{ width: 40, height: 40 }}>
+                    <Icon name={favorite ? "heart" : "heartOutline"} size={16} color={favorite ? "#e0567a" : "#fff"} />
+                  </GlassButton>
+                </>
               )}
+            </div>
+
+            <div className="mt-4" style={{ fontSize: 13, lineHeight: 1.5, color: "rgba(255,255,255,0.72)" }}>
+              {movie.descriptionFull}
             </div>
           </div>
         </div>
 
-        <div className="px-6" style={{ marginTop: 8, position: "relative", zIndex: 20 }}>
-          {movie.tagline && (
-            <div className="text-center" style={{ fontSize: 13, fontStyle: "italic", color: t.textDim, marginBottom: 18 }}>
-              {movie.tagline}
+        {/* ---------- Desktop hero + info strip ---------- */}
+        <div className="show-desktop-layout">
+          <section className="show-desktop-hero">
+            <div className="show-desktop-backdrop">
+              <PosterArt posterPath={movie.backdropPath} overrideSrc={customBackdropUrl} alt="" tmdbSize="original" sizes="100vw" />
+              <div className="show-desktop-backdrop-scrim" />
             </div>
-          )}
-          {customLogoUrl || autoLogoUrl ? (
-            <div className="flex justify-center">
-              {/* eslint-disable-next-line @next/next/no-img-element -- resolved TMDB CDN URL, not a next/image-managed path */}
-              <img
-                src={customLogoUrl || autoLogoUrl}
-                alt={displayTitle}
-                onError={() => { if (!customLogoUrl) setAutoLogoFailed(true); }}
-                style={{ maxWidth: "80%", maxHeight: 72, objectFit: "contain" }}
-              />
-            </div>
-          ) : (
-            <div className="text-center" style={{ fontSize: 30, fontWeight: 800, color: "#fff", letterSpacing: "0.01em" }}>{displayTitle}</div>
-          )}
-          <div className="text-center" style={{ fontSize: 12, color: t.textDim, marginTop: 9 }}>{movie.year} · {movie.genres} · ★ {movie.rating}</div>
 
-          <div className="flex items-center justify-center gap-2.5" style={{ marginTop: 17 }}>
-            {!inLibrary ? (
-              <button onClick={addToLibrary} className="flex items-center gap-2 rounded-full active:scale-95 transition" style={{ padding: "10px 20px", background: "#fff", color: "#111" }}>
-                <Icon name="plus" size={14} color="#111" />
-                <span style={{ fontSize: 13.5, fontWeight: 600 }}>Add to Library</span>
-              </button>
-            ) : (
-              <>
-                <div className="relative">
-                  {statusOpen && (
-                    <>
-                      <div className="fixed inset-0 z-20" onClick={() => setStatusOpen(false)} />
-                      <StatusMenu status={status} onSelect={selectStatus} align="center" options={movieStatusMenuOptions} />
-                    </>
-                  )}
-                  {/* Stays "Add to Library" (not a "Choose Status"
-                      placeholder) for as long as nothing's actually been
-                      picked yet — the button's copy only changes once
-                      selectStatus sets a real status, not the instant the
-                      menu opens. Deliberately diverges from Show Detail's
-                      own "Choose Status" default (not changed there). */}
-                  <button onClick={() => setStatusOpen((v) => !v)} className="flex items-center gap-2 rounded-full active:scale-95 transition" style={{ padding: "10px 18px", background: "#fff", color: "#111" }}>
-                    <Icon name={status == null ? "plus" : status === "watchlist" ? "bookmarkFilled" : movieStatusMenuOptions.find((s) => s.id === status)?.icon ?? "plus"} size={15} color="#111" />
-                    <span style={{ fontSize: 13.5, fontWeight: 600 }}>{status == null ? "Add to Library" : movieStatusMenuOptions.find((s) => s.id === status)?.label ?? "Add to Library"}</span>
-                  </button>
+            <div className="show-desktop-hero-main">
+              <div className="show-desktop-poster">
+                <PosterArt posterPath={movie.posterPath} overrideSrc={customPosterUrl} alt={displayTitle} />
+              </div>
+
+              <div className="show-desktop-copy">
+                {customLogoUrl || autoLogoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- resolved TMDB CDN URL
+                  <img
+                    className="show-desktop-logo"
+                    src={customLogoUrl || autoLogoUrl}
+                    alt={displayTitle}
+                    onError={() => { if (!customLogoUrl) setAutoLogoFailed(true); }}
+                  />
+                ) : (
+                  <h1>{displayTitle}</h1>
+                )}
+
+                <div className="show-desktop-meta">
+                  {desktopMetaParts.map((part, i) => (
+                    <span key={`${part}-${i}`}>{i > 0 ? `• ${part}` : part}</span>
+                  ))}
+                  {movie.statusLabel && movie.status !== "Released" ? (
+                    <span className="is-status">• {movie.statusLabel}</span>
+                  ) : null}
                 </div>
-                <GlassButton onClick={() => {
-                  if (!user) { router.push("/login"); return; }
-                  toggleFavorite(movieId, "MovieDetailClient:toggleFavorite");
-                }} style={{ width: 40, height: 40 }}>
-                  <Icon name={favorite ? "heart" : "heartOutline"} size={16} color={favorite ? "#e0567a" : "#fff"} />
-                </GlassButton>
-              </>
+
+                {movie.genresList?.length > 0 && (
+                  <div className="show-desktop-genres">
+                    {movie.genresList.map((g) => (
+                      <span key={g} className="show-desktop-genre">{g}</span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="show-desktop-actions">
+                  <div className={`relative show-desktop-status-wrap${statusOpen ? " is-open" : ""}`}>
+                    {statusOpen && (
+                      <>
+                        <div className="show-desktop-status-scrim" onClick={() => setStatusOpen(false)} />
+                        <StatusMenu status={status} onSelect={selectStatus} align="left" options={movieStatusMenuOptions} style={{ zIndex: 110 }} />
+                      </>
+                    )}
+                    {!inLibrary ? (
+                      <button type="button" className="show-desktop-action is-light" onClick={addToLibrary}>
+                        <Icon name="plus" size={15} color="#111" />
+                        Add to List
+                      </button>
+                    ) : (
+                      <button type="button" className="show-desktop-action is-light" onClick={() => setStatusOpen((v) => !v)}>
+                        <Icon name={statusIcon} size={15} color="#111" />
+                        {statusLabel}
+                      </button>
+                    )}
+                  </div>
+
+                  <GlassButton
+                    onClick={() => {
+                      if (!user) { router.push("/login"); return; }
+                      if (!inLibrary) {
+                        addToLibrary();
+                        return;
+                      }
+                      toggleFavorite(movieId, "MovieDetailClient:desktopFavorite");
+                    }}
+                    style={{ width: 42, height: 42 }}
+                    aria-label={favorite ? "Remove from favorites" : "Add to favorites"}
+                  >
+                    <Icon name={favorite ? "heart" : "heartOutline"} size={16} color={favorite ? "#e0567a" : "#fff"} />
+                  </GlassButton>
+
+                  {videos[0] && (
+                    <button type="button" className="show-desktop-action is-secondary" onClick={openTrailer}>
+                      <Icon name="clapperboard" size={16} color="#fff" strokeWidth={1.7} />
+                      Trailer
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    className={`show-desktop-action is-secondary${rating ? " is-rated" : ""}`}
+                    onClick={() => {
+                      if (!user) { router.push("/login"); return; }
+                      openRating();
+                    }}
+                    aria-label={userRatingScore ? `Your rating ${userRatingScore}` : "Rate"}
+                  >
+                    <Icon
+                      name={rating ? "star" : "starOutline"}
+                      size={16}
+                      color={rating ? accent : "#fff"}
+                    />
+                    {userRatingScore ?? "Rate"}
+                  </button>
+
+                  <GlassButton
+                    onClick={() => {
+                      if (!user) { router.push("/login"); return; }
+                      setStatusOpen(false);
+                      setDesktopMoreOpen(false);
+                      setCollectionAllOpen(true);
+                    }}
+                    style={{ width: 42, height: 42 }}
+                    aria-label="Add to a Collection"
+                    aria-haspopup="dialog"
+                    aria-expanded={collectionAllOpen}
+                  >
+                    <Icon name="collection" size={16} color="#fff" />
+                  </GlassButton>
+
+                  <div className="relative" ref={moreMenuRef}>
+                    <button
+                      type="button"
+                      ref={moreMenuBtnRef}
+                      className="show-desktop-more"
+                      aria-label="More options"
+                      aria-haspopup="menu"
+                      aria-expanded={desktopMoreOpen}
+                      onClick={() => { setStatusOpen(false); setDesktopMoreOpen((v) => !v); }}
+                    >
+                      <Icon name="more" size={16} color="#fff" />
+                    </button>
+                    {desktopMoreOpen && (
+                      <div
+                        ref={moreMenuPanelRef}
+                        className={`show-desktop-more-menu${desktopMorePos ? " is-placed" : ""}${desktopMorePos?.side ? ` is-${desktopMorePos.side}` : ""}`}
+                        role="menu"
+                        style={desktopMorePos ? {
+                          top: desktopMorePos.top,
+                          left: desktopMorePos.left,
+                          background: "rgba(48,50,54,0.96)",
+                          border: "1px solid rgba(255,255,255,0.12)",
+                          backdropFilter: "blur(28px) saturate(140%)",
+                          WebkitBackdropFilter: "blur(28px) saturate(140%)",
+                        } : undefined}
+                      >
+                        {moreMenuItems.filter((m) => m.id !== "tags").map((m) => (
+                          <button
+                            key={m.id}
+                            type="button"
+                            role="menuitem"
+                            className="show-desktop-more-item"
+                            onClick={() => {
+                              setDesktopMoreOpen(false);
+                              if (m.pickerType) router.push(`/movie/${movieId}?picker=${m.pickerType}`);
+                            }}
+                          >
+                            <Icon name={m.icon} size={16} color="#fff" />
+                            <span>{m.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {movie.descriptionFull ? <p className="show-desktop-overview">{movie.descriptionFull}</p> : null}
+              </div>
+            </div>
+          </section>
+
+          <section className="show-desktop-strip" aria-label="Movie details">
+            {primaryProvider ? (
+              watchProviders?.link ? (
+                <a
+                  className="show-desktop-strip-item is-watch"
+                  href={watchProviders.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <div className="show-desktop-strip-logo">
+                    {primaryProvider.logoPath && (
+                      <Image src={tmdbImage(primaryProvider.logoPath, "w92")} alt="" fill sizes="36px" style={{ objectFit: "cover" }} />
+                    )}
+                  </div>
+                  <div>
+                    <span className="show-desktop-strip-kicker">WATCH ON</span>
+                    <strong>
+                      {primaryProvider.name}
+                      <Icon name="chevronRight" size={14} color="rgba(255,255,255,0.55)" />
+                    </strong>
+                  </div>
+                </a>
+              ) : (
+                <div className="show-desktop-strip-item is-watch">
+                  <div className="show-desktop-strip-logo">
+                    {primaryProvider.logoPath && (
+                      <Image src={tmdbImage(primaryProvider.logoPath, "w92")} alt="" fill sizes="36px" style={{ objectFit: "cover" }} />
+                    )}
+                  </div>
+                  <div>
+                    <span className="show-desktop-strip-kicker">WATCH ON</span>
+                    <strong>{primaryProvider.name}</strong>
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="show-desktop-strip-item is-watch">
+                <div className="show-desktop-strip-logo is-empty"><Icon name="tv" size={16} color="rgba(255,255,255,0.45)" /></div>
+                <div>
+                  <span className="show-desktop-strip-kicker">WATCH ON</span>
+                  <strong>Unavailable</strong>
+                </div>
+              </div>
             )}
-          </div>
 
-          <div className="mt-4" style={{ fontSize: 13, lineHeight: 1.5, color: "rgba(255,255,255,0.72)" }}>
-            {movie.descriptionFull}
-          </div>
+            <div className="show-desktop-strip-item">
+              <Icon name="clock" size={15} color="rgba(255,255,255,0.45)" />
+              <div>
+                <span className="show-desktop-strip-kicker">RUNTIME</span>
+                <strong>{movie.runtimeLabel || "—"}</strong>
+              </div>
+            </div>
 
-          {/* tabs — Details / Cast & Crew / My Rating only, no Episodes */}
-          <div className="mt-5 flex gap-5" style={{ borderBottom: `1px solid ${t.cardBorder}` }}>
-            {[{ id: "details", label: "Details" }, { id: "cast", label: "Cast & Crew" }, { id: "reviews", label: "My Rating" }].map((tb) => (
-              <button key={tb.id} onClick={() => setTab(tb.id)} className="pb-2.5" style={{
-                fontSize: 13.5, fontWeight: 600, color: tab === tb.id ? "#fff" : t.textDim,
-                borderBottom: tab === tb.id ? `2px solid ${accent}` : "2px solid transparent",
-              }}>{tb.label}</button>
+            <div className="show-desktop-strip-item">
+              <Icon name="star" size={15} color="rgba(255,255,255,0.45)" />
+              <div>
+                <span className="show-desktop-strip-kicker">RATING</span>
+                <strong>{movie.rating || "—"}</strong>
+              </div>
+            </div>
+
+            <div className="show-desktop-strip-item">
+              <Icon name="calendar" size={15} color="rgba(255,255,255,0.45)" />
+              <div>
+                <span className="show-desktop-strip-kicker">RELEASE DATE</span>
+                <strong>{movie.releaseDate || "—"}</strong>
+              </div>
+            </div>
+
+            <div className="show-desktop-strip-item">
+              <Icon name="globe" size={15} color="rgba(255,255,255,0.45)" />
+              <div>
+                <span className="show-desktop-strip-kicker">COUNTRY</span>
+                <strong>{movie.originCountry || "—"}</strong>
+              </div>
+            </div>
+
+            <div className="show-desktop-strip-item">
+              <Icon name="user" size={15} color="rgba(255,255,255,0.45)" />
+              <div>
+                <span className="show-desktop-strip-kicker">DIRECTOR</span>
+                <strong>{movie.director !== "—" ? movie.director : "—"}</strong>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div className="show-detail-body px-6" style={{ marginTop: 8, position: "relative", zIndex: 20 }}>
+          <div
+            className="mt-5 flex gap-5 show-detail-tabs"
+            style={{ borderBottom: `1px solid ${t.cardBorder}` }}
+          >
+            {[
+              { id: "details", label: "Details" },
+              { id: "cast", label: "Cast & Crew" },
+              { id: "reviews", label: "My Rating" },
+            ].map((tb) => (
+              <button
+                key={tb.id}
+                onClick={() => setTab(tb.id)}
+                className="show-detail-tab-btn show-detail-tab-mobile-only pb-2.5"
+                style={{
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  color: tab === tb.id ? "#fff" : t.textDim,
+                  borderBottom: tab === tb.id ? `2px solid ${accent}` : "2px solid transparent",
+                }}
+              >
+                {tb.label}
+              </button>
             ))}
           </div>
 
-          {/* ---------- Cast tab ---------- */}
           {tab === "cast" && (
-            cast.length === 0 ? (
-              <div className="mt-4" style={{ padding: "24px 0", textAlign: "center", fontSize: 12.5, color: t.textDim }}>No cast or crew listed yet.</div>
-            ) : (
-              <>
-                <CastGallery people={cast.filter((c) => c.isCast)} onSelect={(id) => router.push(`/person/${id}`)} />
-                {(() => {
-                  const crew = cast.filter((c) => !c.isCast);
-                  return crew.length > 0 ? (
-                    <div className="mt-6">
-                      <div style={{ fontSize: 13.5, fontWeight: 700, color: "#fff", marginBottom: 4 }}>Crew</div>
-                      <CastGallery people={crew} onSelect={(id) => router.push(`/person/${id}`)} />
-                    </div>
-                  ) : null;
-                })()}
-              </>
-            )
+            <div className="show-detail-panel-mobile-only">
+              {cast.length === 0 ? (
+                <div className="mt-4" style={{ padding: "24px 0", textAlign: "center", fontSize: 12.5, color: t.textDim }}>No cast or crew listed yet.</div>
+              ) : (
+                <>
+                  <CastGallery people={cast.filter((c) => c.isCast)} onSelect={(id) => router.push(`/person/${id}`)} />
+                  {(() => {
+                    const crew = cast.filter((c) => !c.isCast);
+                    return crew.length > 0 ? (
+                      <div className="mt-6">
+                        <div style={{ fontSize: 13.5, fontWeight: 700, color: "#fff", marginBottom: 4 }}>Crew</div>
+                        <CastGallery people={crew} onSelect={(id) => router.push(`/person/${id}`)} />
+                      </div>
+                    ) : null;
+                  })()}
+                </>
+              )}
+            </div>
           )}
 
-          {/* ---------- Details tab ---------- */}
           {tab === "details" && (
-            <div className="mt-4 rounded-2xl overflow-hidden" style={{ background: t.cardFill, border: `1px solid ${t.cardBorder}` }}>
+            <div className="mt-4 rounded-2xl overflow-hidden show-detail-panel-mobile-only" style={{ background: t.cardFill, border: `1px solid ${t.cardBorder}` }}>
               <DetailRow icon="clock" label="Runtime" divider={false}>
                 <span style={{ fontSize: 12.5, color: "#fff", fontWeight: 500 }}>
-                  {movie.runtime ? `${Math.floor(movie.runtime / 60)}h ${movie.runtime % 60}m` : "—"}
+                  {movie.runtimeLabel || "—"}
                   {movie.status !== "Released" && movie.statusLabel && <> · {movie.statusLabel}</>}
                 </span>
               </DetailRow>
@@ -562,22 +925,48 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
             </div>
           )}
 
-          {/* ---------- My Rating tab — one rating per movie ---------- */}
           {tab === "reviews" && (
-            <div className="mt-4">
-              <MovieRatingBanner
-                movie={movie}
-                manual={rating}
-                backdropPath={movie.backdropPath}
-                logoUrl={autoLogoUrl}
-                onClick={openRating}
-              />
+            <div className="mt-4 show-detail-panel-mobile-only">
+              {renderRatingBanner()}
             </div>
           )}
 
-          {/* trailer & more — verbatim from Show Detail */}
+          {/* Full-bleed like You May Also Like so portraits aren't clipped
+              by the 1320 content column. */}
+          <section className="show-desktop-cast">
+            <div className="show-desktop-cast-bleed">
+              <div className="show-desktop-cast-head">
+                <h2>Cast & Crew</h2>
+              </div>
+              {cast.length === 0 ? (
+                <div className="show-desktop-ep-empty">No cast or crew listed yet.</div>
+              ) : (
+                <div className="show-desktop-cast-row">
+                  {cast.map((c) => (
+                    <button
+                      key={`${c.isCast ? "cast" : "crew"}-${c.id}`}
+                      type="button"
+                      className="show-desktop-cast-card"
+                      onClick={() => router.push(`/person/${c.id}`)}
+                    >
+                      <div className="show-desktop-cast-avatar" style={{ background: c.grad }}>
+                        {c.profilePath ? (
+                          <Image src={tmdbImage(c.profilePath, "w185")} alt="" fill sizes="88px" style={{ objectFit: "cover" }} />
+                        ) : (
+                          <span>{c.initials}</span>
+                        )}
+                      </div>
+                      <div className="show-desktop-cast-name">{c.name}</div>
+                      <div className="show-desktop-cast-role">{c.role}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+
           <div className="mt-7">
-            <div style={{ fontSize: 15, fontWeight: 600, color: "#fff", marginBottom: 10 }}>Trailer & More</div>
+            <div className="show-detail-section-title">Trailer & More</div>
             {videos.length > 0 ? (
               <div className="flex gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
                 {videos.map((v) => (
@@ -587,7 +976,7 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
                     className="relative flex-shrink-0 rounded-2xl overflow-hidden block active:scale-[0.98] transition"
                     style={{ width: 242, height: 143 }}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element -- YouTube thumbnail CDN, not TMDB */}
+                    {/* eslint-disable-next-line @next/next/no-img-element -- YouTube thumbnail CDN */}
                     <img src={`https://i.ytimg.com/vi/${v.key}/hqdefault.jpg`} alt={v.name || v.type} className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} />
                     <div className="absolute inset-0 flex items-center justify-center">
                       <div style={{ width: 42, height: 42, borderRadius: "50%", background: "rgba(255,255,255,0.085)", border: "1px solid rgba(255,255,255,0.19)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -607,34 +996,34 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
             )}
           </div>
 
-          {/* similar */}
-          <div className="mt-7 mb-2">
-            <div style={{ fontSize: 15, fontWeight: 600, color: "#fff", marginBottom: 10 }}>You May Also Like</div>
-            {resolvedSimilar.length === 0 ? (
-              <span style={{ fontSize: 12.5, color: t.textDim }}>No recommendations yet.</span>
-            ) : (
-              <div className="flex gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                {resolvedSimilar.map((s) => (
-                  <Link key={s.id} href={`/movie/${s.id}`} className="flex-shrink-0 block" style={{ width: 100 }}>
-                    <div className="relative rounded-2xl overflow-hidden" style={{ width: 100, height: 140 }}>
-                      <PosterArt posterPath={s.posterPath} alt={s.title} />
-                      <MediaStatusBadge status={similarStatusMap[s.id]} />
-                    </div>
-                    <div style={{ fontSize: 11.5, color: "#fff", marginTop: 6, fontWeight: 500 }}>{s.title}</div>
-                  </Link>
-                ))}
-              </div>
-            )}
+          <div className="mt-7 mb-2 show-similar">
+            <div className="show-similar-bleed">
+              <div className="show-similar-title">You May Also Like</div>
+              {resolvedSimilar.length === 0 ? (
+                <span className="show-similar-empty" style={{ fontSize: 12.5, color: t.textDim }}>No recommendations yet.</span>
+              ) : (
+                <div className="show-similar-row">
+                  {resolvedSimilar.map((s) => (
+                    <Link key={s.id} href={`/movie/${s.id}`} className="show-similar-card">
+                      <div className="show-similar-poster">
+                        <div className="show-similar-poster-art">
+                          <PosterArt posterPath={s.posterPath} alt={s.title} />
+                        </div>
+                        <MediaStatusBadge status={similarStatusMap[s.id]} />
+                      </div>
+                      <div className="show-similar-name">{s.title}</div>
+                      {s.year ? <div className="show-similar-year">{s.year}</div> : null}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Deep-link cover — hides this page's own hero/details content while
-          a ?tab=reviews visitor's rating data is still loading, same
-          reasoning/z-40 as ShowDetailClient's own cover. */}
       {deepLinkPending && <div className="fixed inset-0 z-40" style={{ background: "#0A0A0C" }} />}
 
-      {/* ---------- Movie rating screen ---------- */}
       {ratingOpen && (
         <MovieRatingScreen
           movieTitle={displayTitle}
@@ -655,7 +1044,6 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
         />
       )}
 
-      {/* ---------- Shareable rating card ---------- */}
       {shareCardOpen && rating && (
         <MovieShareRatingCard
           userId={user.id}
@@ -672,21 +1060,18 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
         />
       )}
 
-      {/* ---------- Add to a Collection — bottom sheet ---------- */}
       {collectionSheetOpen && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setCollectionSheetOpen(false)}>
-          <div className="w-full rounded-t-3xl flex flex-col" style={{ maxHeight: "76%", background: "#161210", border: `1px solid ${t.glassBorder}`, borderBottom: "none", boxShadow: "0 -20px 60px rgba(0,0,0,0.6)" }} onClick={(ev) => ev.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center show-collection-sheet" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setCollectionSheetOpen(false)}>
+          <div className="w-full rounded-t-3xl flex flex-col relative" style={{ maxHeight: "76%", background: "#161210", border: `1px solid ${t.glassBorder}`, borderBottom: "none", boxShadow: "0 -20px 60px rgba(0,0,0,0.6)" }} onClick={(ev) => ev.stopPropagation()}>
             <div className="flex justify-center flex-shrink-0" style={{ paddingTop: 10 }}>
               <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.25)" }} />
             </div>
             <div className="flex items-center justify-between px-5 flex-shrink-0" style={{ paddingTop: 14, paddingBottom: 4 }}>
-              <button onClick={() => setCollectionSheetOpen(false)} className="rounded-full flex items-center justify-center active:scale-90 transition" style={{ width: 36, height: 36, background: accent }}>
-                <Icon name="x" size={16} color="#1a1108" strokeWidth={2.6} />
+              <button onClick={() => setCollectionSheetOpen(false)} className="rounded-full flex items-center justify-center active:scale-90 transition" style={{ width: 36, height: 36, background: "rgba(255,255,255,0.1)" }}>
+                <Icon name="x" size={16} color="#fff" strokeWidth={2.6} />
               </button>
               <span style={{ fontSize: 19, fontWeight: 800, color: "#fff" }}>Collections</span>
-              <button onClick={() => setCollectionSheetOpen(false)} className="rounded-full flex items-center justify-center active:scale-90 transition" style={{ width: 36, height: 36, background: accent }}>
-                <Icon name="check" size={17} color="#1a1108" strokeWidth={2.8} />
-              </button>
+              <div style={{ width: 36 }} />
             </div>
 
             <div className="overflow-y-auto" style={{ padding: "16px 20px", scrollbarWidth: "none" }}>
@@ -697,25 +1082,95 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
                   <CollectionPickerCard key={c.id} collection={c} accent={accent} onClick={() => toggleCollection(c.id)} />
                 ))}
               </div>
-              <div style={{ height: 76 }} />
+              <div style={{ height: 20 }} />
             </div>
 
-            <button onClick={() => setNewCollectionOpen(true)} className="absolute rounded-full flex items-center justify-center active:scale-90 transition" style={{ bottom: 20, right: 20, width: 52, height: 52, background: accent, boxShadow: "0 10px 24px rgba(232,162,76,0.4)" }}>
-              <Icon name="plus" size={22} color="#1a1108" strokeWidth={2.4} />
-            </button>
+            <div className="flex items-center justify-between gap-3 flex-shrink-0" style={{ padding: "12px 20px calc(16px + env(safe-area-inset-bottom))", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+              <button
+                type="button"
+                onClick={() => setNewCollectionOpen(true)}
+                className="flex items-center gap-2 active:opacity-70 transition"
+                style={{ padding: "10px 4px", color: "#fff", fontSize: 14, fontWeight: 600 }}
+              >
+                <Icon name="plus" size={15} color="#fff" strokeWidth={2.2} />
+                Create new
+              </button>
+              <button
+                type="button"
+                disabled={!collectionConfirmActive}
+                onClick={() => setCollectionSheetOpen(false)}
+                className="rounded-full active:scale-95 transition"
+                style={{
+                  minWidth: 108,
+                  padding: "11px 18px",
+                  background: collectionConfirmActive ? "#fff" : "rgba(255,255,255,0.1)",
+                }}
+              >
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: collectionConfirmActive ? "#111" : "rgba(255,255,255,0.42)" }}>Confirm</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* create a new collection, adds the movie to it immediately */}
+      {collectionAllOpen && (
+        <div className="show-collection-all-scrim" onClick={() => setCollectionAllOpen(false)}>
+          <div className="show-collection-all-modal" role="dialog" aria-label="Add to a collection" onClick={(ev) => ev.stopPropagation()}>
+            <div className="show-collection-all-head">
+              <div>
+                <div className="show-collection-all-title">Collections</div>
+                <div className="show-collection-all-sub">Add this movie to one or more collections</div>
+              </div>
+              <button type="button" className="show-collection-all-close" aria-label="Close" onClick={() => setCollectionAllOpen(false)}>
+                <Icon name="x" size={16} color="#fff" strokeWidth={2.2} />
+              </button>
+            </div>
+            <div className="show-collection-all-list">
+              {collections.length === 0 ? (
+                <div className="show-collection-empty">No collections yet.</div>
+              ) : (
+                collections.map((c) => (
+                  <CollectionQuickRow key={c.id} collection={c} onClick={() => toggleCollection(c.id)} />
+                ))
+              )}
+            </div>
+            <div className="show-collection-all-footer">
+              <button
+                type="button"
+                className="show-collection-create-new"
+                onClick={() => setNewCollectionOpen(true)}
+              >
+                <Icon name="plus" size={14} color="#fff" strokeWidth={2.2} />
+                Create new
+              </button>
+              <button
+                type="button"
+                className={`show-collection-confirm${collectionConfirmActive ? " is-active" : ""}`}
+                disabled={!collectionConfirmActive}
+                onClick={() => setCollectionAllOpen(false)}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {newCollectionOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-8" style={{ background: "rgba(0,0,0,0.65)" }} onClick={() => setNewCollectionOpen(false)}>
-          <div className="w-full rounded-3xl" style={{ padding: 22, background: "#1a1512", border: `1px solid ${t.glassBorder}`, boxShadow: "0 30px 60px rgba(0,0,0,0.6)" }} onClick={(ev) => ev.stopPropagation()}>
+        <div className="fixed inset-0 flex items-center justify-center px-8 show-collection-create-scrim" style={{ background: "rgba(0,0,0,0.45)", zIndex: 100 }} onClick={() => { setNewCollectionOpen(false); setNewCollectionName(""); }}>
+          <div className="w-full rounded-3xl show-collection-create-modal" style={{ padding: 22, background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.16)", backdropFilter: "blur(40px) saturate(140%)", WebkitBackdropFilter: "blur(40px) saturate(140%)", boxShadow: "0 30px 60px rgba(0,0,0,0.55)", maxWidth: 420, position: "relative", zIndex: 110 }} onClick={(ev) => ev.stopPropagation()}>
             <div style={{ fontSize: 17, fontWeight: 700, color: "#fff", marginBottom: 14 }}>New Collection</div>
             <input autoFocus value={newCollectionName} onChange={(ev) => setNewCollectionName(ev.target.value)} placeholder="Collection name" className="w-full rounded-2xl outline-none" style={{ padding: "13px 16px", background: t.cardFill, border: `1px solid ${t.cardBorder}`, fontSize: 14.5, color: "#fff" }} />
             <div className="flex gap-2.5" style={{ marginTop: 18 }}>
               <button onClick={() => { setNewCollectionOpen(false); setNewCollectionName(""); }} className="flex-1 rounded-full active:scale-95 transition" style={{ padding: 12, background: t.cardFill, border: `1px solid ${t.glassBorder}` }}><span style={{ fontSize: 13.5, fontWeight: 600, color: "#fff" }}>Cancel</span></button>
-              <button onClick={createCollectionAndAdd} disabled={!newCollectionName.trim()} className="flex-1 rounded-full active:scale-95 transition" style={{ padding: 12, background: newCollectionName.trim() ? accent : t.cardFill }}><span style={{ fontSize: 13.5, fontWeight: 700, color: newCollectionName.trim() ? "#1a1108" : t.textDim }}>Create & Add</span></button>
+              <button
+                onClick={createCollectionAndAdd}
+                disabled={!newCollectionName.trim()}
+                className="flex-1 rounded-full active:scale-95 transition"
+                style={{ padding: 12, background: newCollectionName.trim() ? "#fff" : "rgba(255,255,255,0.1)" }}
+              >
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: newCollectionName.trim() ? "#111" : "rgba(255,255,255,0.42)" }}>Create & Add</span>
+              </button>
             </div>
           </div>
         </div>
@@ -731,7 +1186,6 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
         />
       )}
 
-      {/* Plays in-app instead of opening YouTube — same as Show Detail. */}
       {openVideo && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.92)" }} onClick={() => setOpenVideo(null)}>
           <div className="absolute" style={{ top: "calc(env(safe-area-inset-top) + 12px)", right: 20, zIndex: 10 }} onClick={(e) => e.stopPropagation()}>

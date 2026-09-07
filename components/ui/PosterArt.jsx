@@ -12,16 +12,19 @@ import { tmdbImage } from "@/lib/tmdb";
 // backs user-picked custom covers/posters (show_customizations' custom_*_url
 // columns are already-resolved TMDB CDN URLs, not bare paths, so they can't
 // go through tmdbImage(posterPath, tmdbSize) like every other caller here).
-export default function PosterArt({ posterPath, overrideSrc, base = "#221a14", glow = "#E8A24C", alt = "", tmdbSize = "w500", sizes = "500px" }) {
+export default function PosterArt({ posterPath, overrideSrc, base = "#221a14", glow = "#E8A24C", alt = "", tmdbSize = "w500", sizes = "500px", flat = false, objectFit = "cover", className = "" }) {
   const src = overrideSrc || tmdbImage(posterPath, tmdbSize);
 
   return (
     <div
+      className={className || undefined}
       style={{
         position: "absolute",
         inset: 0,
         overflow: "hidden",
-        background: `linear-gradient(160deg, ${glow}55 0%, ${base} 55%, #060504 100%)`,
+        background: flat
+          ? "#141518"
+          : `linear-gradient(160deg, ${glow}55 0%, ${base} 55%, #060504 100%)`,
       }}
     >
       {src ? (
@@ -30,17 +33,19 @@ export default function PosterArt({ posterPath, overrideSrc, base = "#221a14", g
         // of the interactions that makes a press-and-hold gesture (e.g.
         // Watch History's long-press menu) feel broken/web-like instead
         // of like a native app.
-        <Image src={src} alt={alt} fill sizes={sizes} draggable={false} style={{ objectFit: "cover" }} />
+        <Image src={src} alt={alt} fill sizes={sizes} draggable={false} style={{ objectFit }} />
       ) : (
         <div
           style={{
             position: "absolute",
             inset: 0,
-            background: `radial-gradient(circle at 30% 20%, ${glow}33, transparent 55%)`,
+            background: flat
+              ? "rgba(255,255,255,0.04)"
+              : `radial-gradient(circle at 30% 20%, ${glow}33, transparent 55%)`,
           }}
         />
       )}
-      <Grain />
+      {!flat && <Grain />}
     </div>
   );
 }

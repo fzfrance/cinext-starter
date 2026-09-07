@@ -77,9 +77,24 @@ function GlassButton({ children, onClick, style }) {
   );
 }
 
-export default function MovieRatingScreen({ movieTitle, movie, manual, cast, backdropPath, logoUrl, movieGenre, initialEditing, onClose, onSave, onDelete, onShare }) {
+export default function MovieRatingScreen({ movieTitle, movie, manual, cast, backdropPath, logoUrl, movieGenre, initialEditing, onClose, onSave, onDelete, onShare, presentation = "auto" }) {
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(min-width: 900px)").matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 900px)");
+    const apply = () => setIsDesktop(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+  // Same centered-card presentation as EpisodeRatingFlow on desktop.
+  const isModal = presentation === "modal" || (presentation !== "fullscreen" && isDesktop);
+
   const [atmoRGB, setAtmoRGB] = useState([10, 10, 12]);
   useEffect(() => {
+    // Same as mobile — sample the landscape backdrop so the finished card
+    // atmosphere matches the hero art (not the vertical poster alone).
     const src = backdropPath ?? movie.posterPath;
     if (!src) { setAtmoRGB([10, 10, 12]); return; }
     let cancelled = false;
@@ -91,15 +106,33 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
 
   const mixRGB = (amt) => atmoRGB.map((c) => Math.round(c * amt + 12 * (1 - amt))).join(",");
   const CARD_BG = `linear-gradient(180deg, rgb(${mixRGB(0.32)}) 0%, rgb(${mixRGB(0.14)}) 55%, #141414 100%)`;
+  const ATMOS_BG = `linear-gradient(180deg, #0A0A0C 0%, rgba(${atmoRGB.map((c) => Math.round(c * 0.22)).join(",")},0.9) 20%, rgba(${atmoRGB.map((c) => Math.round(c * 0.42)).join(",")},0.95) 55%, #0A0A0C 100%)`;
+  const HERO_VEIL = "linear-gradient(180deg, rgba(10,8,6,0.15) 0%, rgba(10,8,6,0.35) 45%, #0A0A0C 100%)";
 
   const [, setNavHidden] = useNavVisibility();
   useEffect(() => {
+    if (isModal) return undefined;
     setNavHidden(true);
     return () => setNavHidden(false);
-  }, [setNavHidden]);
+  }, [setNavHidden, isModal]);
+
+  useEffect(() => {
+    if (!isModal) return undefined;
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtml = html.style.overflow;
+    const prevBody = body.style.overflow;
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    return () => {
+      html.style.overflow = prevHtml;
+      body.style.overflow = prevBody;
+    };
+  }, [isModal]);
 
   const [editing, setEditing] = useState(initialEditing);
   const [draftRating, setDraftRating] = useState(manual ? manual.rating : 0);
+  const [previewRating, setPreviewRating] = useState(null);
   const [draftMoods, setDraftMoods] = useState(moodIdsFromField(manual?.mood));
   const [draftCharacterId, setDraftCharacterId] = useState(manual?.characterId || null);
   const [draftCharacterName, setDraftCharacterName] = useState(manual?.characterName || null);
@@ -114,7 +147,11 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
   const [deleting, setDeleting] = useState(false);
 
   const readMoodMetas = manual ? moodMetasFromField(manual.mood) : [];
-  const canSave = true;
+  // 0 stars means "no rating" — Save stays disabled until a real score is set.
+  const canSave = !editing || draftRating > 0;
+  const liveScore = previewRating != null ? previewRating : (editing ? draftRating : (manual?.rating ?? 0));
+  const runtimeLabel = movie.runtimeLabel
+    || (movie.runtime ? `${Math.floor(movie.runtime / 60)}h ${movie.runtime % 60}m` : null);
 
   const toggleDraftMood = (id) => {
     setDraftMoods((prev) => (prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]));
@@ -122,6 +159,7 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
 
   const loadDraftFromManual = () => {
     setDraftRating(manual ? manual.rating : 0);
+    setPreviewRating(null);
     setDraftMoods(moodIdsFromField(manual?.mood));
     setDraftCharacterId(manual?.characterId || null);
     setDraftCharacterName(manual?.characterName || null);
@@ -147,6 +185,7 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
         reviewDate: manual ? draftReviewDate : todayISO(),
       });
       setEditing(false);
+      setPreviewRating(null);
       setJustSaved(true);
     } finally {
       setSaving(false);
@@ -164,9 +203,394 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
     }
   };
 
+  const starRow = (
+    <StarInput
+      value={editing ? draftRating : (manual?.rating ?? 0)}
+      onChange={setDraftRating}
+      onPreviewChange={editing ? setPreviewRating : undefined}
+      readOnly={!editing}
+      maxStars={10}
+      autoFit
+      autoFitMin={26}
+      autoFitMax={isModal ? 34 : 43}
+      autoFitGapMin={3}
+      autoFitGapMax={6}
+      rowPaddingInline={4}
+      hitPaddingBlock={isModal ? 8 : 0}
+    />
+  );
+
+  const moodBlock = (editing || readMoodMetas.length > 0) && (
+    editing ? (
+      <div className={isModal ? "ep-rating-desktop-moods" : "mt-4 grid"} style={isModal ? undefined : { gridTemplateColumns: "repeat(4, 1fr)", rowGap: 16, columnGap: 4 }}>
+        {SEASON_MOOD_LIST.map((m) => {
+          const active = draftMoods.includes(m.id);
+          return isModal ? (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => toggleDraftMood(m.id)}
+              className={`ep-rating-desktop-mood${active ? " is-active" : ""}`}
+            >
+              <span className="ep-rating-desktop-mood-emoji">{m.emoji}</span>
+              <span className="ep-rating-desktop-mood-label">{m.label}</span>
+            </button>
+          ) : (
+            <button key={m.id} onClick={() => toggleDraftMood(m.id)} className="flex flex-col items-center gap-1.5 active:scale-95 transition">
+              <div className="flex items-center justify-center rounded-full" style={{ width: 44, height: 44, background: active ? "rgba(232,162,76,0.14)" : "rgba(255,255,255,0.06)", border: `1.5px solid ${active ? accent : "transparent"}` }}>
+                <span style={{ fontSize: 19 }}>{m.emoji}</span>
+              </div>
+              <span style={{ fontSize: 10.5, color: active ? accent : t.textDim, fontWeight: active ? 700 : 500 }}>{m.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    ) : (
+      <div className="flex flex-wrap items-center justify-center gap-2 mt-3.5">
+        {readMoodMetas.map((meta) => (
+          <div key={meta.id} className="flex items-center gap-2 rounded-full" style={{ padding: "5px 12px 5px 5px", background: "rgba(255,255,255,0.06)" }}>
+            <div className="flex items-center justify-center rounded-full" style={{ width: 34, height: 34, background: "rgba(255,255,255,0.06)" }}><span style={{ fontSize: 17 }}>{meta.emoji}</span></div>
+            <span style={{ fontSize: 14, color: "#fff", fontWeight: 500 }}>{meta.label}</span>
+          </div>
+        ))}
+      </div>
+    )
+  );
+
+  const castBlock = (editing || manual?.characterName) && (
+    editing ? (
+      <div className={isModal ? "ep-rating-desktop-cast" : "mt-1 flex gap-4 overflow-x-auto"} style={isModal ? undefined : { scrollbarWidth: "none", paddingTop: 12 }}>
+        {cast.length === 0 ? (
+          <div style={{ fontSize: 12, color: t.textDim, padding: "8px 0" }}>No cast listed for this movie yet.</div>
+        ) : cast.map((c) => {
+          const active = draftCharacterId === c.id;
+          return isModal ? (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => { setDraftCharacterId(active ? null : c.id); setDraftCharacterName(active ? null : c.role); }}
+              className={`ep-rating-desktop-cast-item${active ? " is-active" : ""}`}
+            >
+              <div className="ep-rating-desktop-cast-avatar-wrap">
+                <div className={`ep-rating-desktop-cast-ring${active ? " is-active" : ""}`}>
+                  <div className="relative overflow-hidden" style={{ width: 44, height: 44, borderRadius: "50%", background: c.grad, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {c.profilePath ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- TMDB CDN path
+                      <img src={tmdbImage(c.profilePath, "w185")} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} />
+                    ) : (
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#fff" }}>{initialsOf(c.role)}</span>
+                    )}
+                  </div>
+                </div>
+                {active && (
+                  <div className="ep-rating-desktop-cast-crown">
+                    <Icon name="crown" size={10} color="#1a1108" />
+                  </div>
+                )}
+              </div>
+              <span className="ep-rating-desktop-cast-name">{c.role}</span>
+            </button>
+          ) : (
+            <button
+              key={c.id}
+              onClick={() => { setDraftCharacterId(active ? null : c.id); setDraftCharacterName(active ? null : c.role); }}
+              className="flex-shrink-0 flex flex-col items-center gap-1.5 active:scale-95 transition"
+            >
+              <div className="relative">
+                <div className="relative overflow-hidden" style={{ width: 52, height: 52, borderRadius: "50%", background: c.grad, display: "flex", alignItems: "center", justifyContent: "center", border: active ? `2px solid ${accent}` : "2px solid transparent" }}>
+                  {c.profilePath ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- TMDB CDN path, small avatar in a scrollable row
+                    <img src={tmdbImage(c.profilePath, "w185")} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} />
+                  ) : (
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{initialsOf(c.role)}</span>
+                  )}
+                </div>
+                {active && <div style={{ position: "absolute", top: -8, right: -4, width: 18, height: 18, borderRadius: "50%", background: accent, display: "flex", alignItems: "center", justifyContent: "center" }}><Icon name="crown" size={10} color="#1a1108" /></div>}
+              </div>
+              <span style={{ fontSize: 11, color: active ? "#fff" : t.textDim }}>{c.role}</span>
+            </button>
+          );
+        })}
+      </div>
+    ) : (
+      <div className="flex items-center justify-center gap-2 mt-3.5">
+        {(() => {
+          const c = cast.find((x) => x.id === manual.characterId);
+          return (
+            <div className="relative overflow-hidden" style={{ width: 34, height: 34, borderRadius: "50%", background: c?.grad || "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {c?.profilePath ? (
+                // eslint-disable-next-line @next/next/no-img-element -- TMDB CDN path
+                <img src={tmdbImage(c.profilePath, "w185")} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} />
+              ) : (
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: "#fff" }}>{initialsOf((c ? c.role : manual.characterName) || "?")}</span>
+              )}
+            </div>
+          );
+        })()}
+        <span style={{ fontSize: 14, color: "#fff", fontWeight: 500 }}>{manual.characterName}</span>
+      </div>
+    )
+  );
+
+  if (isModal) {
+    const panelClass = justSaved
+      ? "ep-rating-panel ep-rating-panel-desktop season-rating-panel-desktop is-saved-confirm"
+      : editing
+        ? "ep-rating-panel ep-rating-panel-desktop season-rating-panel-desktop"
+        : "ep-rating-panel season-rating-finished-panel";
+
+    return (
+      <div className="fixed inset-0 z-50 ep-rating-overlay" onClick={onClose}>
+        <div className={panelClass} onClick={(event) => event.stopPropagation()}>
+          {justSaved ? (
+            <div className="ep-rating-desktop-done">
+              <div className="ep-rating-desktop-done-check">
+                <Icon name="check" size={22} color={accent} strokeWidth={2.4} />
+              </div>
+              <div className="ep-rating-desktop-done-title">Rating Saved!</div>
+              <div className="ep-rating-desktop-done-meta">
+                <span>{movieTitle}</span>
+              </div>
+              <div className="ep-rating-desktop-done-stars">
+                <StarInput value={draftRating || manual?.rating || 0} onChange={() => {}} size={22} color={accent} gap={3} maxStars={10} readOnly />
+              </div>
+              <button type="button" onClick={onClose} className="ep-rating-desktop-save is-ready">
+                Done
+              </button>
+            </div>
+          ) : !editing ? (
+            /* Finished card — one vertical panel, same system as mobile
+               (backdrop hero + atmosphere tint + CARD_BG modules). Outer
+               panel stays fixed; inner body scrolls for long reviews. */
+            <div className="season-rating-finished" style={{ ["--rating-card-bg"]: CARD_BG, ["--rating-card-border"]: CARD_BORDER }}>
+              <button type="button" className="season-rating-desktop-close" onClick={onClose} aria-label="Close">
+                <Icon name="x" size={16} />
+              </button>
+              <div className="season-rating-finished-scroll">
+                <div className="season-rating-finished-hero">
+                  <PosterArt posterPath={backdropPath ?? movie.posterPath} base={movie.base} glow={movie.glow} alt={movieTitle} tmdbSize="w780" />
+                  <div className="season-rating-finished-hero-veil" style={{ background: HERO_VEIL }} />
+                  <div className="season-rating-finished-hero-copy">
+                    {logoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- resolved TMDB CDN URL
+                      <img src={logoUrl} alt={movieTitle} className="season-rating-finished-logo" />
+                    ) : (
+                      <div className="season-rating-finished-kicker">{movieTitle.toUpperCase()}</div>
+                    )}
+                    <div className="season-rating-finished-meta">
+                      {movie.year}{runtimeLabel ? ` · ${runtimeLabel}` : ""}
+                    </div>
+                    {movieGenre ? <div className="season-rating-finished-genre">{movieGenre}</div> : null}
+                    {manual ? (
+                      <div className="season-rating-finished-score-row">
+                        <div className="season-rating-finished-score-pill">
+                          <Icon name="star" size={12} color={accent} />
+                          <span>{manual.rating.toFixed(1)}<span>/10</span></span>
+                        </div>
+                        <span className="season-rating-finished-date">{fmtISODate(manual.reviewDate)}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="season-rating-finished-body">
+                  <div className="season-rating-finished-atmos" style={{ background: ATMOS_BG }} aria-hidden="true" />
+                  <div className="season-rating-finished-stack">
+                    <div className="season-rating-finished-card is-center">
+                      <div className="season-rating-finished-card-title">Your Rating</div>
+                      <div className="season-rating-finished-stars">
+                        <StarInput
+                          value={manual?.rating ?? 0}
+                          onChange={() => {}}
+                          readOnly
+                          maxStars={10}
+                          autoFit
+                          autoFitMin={26}
+                          autoFitMax={36}
+                          autoFitGapMin={3}
+                          autoFitGapMax={6}
+                          rowPaddingInline={4}
+                        />
+                      </div>
+                      {manual ? (
+                        <div className="season-rating-finished-score-num">{manual.rating.toFixed(1)}/10</div>
+                      ) : null}
+                    </div>
+
+                    {readMoodMetas.length > 0 ? (
+                      <div className="season-rating-finished-card is-center">
+                        <div className="season-rating-finished-card-title">Your Mood</div>
+                        <div className="season-rating-finished-moods">
+                          {readMoodMetas.map((m) => (
+                            <div key={m.id} className="ep-rating-desktop-mood is-active">
+                              <span className="ep-rating-desktop-mood-emoji">{m.emoji}</span>
+                              <span className="ep-rating-desktop-mood-label">{m.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {manual?.characterName ? (
+                      <div className="season-rating-finished-card is-center">
+                        <div className="season-rating-finished-card-title">Favorite Character</div>
+                        {castBlock}
+                      </div>
+                    ) : null}
+
+                    {manual?.text ? (
+                      <div className="season-rating-finished-card is-center">
+                        <div className="season-rating-finished-card-title">Your Review</div>
+                        <div className="season-rating-finished-review">{manual.text}</div>
+                      </div>
+                    ) : null}
+
+                    {manual ? (
+                      <div className="season-rating-view-actions">
+                        <button type="button" onClick={remove} disabled={deleting} className="season-rating-action-btn is-danger">
+                          <Icon name="trash" size={13} color="currentColor" />
+                          {deleting ? "Deleting…" : "Delete review"}
+                        </button>
+                        <div className="season-rating-view-actions-right">
+                          <button type="button" onClick={onShare} className="season-rating-action-btn is-ghost">
+                            <Icon name="share" size={13} />
+                            Share
+                          </button>
+                          <button type="button" onClick={startEdit} className="season-rating-action-btn is-solid">
+                            <Icon name="edit" size={13} color="#111" />
+                            Edit review
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="ep-rating-desktop">
+              <aside className="season-rating-left">
+                <div className="season-rating-poster is-backdrop">
+                  <PosterArt posterPath={backdropPath ?? movie.posterPath} base={movie.base} glow={movie.glow} alt={movieTitle} tmdbSize="w780" />
+                  <div className="season-rating-poster-fade" style={{ background: HERO_VEIL }} />
+                </div>
+                <div className="season-rating-left-body" style={{ background: ATMOS_BG }}>
+                  {logoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- resolved TMDB CDN URL
+                    <img src={logoUrl} alt={movieTitle} className="season-rating-left-logo" />
+                  ) : (
+                    <h2 className="season-rating-left-title">{movieTitle}</h2>
+                  )}
+                  {movieGenre ? <div className="season-rating-left-genre">{movieGenre}</div> : null}
+                  <div className="season-rating-left-badges">
+                    {movie.year ? <div className="ep-rating-desktop-badge">{movie.year}</div> : null}
+                    {runtimeLabel ? <div className="ep-rating-desktop-badge">{runtimeLabel}</div> : null}
+                    {movie.contentRating ? <div className="ep-rating-desktop-badge">{movie.contentRating}</div> : null}
+                    {manual ? (
+                      <div className="relative" style={{ width: "fit-content" }}>
+                        <button
+                          type="button"
+                          onClick={() => setDateEditorOpen((v) => !v)}
+                          className="ep-rating-desktop-badge"
+                          style={{ cursor: "pointer" }}
+                        >
+                          <Icon name="calendar" size={11} color="rgba(255,255,255,0.7)" />
+                          {fmtISODate(draftReviewDate)}
+                        </button>
+                        {dateEditorOpen && (
+                          <MiniDatePicker
+                            value={draftReviewDate}
+                            onChange={setDraftReviewDate}
+                            onClose={() => setDateEditorOpen(false)}
+                          />
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                  {movie.descriptionFull ? (
+                    <p className="season-rating-left-synopsis">{movie.descriptionFull}</p>
+                  ) : null}
+
+                  <div className="season-rating-stars-block">
+                    <div className="season-rating-stars-block-title">Rate this movie</div>
+                    <div className="season-rating-stars-row">
+                      <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+                        <StarInput
+                          value={draftRating}
+                          onChange={setDraftRating}
+                          onPreviewChange={setPreviewRating}
+                          maxStars={10}
+                          autoFit
+                          autoFitMin={22}
+                          autoFitMax={30}
+                          autoFitGapMin={2}
+                          autoFitGapMax={5}
+                          rowPaddingInline={0}
+                          hitPaddingBlock={6}
+                        />
+                      </div>
+                      {liveScore > 0 && (
+                        <div className="ep-rating-desktop-score">
+                          <span className="ep-rating-desktop-score-n">{Number(liveScore).toFixed(1)}<span>/10</span></span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </aside>
+
+              <div className="season-rating-right">
+                <button type="button" className="season-rating-desktop-close" onClick={onClose} aria-label="Close">
+                  <Icon name="x" size={16} />
+                </button>
+
+                {moodBlock && (
+                  <section className="ep-rating-desktop-section">
+                    <div className="ep-rating-desktop-section-title">How did it make you feel?</div>
+                    {moodBlock}
+                  </section>
+                )}
+
+                {castBlock && (
+                  <section className="ep-rating-desktop-section ep-rating-desktop-section-cast">
+                    <div className="ep-rating-desktop-section-title">Favorite character?</div>
+                    {castBlock}
+                  </section>
+                )}
+
+                <section className="ep-rating-desktop-section">
+                  <div className="ep-rating-desktop-section-title">
+                    Write your review
+                    <span style={{ fontSize: 12, color: t.textDim, fontWeight: 500 }}> (optional)</span>
+                  </div>
+                  <div className="season-rating-review-editor">
+                    <textarea value={draftText} onChange={(e) => setDraftText(e.target.value)} placeholder="Share your thoughts..." rows={3} />
+                  </div>
+                </section>
+
+                <div className="season-rating-actions">
+                  <button type="button" onClick={save} disabled={!canSave || saving} className={`ep-rating-desktop-save${canSave && !saving ? " is-ready" : ""}`}>
+                    {saving ? "Saving…" : "Save rating"}
+                  </button>
+                  <button type="button" onClick={onClose} className="ep-rating-desktop-dismiss">Not now</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="fixed inset-0 z-40" style={{ background: "#0A0A0C" }}>
-      <div className="h-full overflow-y-auto pb-12" style={{ scrollbarWidth: "none" }}>
+    <div
+      className="fixed inset-0 z-40"
+      style={{ background: "#0A0A0C" }}
+    >
+      <div
+        className="h-full overflow-y-auto pb-12"
+        style={{ scrollbarWidth: "none" }}
+      >
         <div className="relative w-full" style={{ height: 400 }}>
           <PosterArt posterPath={backdropPath ?? movie.posterPath} base={movie.base} glow={movie.glow} alt={movieTitle} tmdbSize="w780" />
           <div style={{ position: "absolute", inset: 0, background: `linear-gradient(180deg, rgba(10,8,6,0.15) 0%, rgba(10,8,6,0.35) 45%, #0A0A0C 100%)` }} />
@@ -204,7 +628,7 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
               <div style={{ fontSize: 13.2, letterSpacing: "0.14em", color: accent, fontWeight: 600 }}>{movieTitle.toUpperCase()}</div>
             )}
             <div style={{ fontSize: 12, fontWeight: 500, color: "#fff", marginTop: 3.3 }}>
-              {movie.year}{movie.runtime ? ` · ${Math.floor(movie.runtime / 60)}h ${movie.runtime % 60}m` : ""}
+              {movie.year}{runtimeLabel ? ` · ${runtimeLabel}` : ""}
             </div>
             {movieGenre && (
               <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", marginTop: 2 }}>{movieGenre}</div>
@@ -260,20 +684,9 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
           <div className="rounded-3xl flex flex-col items-center text-center" style={{ padding: "22px 14px", background: CARD_BG, border: `1px solid ${CARD_BORDER}` }}>
             <div style={{ fontSize: 15.5, fontWeight: 600, color: "#fff" }}>{editing ? "Rate this movie" : "Your Rating"}</div>
             <div className="mt-4">
-              <StarInput
-                value={editing ? draftRating : (manual?.rating ?? 0)}
-                onChange={setDraftRating}
-                readOnly={!editing}
-                maxStars={10}
-                autoFit
-                autoFitMin={30}
-                autoFitMax={43}
-                autoFitGapMin={3}
-                autoFitGapMax={6}
-                rowPaddingInline={4}
-              />
+              {starRow}
             </div>
-            {editing && <div style={{ fontSize: 15.73, fontWeight: 700, color: accent, marginTop: 9 }}>{draftRating.toFixed(1)}/10</div>}
+            {editing && <div style={{ fontSize: 15.73, fontWeight: 700, color: accent, marginTop: 9 }}>{Number(liveScore).toFixed(1)}/10</div>}
             {!editing && manual && <div style={{ fontSize: 15.73, fontWeight: 700, color: accent, marginTop: 9 }}>{manual.rating.toFixed(1)}/10</div>}
           </div>
 
@@ -281,30 +694,7 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
           {(editing || readMoodMetas.length > 0) && (
             <div className="mt-4 rounded-3xl text-center" style={{ padding: "22px 16px", background: CARD_BG, border: `1px solid ${CARD_BORDER}` }}>
               <div style={{ fontSize: 15.5, fontWeight: 600, color: "#fff" }}>{editing ? "How did it make you feel?" : "Your Mood"}</div>
-              {editing ? (
-                <div className="mt-4 grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", rowGap: 16, columnGap: 4 }}>
-                  {SEASON_MOOD_LIST.map((m) => {
-                    const active = draftMoods.includes(m.id);
-                    return (
-                      <button key={m.id} onClick={() => toggleDraftMood(m.id)} className="flex flex-col items-center gap-1.5 active:scale-95 transition">
-                        <div className="flex items-center justify-center rounded-full" style={{ width: 44, height: 44, background: active ? "rgba(232,162,76,0.14)" : "rgba(255,255,255,0.06)", border: `1.5px solid ${active ? accent : "transparent"}` }}>
-                          <span style={{ fontSize: 19 }}>{m.emoji}</span>
-                        </div>
-                        <span style={{ fontSize: 10.5, color: active ? accent : t.textDim, fontWeight: active ? 700 : 500 }}>{m.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="flex flex-wrap items-center justify-center gap-2 mt-3.5">
-                  {readMoodMetas.map((meta) => (
-                    <div key={meta.id} className="flex items-center gap-2 rounded-full" style={{ padding: "5px 12px 5px 5px", background: "rgba(255,255,255,0.06)" }}>
-                      <div className="flex items-center justify-center rounded-full" style={{ width: 34, height: 34, background: "rgba(255,255,255,0.06)" }}><span style={{ fontSize: 17 }}>{meta.emoji}</span></div>
-                      <span style={{ fontSize: 14, color: "#fff", fontWeight: 500 }}>{meta.label}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {moodBlock}
             </div>
           )}
 
@@ -312,52 +702,7 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
           {(editing || manual?.characterName) && (
             <div className="mt-4 rounded-3xl text-center" style={{ padding: "22px 16px", background: CARD_BG, border: `1px solid ${CARD_BORDER}` }}>
               <div style={{ fontSize: 15.5, fontWeight: 600, color: "#fff" }}>{editing ? "Favorite character?" : "Favorite Character"}</div>
-              {editing ? (
-                <div className="mt-1 flex gap-4 overflow-x-auto" style={{ scrollbarWidth: "none", paddingTop: 12 }}>
-                  {cast.length === 0 ? (
-                    <div style={{ fontSize: 12, color: t.textDim, padding: "8px 0" }}>No cast listed for this movie yet.</div>
-                  ) : cast.map((c) => {
-                    const active = draftCharacterId === c.id;
-                    return (
-                      <button
-                        key={c.id}
-                        onClick={() => { setDraftCharacterId(active ? null : c.id); setDraftCharacterName(active ? null : c.role); }}
-                        className="flex-shrink-0 flex flex-col items-center gap-1.5 active:scale-95 transition"
-                      >
-                        <div className="relative">
-                          <div className="relative overflow-hidden" style={{ width: 52, height: 52, borderRadius: "50%", background: c.grad, display: "flex", alignItems: "center", justifyContent: "center", border: active ? `2px solid ${accent}` : "2px solid transparent" }}>
-                            {c.profilePath ? (
-                              // eslint-disable-next-line @next/next/no-img-element -- TMDB CDN path, small avatar in a scrollable row
-                              <img src={tmdbImage(c.profilePath, "w185")} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} />
-                            ) : (
-                              <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{initialsOf(c.role)}</span>
-                            )}
-                          </div>
-                          {active && <div style={{ position: "absolute", top: -8, right: -4, width: 18, height: 18, borderRadius: "50%", background: accent, display: "flex", alignItems: "center", justifyContent: "center" }}><Icon name="crown" size={10} color="#1a1108" /></div>}
-                        </div>
-                        <span style={{ fontSize: 11, color: active ? "#fff" : t.textDim }}>{c.role}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="flex items-center justify-center gap-2 mt-3.5">
-                  {(() => {
-                    const c = cast.find((x) => x.id === manual.characterId);
-                    return (
-                      <div className="relative overflow-hidden" style={{ width: 34, height: 34, borderRadius: "50%", background: c?.grad || "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        {c?.profilePath ? (
-                          // eslint-disable-next-line @next/next/no-img-element -- TMDB CDN path
-                          <img src={tmdbImage(c.profilePath, "w185")} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} />
-                        ) : (
-                          <span style={{ fontSize: 11.5, fontWeight: 700, color: "#fff" }}>{initialsOf((c ? c.role : manual.characterName) || "?")}</span>
-                        )}
-                      </div>
-                    );
-                  })()}
-                  <span style={{ fontSize: 14, color: "#fff", fontWeight: 500 }}>{manual.characterName}</span>
-                </div>
-              )}
+              {castBlock}
             </div>
           )}
 

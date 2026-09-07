@@ -8,7 +8,7 @@ import CoverArt from "@/components/library/art/CoverArt";
 import InsideArt from "@/components/library/art/InsideArt";
 import SpineFace from "@/components/library/art/SpineFace";
 import Disc from "@/components/library/art/Disc";
-import { SPINE_W, REST_Y } from "@/components/library/ShelfCase";
+import { SPINE_W, COVER_W, REST_Y } from "@/components/library/ShelfCase";
 import { useAuth } from "@/lib/auth-context";
 import { useMovieFavorites } from "@/lib/movie-favorites-context";
 import { setMovieStatus, removeUserMovie } from "@/lib/userMovies";
@@ -18,8 +18,10 @@ import { useNavVisibility } from "@/lib/nav-visibility-context";
 
 const t = themes.dark;
 const TRUE_RED = "#ef4444";
-const BIG_W = 226;
-const BIG_H = 322;
+// +15% vs prior 226×322 floating case (keep in sync with CaseOverlay)
+const BIG_W = 260;
+const BIG_H = 370;
+const BIG_SPINE_W = Math.round(SPINE_W * (BIG_W / COVER_W));
 
 // Fork of components/library/CaseOverlay.jsx, not a parameterized version
 // of it — same fork convention as MovieRatingScreen/MoviePosterQuickStatusMenu
@@ -127,23 +129,26 @@ export default function MovieCaseOverlay({ show, origin, onClose, onStatusChange
       <div onClick={(e) => e.stopPropagation()} style={{ width: BIG_W * 2, height: BIG_H, position: "relative", display: "flex", justifyContent: "center", transform: `scale(${open ? 0.72 : 0.86}) translateX(${open ? 0 : -BIG_W / 2}px)`, transition: "transform 1.05s cubic-bezier(.6,.05,.2,1)" }}>
         <div style={{ position: "absolute", left: BIG_W, top: 0, width: BIG_W, height: BIG_H, perspective: 1500 }}>
           <div style={{ position: "absolute", inset: 0, transformStyle: "preserve-3d", transformOrigin: "left center", transform: caseCentered ? "translate(0px,0px) scale(1) rotateY(0deg)" : restTransform, transition: isClosingFly ? `transform ${FLY_BACK_MS}ms cubic-bezier(.22,1,.36,1)` : "transform 1s cubic-bezier(.5,.05,.2,1)" }}>
-            <div style={{ position: "absolute", inset: 0, borderRadius: "0 6px 6px 0", background: "linear-gradient(180deg, #17171a 0%, #101013 100%)", border: "1px solid rgba(255,255,255,0.09)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 26px 60px rgba(0,0,0,0.6), inset 3px 0 6px rgba(0,0,0,0.5)", transform: lidOpen ? "translateZ(6px)" : "translateZ(0px)", transition: lidOpen ? "transform 1ms linear 1000ms" : "transform 1ms linear", backfaceVisibility: "visible", WebkitBackfaceVisibility: "visible" }}>
+            <div style={{ position: "absolute", inset: 0, borderRadius: "0 8px 8px 0", background: "linear-gradient(180deg, #1a1a1e 0%, #0e0e12 100%)", border: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 28px 64px rgba(0,0,0,0.62), inset 4px 0 10px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.12)", transform: lidOpen ? "translateZ(8px)" : "translateZ(0px)", transition: lidOpen ? "transform 1ms linear 1000ms" : "transform 1ms linear", backfaceVisibility: "visible", WebkitBackfaceVisibility: "visible" }}>
+              <div aria-hidden="true" style={{ position: "absolute", width: "72%", aspectRatio: "1", borderRadius: "50%", border: "1px solid rgba(255,255,255,0.07)", boxShadow: "inset 0 0 28px rgba(0,0,0,0.55), 0 0 0 10px rgba(0,0,0,0.18)", pointerEvents: "none" }} />
               <button onClick={(e) => { e.stopPropagation(); router.push(`/movie/${show.id}`); }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", borderRadius: "50%", opacity: lidOpen ? 1 : 0, transition: lidOpen ? "opacity 400ms ease 900ms" : "opacity 200ms ease", backfaceVisibility: "visible", WebkitBackfaceVisibility: "visible" }}>
-                <Disc show={show} />
+                <Disc show={show} size={205} />
               </button>
-              <div style={{ position: "absolute", bottom: 12, left: 0, right: 0, textAlign: "center", color: t.textDim, fontSize: 10, letterSpacing: 1.2, textTransform: "uppercase" }}>{show.meta}</div>
+              <div style={{ position: "absolute", bottom: 14, left: 0, right: 0, textAlign: "center", color: t.textDim, fontSize: 10, letterSpacing: 1.2, textTransform: "uppercase" }}>{show.meta}</div>
             </div>
-            <div style={{ position: "absolute", left: 0, top: 0, width: SPINE_W + 6, height: "100%", transformOrigin: "left center", transform: "rotateY(-90deg)", overflow: "hidden", backfaceVisibility: "hidden" }}>
+            <div style={{ position: "absolute", left: 0, top: 0, width: BIG_SPINE_W, height: "100%", transformOrigin: "left center", transform: "rotateY(-90deg) translateZ(0.5px)", overflow: "hidden", backfaceVisibility: "hidden", borderRadius: "5px 0 0 5px" }}>
               <SpineFace show={show} height={BIG_H} />
             </div>
-            <div style={{ position: "absolute", left: 0, top: 0, width: 6, height: "100%", transformOrigin: "left center", transform: "rotateY(-45deg)", backfaceVisibility: "hidden" }}>
-              <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "linear-gradient(90deg, rgba(60,60,66,0.9) 0%, rgba(20,20,22,0.9) 100%)" }} />
+            <div style={{ position: "absolute", left: 0, top: 0, width: 7, height: "100%", transformOrigin: "left center", transform: "rotateY(-45deg) translateZ(0.25px)", backfaceVisibility: "hidden" }}>
+              <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "linear-gradient(90deg, rgba(220,220,228,0.5) 0%, rgba(70,70,78,0.95) 40%, rgba(18,18,22,0.98) 100%)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35)" }} />
             </div>
-            <div style={{ position: "absolute", inset: 0, transformStyle: "preserve-3d", transformOrigin: "left center", transform: lidOpen ? "rotateY(-178deg) translateZ(-6px)" : "rotateY(0deg) translateZ(3px)", transition: `transform ${LID_CLOSE_MS}ms cubic-bezier(.68,0,.22,1)` }}>
-              <div style={{ position: "absolute", inset: 0, backfaceVisibility: "hidden", borderRadius: "0 6px 6px 0", overflow: "hidden", boxShadow: "0 26px 60px rgba(0,0,0,0.6)" }}>
+            <div aria-hidden="true" style={{ position: "absolute", left: 0, top: 0, width: BIG_W, height: 5, transformOrigin: "top left", transform: "rotateX(90deg)", background: "linear-gradient(90deg, rgba(40,40,46,0.95), rgba(130,130,140,0.5) 20%, rgba(28,28,32,0.92))", backfaceVisibility: "hidden" }} />
+            <div style={{ position: "absolute", inset: 0, transformStyle: "preserve-3d", transformOrigin: "left center", transform: lidOpen ? "rotateY(-178deg) translateZ(-8px)" : "rotateY(0deg) translateZ(4px)", transition: `transform ${LID_CLOSE_MS}ms cubic-bezier(.68,0,.22,1)` }}>
+              <div style={{ position: "absolute", inset: 0, backfaceVisibility: "hidden", borderRadius: "0 8px 8px 0", overflow: "hidden", boxShadow: "0 28px 64px rgba(0,0,0,0.62), inset 0 1px 0 rgba(255,255,255,0.2)" }}>
                 <CoverArt show={show} big />
+                <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: "linear-gradient(118deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.05) 16%, transparent 34%)", pointerEvents: "none" }} />
               </div>
-              <div style={{ position: "absolute", inset: 0, backfaceVisibility: "hidden", transform: "rotateY(180deg)", borderRadius: "6px 0 0 6px", overflow: "hidden" }}>
+              <div style={{ position: "absolute", inset: 0, backfaceVisibility: "hidden", transform: "rotateY(180deg)", borderRadius: "8px 0 0 8px", overflow: "hidden", boxShadow: "inset 0 0 24px rgba(0,0,0,0.35)" }}>
                 <InsideArt show={show} />
               </div>
             </div>
@@ -157,7 +162,7 @@ export default function MovieCaseOverlay({ show, origin, onClose, onStatusChange
             src={logoSrc}
             alt=""
             onError={() => setLogoFailed(true)}
-            style={{ maxWidth: 190, maxHeight: 68, objectFit: "contain", filter: "drop-shadow(0 2px 10px rgba(0,0,0,0.7))" }}
+            style={{ maxWidth: 220, maxHeight: 78, objectFit: "contain", filter: "drop-shadow(0 2px 10px rgba(0,0,0,0.7))" }}
           />
         ) : (
           <div style={{ color: "#fff", fontSize: 17, fontWeight: 700, textShadow: "0 2px 10px rgba(0,0,0,0.7)" }}>{show.title}</div>

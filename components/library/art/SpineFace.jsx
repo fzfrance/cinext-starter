@@ -25,28 +25,37 @@ function DvdMark({ width = 20 }) {
 // logo URL exists but the image itself fails to actually load, via onError —
 // previously a broken logoPath silently rendered nothing at all, which is
 // very likely why some titles showed no label whatsoever).
+//
+// Text fallback prefers englishTitle / originalTitle over a localized
+// display title so spines don't print Thai (etc.) for non-Thai shows.
 export default function SpineFace({ show, height }) {
   const [logoFailed, setLogoFailed] = useState(false);
   const logoSrc = !logoFailed && show.logoPath ? tmdbImage(show.logoPath, "w300") : null;
+  const spineTitle = show.englishTitle || show.originalTitle || show.title;
   return (
-    <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: `linear-gradient(180deg, ${show.glow}4d 0%, ${show.base} 45%, #0a0908 100%)`, boxShadow: "inset 2px 0 3px rgba(255,255,255,0.12), inset -2px 0 4px rgba(0,0,0,0.55)" }}>
+    <div
+      className="dvd-spine-face"
+      style={{
+        position: "absolute",
+        inset: 0,
+        overflow: "hidden",
+        background: `linear-gradient(180deg, ${show.glow}55 0%, ${show.base} 42%, #0a0908 100%)`,
+        boxShadow: "inset 2px 0 4px rgba(255,255,255,0.16), inset -3px 0 6px rgba(0,0,0,0.62)",
+      }}
+    >
       <Grain />
-      {/* top end-cap + separator line, matching real DVD spine printing */}
-      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 6, background: "linear-gradient(180deg, rgba(40,40,44,0.95) 0%, rgba(18,18,20,0.9) 100%)" }} />
-      <div style={{ position: "absolute", top: 6, left: 0, right: 0, height: 1, background: "rgba(255,255,255,0.4)" }} />
+      {/* Plastic rim highlight along the outer (viewer-facing) spine edge */}
+      <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, rgba(255,255,255,0.22) 0%, transparent 18%, transparent 78%, rgba(0,0,0,0.35) 100%)", pointerEvents: "none" }} />
+      {/* Glossy top lip — real DVD spines catch a hard specular on the upper edge */}
+      <div aria-hidden="true" style={{ position: "absolute", top: 0, left: 0, right: 0, height: 10, background: "linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.12) 45%, transparent 100%)", pointerEvents: "none" }} />
+      {/* top end-cap + separator line */}
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 7, background: "linear-gradient(180deg, rgba(52,52,58,0.98) 0%, rgba(18,18,20,0.92) 100%)" }} />
+      <div style={{ position: "absolute", top: 7, left: 0, right: 0, height: 1, background: "rgba(255,255,255,0.45)" }} />
       {/* bottom separator line + end-cap */}
-      <div style={{ position: "absolute", bottom: 6, left: 0, right: 0, height: 1, background: "rgba(255,255,255,0.4)" }} />
-      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 6, background: "linear-gradient(0deg, rgba(40,40,44,0.95) 0%, rgba(18,18,20,0.9) 100%)" }} />
-      {/* Logo box: length (this box's width, pre-rotation) is almost always
-          the binding constraint for wide wordmark logos under
-          object-fit:contain, trimmed margins to maximize it (height-36,
-          up from height-56). Cross-axis bumped to 30. A dedicated dark
-          backing plate sits directly behind the logo/text — without it, a
-          correctly-sized logo can still be nearly invisible against
-          similarly-dark or busy poster art underneath, which is likely why
-          some titles read as "missing" even when actually rendering. */}
-      <div style={{ position: "absolute", top: 10, bottom: 26, left: 0, right: 0, display: "flex", justifyContent: "center", alignItems: "center" }}>
-        <div style={{ background: "rgba(0,0,0,0.48)", borderRadius: 4, padding: logoSrc ? "3px 2px" : "6px 2px" }}>
+      <div style={{ position: "absolute", bottom: 7, left: 0, right: 0, height: 1, background: "rgba(255,255,255,0.4)" }} />
+      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 7, background: "linear-gradient(0deg, rgba(52,52,58,0.98) 0%, rgba(18,18,20,0.92) 100%)" }} />
+      <div style={{ position: "absolute", top: 12, bottom: 28, left: 0, right: 0, display: "flex", justifyContent: "center", alignItems: "center" }}>
+        <div style={{ background: "rgba(0,0,0,0.42)", borderRadius: 3, padding: logoSrc ? "3px 2px" : "6px 2px" }}>
           {logoSrc ? (
             <div style={{ width: (height - 36) * 0.6, height: 18, display: "flex", alignItems: "center", justifyContent: "center", transform: "rotate(90deg)" }}>
               {/* eslint-disable-next-line @next/next/no-img-element -- TMDB CDN path, not a next/image-managed local asset */}
@@ -54,12 +63,11 @@ export default function SpineFace({ show, height }) {
             </div>
           ) : (
             <div style={{ writingMode: "vertical-rl", color: "#fff", fontSize: 10.5, fontWeight: 700, letterSpacing: 1.4, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxHeight: height - 36, textShadow: "0 1px 3px rgba(0,0,0,0.9)" }}>
-              {show.title}
+              {spineTitle}
             </div>
           )}
         </div>
       </div>
-      {/* DVD watermark sits just above the bottom separator line, inside the main body */}
       <div style={{ position: "absolute", bottom: 12, left: 0, right: 0, display: "flex", justifyContent: "center", opacity: 0.85 }}>
         <DvdMark width={20} />
       </div>

@@ -1,14 +1,27 @@
 import SearchClient from "./SearchClient";
 import { getExploreData } from "@/lib/exploreData";
+import { getWatchProvidersList, getWatchProvidersListMovie } from "@/lib/tmdb";
 
-// Standalone top-level route (outside the (tabs) group, same pattern as
-// app/show/[id]/episode/[season]/[ep]) — reached from the global nav's
-// floating search button. Shows the exact same Explore content (hero,
-// genre chips, Trending Shows/Movies, Shows/Movies For You) as
-// app/(tabs)/explore — same data fetch, same ExploreClient — with a
-// search bar fixed over the bottom of it, swapping in live TMDB results
-// while there's a query.
+// Standalone top-level route (outside the (tabs) group) — reached from
+// the global nav Search control. Mobile keeps Explore behind a bottom
+// search bar; desktop (≥900px) uses a dedicated search page with filters.
 export default async function Page() {
-  const { trendingShows, trendingMovies, heroSlides } = await getExploreData();
-  return <SearchClient trendingShows={trendingShows} trendingMovies={trendingMovies} heroSlides={heroSlides} />;
+  const [{ trendingShows, trendingMovies, heroSlides }, tvProviders, movieProviders] = await Promise.all([
+    getExploreData({ includeGenreRails: false }),
+    getWatchProvidersList().catch(() => ({ results: [] })),
+    getWatchProvidersListMovie().catch(() => ({ results: [] })),
+  ]);
+  const providerLogos = Object.fromEntries(
+    [...(tvProviders.results ?? []), ...(movieProviders.results ?? [])]
+      .filter((p) => p.logo_path)
+      .map((p) => [p.provider_id, p.logo_path])
+  );
+  return (
+    <SearchClient
+      trendingShows={trendingShows}
+      trendingMovies={trendingMovies}
+      heroSlides={heroSlides}
+      providerLogos={providerLogos}
+    />
+  );
 }

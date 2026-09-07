@@ -1,10 +1,8 @@
 "use client";
 
+import { useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Icon from "@/components/ui/Icon";
-import { themes, DEFAULT_ACCENT } from "@/lib/theme";
-
-const t = themes.dark;
-const accent = DEFAULT_ACCENT;
 
 export const statusMenuOptions = [
   { id: "watchlist", label: "Watchlist", icon: "bookmark" },
@@ -39,41 +37,120 @@ export const favoritesOnlyOptions = [
   { id: "remove", label: "Remove from Favorites", icon: "trash", danger: true },
 ];
 
-// Shared status-setting popover (Watchlist / Watching / Completed / Paused /
-// Drop / Remove) — used by both Show Detail's "Add to Library" control and
-// Explore search results' "+" button. Self-positions via plain CSS
-// (`top: 100%` relative to whatever positioned wrapper the caller renders
-// it inside — no backdrop, no anchor-rect math), closing only when an
-// option is picked or the trigger is toggled again, same as the original
-// Show Detail dropdown this was extracted from.
-//
-// White/glass styling on the row itself (active row = plain white tint, not
-// accent) and on the label text — only each option's own icon uses the
-// accent color now, per explicit request. Accent color selection is
-// currently disabled (Settings > Appearance is "Coming Soon"), so this is
-// effectively always amber in practice today. "Remove" always stays
-// pink/danger-colored regardless of active state.
-export default function StatusMenu({ status, onSelect, align = "center", direction = "down", includeRemove = true, removeLabel = "Remove", options: optionsProp = statusMenuOptions, style }) {
-  const options = includeRemove ? optionsProp : optionsProp.filter((o) => o.id !== "remove");
-  const alignStyle = align === "right" ? { right: 0 } : align === "left" ? { left: 0 } : { left: "50%", transform: "translateX(-50%)" };
-  // "up" is for triggers anchored low on screen with little room below them
-  // (e.g. CaseOverlay's status pill, which floats roughly mid-to-lower
-  // screen inside a `position:fixed` overlay that has no page scroll to
-  // fall back on) — opening downward there pushed the last option(s)
-  // (Drop/Remove) past the bottom edge with nothing to scroll to reach
-  // them. maxHeight + overflowY stays on regardless of direction as a
-  // backstop for any trigger position tight enough to still not fit.
-  const directionStyle = direction === "up" ? { bottom: "calc(100% + 8px)" } : { top: "calc(100% + 8px)" };
+const MENU_W = 190;
+const GAP = 8;
+const VIEW_PAD = 12;
 
-  return (
+// Shared status-setting popover (Watchlist / Watching / Completed / Paused /
+// Drop / Remove) — used by Show Detail, Explore/search, library overlays,
+// and poster long-press menus. Portaled + position:fixed so parent
+// overflow (hero / action row / cards) can never clip the last option
+// ("Remove"). Flips above the trigger when there isn't enough room below.
+//
+// Neutral white icons for every non-danger option (no amber/accent).
+// "Remove" stays pink/danger-colored.
+export default function StatusMenu({
+  status,
+  onSelect,
+  align = "center",
+  direction = "auto",
+  includeRemove = true,
+  removeLabel = "Remove",
+  options: optionsProp = statusMenuOptions,
+  style,
+  // When the menu is already mounted inside a fixed/portal anchor
+  // (PosterQuickStatusMenu), skip the second portal and keep relative CSS.
+  anchored = false,
+}) {
+  const options = includeRemove ? optionsProp : optionsProp.filter((o) => o.id !== "remove");
+  const markerRef = useRef(null);
+  const [coords, setCoords] = useState(null);
+
+  useLayoutEffect(() => {
+    if (anchored) return undefined;
+
+    const place = () => {
+      const marker = markerRef.current;
+      const wrap = marker?.parentElement;
+      if (!wrap) return;
+      const rect = wrap.getBoundingClientRect();
+      // Hidden layout (e.g. mobile hero while desktop is shown) still mounts
+      // this menu — skip portaling when the trigger isn't on-screen, or a
+      // second menu ends up at 0,0 on top of the real one.
+      if (rect.width < 1 && rect.height < 1) {
+        setCoords(null);
+        return;
+      }
+      const estH = Math.min(options.length * 44 + 20, 420);
+      const spaceBelow = window.innerHeight - rect.bottom - VIEW_PAD;
+      const spaceAbove = rect.top - VIEW_PAD;
+
+      let dir = direction;
+      if (dir === "auto") {
+        dir = spaceBelow >= estH || spaceBelow >= spaceAbove ? "down" : "up";
+      }
+
+      const maxHeight = Math.max(
+        160,
+        Math.min(420, dir === "down" ? spaceBelow - GAP : spaceAbove - GAP)
+      );
+
+      let left;
+      if (align === "right") left = rect.right - MENU_W;
+      else if (align === "left") left = rect.left;
+      else left = rect.left + rect.width / 2 - MENU_W / 2;
+      left = Math.max(VIEW_PAD, Math.min(left, window.innerWidth - MENU_W - VIEW_PAD));
+
+      const top = dir === "up"
+        ? Math.max(VIEW_PAD, rect.top - GAP - Math.min(estH, maxHeight))
+        : rect.bottom + GAP;
+
+      setCoords({ top, left, maxHeight, dir });
+    };
+
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [anchored, align, direction, options.length]);
+
+  const menu = (
     <div
-      className="absolute z-30 rounded-2xl"
+      className="rounded-2xl"
+      role="menu"
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
       style={{
-        width: 190, padding: "6px", maxHeight: "40dvh", overflowY: "auto",
-        background: "rgba(38,38,42,0.93)", border: "1px solid rgba(255,255,255,0.12)",
-        backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)",
+        width: MENU_W,
+        padding: "8px 6px",
+        maxHeight: anchored ? (style?.maxHeight ?? "min(420px, 70dvh)") : (coords?.maxHeight ?? 320),
+        overflowY: "auto",
+        overscrollBehavior: "contain",
+        background: "rgba(48, 50, 54, 0.96)",
+        border: "1px solid rgba(255,255,255,0.12)",
+        backdropFilter: "blur(28px) saturate(140%)",
+        WebkitBackdropFilter: "blur(28px) saturate(140%)",
         boxShadow: "0 20px 44px rgba(0,0,0,0.55)",
-        ...directionStyle, ...alignStyle, ...style,
+        scrollbarWidth: "thin",
+        ...(anchored
+          ? {
+              position: "absolute",
+              zIndex: 100,
+              ...(direction === "up" ? { bottom: "calc(100% + 8px)" } : { top: "calc(100% + 8px)" }),
+              ...(align === "right" ? { right: 0 } : align === "left" ? { left: 0 } : { left: "50%", transform: "translateX(-50%)" }),
+              ...style,
+            }
+          : {
+              position: "fixed",
+              zIndex: 200,
+              top: coords?.top ?? 0,
+              left: coords?.left ?? 0,
+              visibility: coords ? "visible" : "hidden",
+              ...style,
+            }),
       }}
     >
       {options.map((opt) => {
@@ -83,24 +160,37 @@ export default function StatusMenu({ status, onSelect, align = "center", directi
         // ambiguous (unfavorite vs. drop the show from the library
         // entirely) in a screen that's specifically about favorites.
         const label = opt.id === "remove" ? removeLabel : opt.label;
+        const iconColor = opt.danger ? "#e0567a" : "#fff";
         return (
           <button
             key={opt.id}
+            type="button"
+            role="menuitem"
             onClick={() => onSelect(opt.id)}
             className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition"
-            style={{ padding: "10px 12px", background: active ? "rgba(255,255,255,0.14)" : "transparent" }}
+            style={{ padding: "11px 12px", background: active ? "rgba(255,255,255,0.14)" : "transparent", flexShrink: 0 }}
           >
-            <Icon name={opt.id === "watchlist" && active ? "bookmarkFilled" : opt.icon} size={16} color={opt.danger ? "#e0567a" : accent} />
+            <Icon name={opt.id === "watchlist" && active ? "bookmarkFilled" : opt.icon} size={16} color={iconColor} />
             {/* textAlign left — without it, a label long enough to wrap
                 (e.g. "Remove from Favorites") inherits the <button>
                 element's own default center text-align and visibly
                 centers each wrapped line instead of flowing left from the
                 icon like every single-line label already does. */}
-            <span style={{ fontSize: 13.5, color: opt.danger ? "#e0567a" : "#fff", fontWeight: 500, textAlign: "left" }}>{label}</span>
+            <span style={{ flex: 1, fontSize: 13.5, color: opt.danger ? "#e0567a" : "#fff", fontWeight: 500, textAlign: "left" }}>{label}</span>
             {active && !opt.danger && <Icon name="check" size={13} color="#fff" strokeWidth={2.4} />}
           </button>
         );
       })}
     </div>
+  );
+
+  if (anchored) return menu;
+
+  return (
+    <>
+      {/* Zero-size marker kept in the trigger wrapper so we can measure it. */}
+      <span ref={markerRef} aria-hidden="true" style={{ position: "absolute", width: 0, height: 0, pointerEvents: "none" }} />
+      {coords && typeof document !== "undefined" ? createPortal(menu, document.body) : null}
+    </>
   );
 }

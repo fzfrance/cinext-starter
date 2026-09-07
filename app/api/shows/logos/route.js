@@ -2,10 +2,9 @@ import { NextResponse } from "next/server";
 import { getShowDetails, getShowImages, pickBestLogo } from "@/lib/tmdb";
 
 // Batched "best logo per show" lookup for the Library shelf's DVD
-// spines/disc + Show Detail's auto title logo — picks the logo matching
-// the caller's Readable Languages (see lib/tmdb.js's pickBestLogo) instead
-// of TMDB's raw highest-voted one, so e.g. a K-drama gets its Korean
-// wordmark when the user has Korean marked readable, not its English one.
+// spines/disc + Show Detail's auto title logo — pickBestLogo prefers
+// original language, then English, then other readable languages (so a
+// non-Thai show doesn't get a Thai market logo just because Thai is readable).
 // getShowDetails is already called (and edge-cached for an hour) by
 // /api/shows/library-detail for these same ids, so this doesn't add a
 // genuine second TMDB hit per show within that window.

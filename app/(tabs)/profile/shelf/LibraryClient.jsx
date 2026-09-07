@@ -152,7 +152,7 @@ export default function LibraryClient() {
   useEffect(() => {
     if (type !== "shows" || shows.length === 0) return;
     const ids = shows.map((s) => s.id);
-    const key = `${ids.join(",")}|${readableLanguages.join(",")}`;
+    const key = `v2|${ids.join(",")}|${readableLanguages.join(",")}`;
     if (logoIdsRef.current === key) return;
     logoIdsRef.current = key;
     let cancelled = false;
@@ -232,7 +232,7 @@ export default function LibraryClient() {
   useEffect(() => {
     if (type !== "movies" || movies.length === 0) return;
     const ids = movies.map((s) => s.id);
-    const key = `${ids.join(",")}|${readableLanguages.join(",")}`;
+    const key = `v2|${ids.join(",")}|${readableLanguages.join(",")}`;
     if (movieLogoIdsRef.current === key) return;
     movieLogoIdsRef.current = key;
     let cancelled = false;

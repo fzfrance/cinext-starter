@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -15,6 +15,7 @@ import SeasonBanner from "@/components/SeasonBanner";
 import SeasonRatingScreen from "@/components/SeasonRatingScreen";
 import ShareRatingCard from "@/components/ShareRatingCard";
 import CollectionPickerCard from "@/components/CollectionPickerCard";
+import CollectionQuickRow from "@/components/CollectionQuickRow";
 import { useAuth } from "@/lib/auth-context";
 import { useFavorites } from "@/lib/favorites-context";
 import { useShowCustomizations } from "@/lib/show-customizations-context";
@@ -27,7 +28,7 @@ import { getSeasonRatings, saveSeasonRating, deleteSeasonRating, getAutoSeasonSc
 import { getProfile } from "@/lib/profile";
 import { tmdbImage } from "@/lib/tmdb";
 import { resolveShowStatus } from "@/lib/statusResolver";
-import { resolveTitle, useReadableLanguages } from "@/lib/languages";
+import { resolveTitle, useReadableLanguages, useAppLanguage } from "@/lib/languages";
 import { themes, DEFAULT_ACCENT, tintColorForShow } from "@/lib/theme";
 import { useNavTint } from "@/lib/nav-tint-context";
 import { useNavVisibility } from "@/lib/nav-visibility-context";
@@ -67,12 +68,12 @@ class SectionErrorBoundary extends React.Component {
   }
 }
 
-function GlassButton({ children, onClick, style }) {
+function GlassButton({ children, onClick, style, ...props }) {
   return (
     <button onClick={onClick} style={{
       background: t.cardFill, color: "#fff",
       border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", ...style
-    }} className="flex items-center justify-center gap-2 rounded-full active:scale-95 transition">
+    }} className="flex items-center justify-center gap-2 rounded-full active:scale-95 transition" {...props}>
       {children}
     </button>
   );
@@ -160,6 +161,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   const { isFavorite, toggleFavorite } = useFavorites();
   const { getCustomBackdrop, getCustomPoster, getCustomLogo, setCustomImage } = useShowCustomizations();
   const readableLanguages = useReadableLanguages();
+  const { t: tr } = useAppLanguage();
   // Resolved once here, per the signed-in user's Readable Languages —
   // downstream code (the hero title, the similar-shows row) just reads
   // `.title` normally.
@@ -291,7 +293,14 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   const [statusExplicit, setStatusExplicit] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [desktopMoreOpen, setDesktopMoreOpen] = useState(false);
+  // Fixed-position coords for the ••• menu (right of trigger by default,
+  // with collision flip to left / down). Null until measured.
+  const [desktopMorePos, setDesktopMorePos] = useState(null);
   const [collectionSheetOpen, setCollectionSheetOpen] = useState(false);
+  // Desktop: centered liquid-glass modal (same pattern as image picker).
+  // Mobile still uses the bottom sheet above.
+  const [collectionAllOpen, setCollectionAllOpen] = useState(false);
   // Which video (trailer/teaser/featurette/etc.) is currently playing in
   // the fullscreen player below — was a plain trailerOpen boolean when
   // there was only ever one trailer to show; now there can be several
@@ -327,6 +336,10 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   const [tab, setTab] = useState("episodes");
   const [seasons, setSeasons] = useState(initialSeasons);
   const [expandedSeason, setExpandedSeason] = useState(null);
+  const [desktopSeasonId, setDesktopSeasonId] = useState(() => initialSeasons[0]?.id ?? null);
+  const moreMenuRef = useRef(null);
+  const moreMenuPanelRef = useRef(null);
+  const moreMenuBtnRef = useRef(null);
 
   const [ratingEpisode, setRatingEpisode] = useState(null); // { seasonId, ep }
   const [activeEpisode, setActiveEpisode] = useState(null); // { seasonId, epNumber }
@@ -360,11 +373,11 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   // as long as any of these are open, same pattern
   // components/library/CaseOverlay.jsx already uses for its own overlay.
   useEffect(() => {
-    const hidden = collectionSheetOpen || newCollectionOpen || !!openVideo
+    const hidden = collectionSheetOpen || collectionAllOpen || newCollectionOpen || !!openVideo
       || watchMenuFor != null || skipMenuFor != null || skipSeasonMenuFor != null || watchNextMenuAnchor != null;
     setNavHidden(hidden);
     return () => setNavHidden(false);
-  }, [collectionSheetOpen, newCollectionOpen, openVideo, watchMenuFor, skipMenuFor, skipSeasonMenuFor, watchNextMenuAnchor, setNavHidden]);
+  }, [collectionSheetOpen, collectionAllOpen, newCollectionOpen, openVideo, watchMenuFor, skipMenuFor, skipSeasonMenuFor, watchNextMenuAnchor, setNavHidden]);
 
   // Season ratings (0-10, mood/character/review — reference/
   // season_rating_prototype.jsx), keyed by season number:
@@ -667,7 +680,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
         covers: [],
       }));
       setCollections(mapped);
-      const hydrated = await hydrateCollectionPreviews(mapped, 5);
+      const hydrated = await hydrateCollectionPreviews(mapped, 9);
       if (cancelled) return;
       const coversById = new Map(hydrated.map((c) => [c.id, c.covers]));
       setCollections((prev) => prev.map((c) => ({ ...c, covers: coversById.get(c.id) ?? c.covers })));
@@ -754,15 +767,40 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     setPendingStatusSync(true);
     return true;
   };
-  const markSkipped = (seasonId, n) => { setEpisodeSkippedState(seasonId, n, true); setWatchMenuFor(null); setSkipMenuFor(null); };
+  const markSkipped = (seasonId, n) => { setEpisodeSkippedState(seasonId, n, true); setWatchMenuFor(null); setSkipMenuFor(null); setWatchNextMenuAnchor(null); };
 
   const toggleEp = (seasonId, n) => {
     const season = seasons.find((s) => s.id === seasonId);
-    const ep = season.episodes.find((e) => e.n === n);
-    if ((ep.watchCount || 0) === 0) {
+    const ep = season?.episodes.find((e) => e.n === n);
+    if (!ep) return;
+    // First mark: activate watched immediately and open the rating card.
+    // Menus (Mark As… / skip-ahead) only appear on a later click once watched.
+    setWatchMenuFor(null);
+    setSkipMenuFor(null);
+    setWatchNextMenuAnchor(null);
+    if ((ep.watchCount || 0) === 0 && !ep.watched) {
       if (!setEpisodeWatchCount(seasonId, n, 1)) return;
       setRatingEpisode({ seasonId, ep: { ...ep, watched: true, watchCount: 1 } });
+      return;
     }
+    // Already watched but rating sheet requested again (e.g. Watched Once)
+    if (ep.watched || (ep.watchCount || 0) > 0) {
+      setRatingEpisode({ seasonId, ep: { ...ep, watched: true, watchCount: Math.max(ep.watchCount || 0, 1) } });
+    }
+  };
+
+  // Explicit first-mark path used by desktop/mobile check buttons — never opens a menu.
+  const markWatchedAndRate = (seasonId, ep) => {
+    if (!ep || ep.daysUntil != null) return;
+    setWatchMenuFor(null);
+    setSkipMenuFor(null);
+    setWatchNextMenuAnchor(null);
+    if (ep.watched || (ep.watchCount || 0) > 0) {
+      setRatingEpisode({ seasonId, ep: { ...ep, watched: true, watchCount: Math.max(ep.watchCount || 0, 1) } });
+      return;
+    }
+    if (!setEpisodeWatchCount(seasonId, ep.n, 1)) return;
+    setRatingEpisode({ seasonId, ep: { ...ep, watched: true, watchCount: 1 } });
   };
 
   // Rating (stars) persists onto the episode's most recent watch row. The
@@ -849,32 +887,24 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   const selectStatus = (id) => {
     if (!user) { router.push("/login"); return; }
     if (id === "remove") {
-      // Remove is a full reset of this show for this user, not just the
-      // library row — removeUserShow (lib/userShows.js) cascades through
-      // episode_watches and season_reviews before deleting the user_shows
-      // row, so every piece of local state sourced from those tables has
-      // to be cleared here too, not just inLibrary/favorite/status.
-      // Deliberately not optimistic: local state only changes once the
-      // delete has actually succeeded, so a failed delete can't leave the
-      // UI claiming the show is gone while Supabase still has it (or the
-      // reverse). The menu itself still closes immediately either way —
-      // that's just dismissing the picker, not asserting success.
+      // Remove returns the show to its pre-library state ("Add to List"):
+      // delete the library row and clear local status UI. removeUserShow
+      // also clears watches/reviews so progress UI can't outlive the row.
+      setStatusOpen(false);
+      setInLibrary(false);
+      setFavorite(false);
+      setStatus(null);
+      setStatusExplicit(false);
+      setSeasons((ss) => ss.map((s) => ({
+        ...s,
+        episodes: s.episodes.map((e) => ({ ...e, watched: false, watchCount: 0, skipped: false, myRating: null })),
+      })));
+      setWatchedShowIds((prev) => { const next = new Set(prev); next.delete(showId); return next; });
       removeUserShow(user.id, showId, "ShowDetailClient:selectStatus:remove")
-        .then(() => {
-          setInLibrary(false);
-          setFavorite(false);
-          setStatusExplicit(true);
-          setSeasons((ss) => ss.map((s) => ({
-            ...s,
-            episodes: s.episodes.map((e) => ({ ...e, watched: false, watchCount: 0, skipped: false, myRating: null })),
-          })));
-          setWatchedShowIds((prev) => { const next = new Set(prev); next.delete(showId); return next; });
-        })
         .catch((err) => {
           console.error(err);
           window.alert("Couldn't remove this show — please try again.");
         });
-      setStatusOpen(false);
       return;
     }
     if (id === "watchlist" && (watchedReleasedEpisodes > 0 || resolvedReleasedEpisodes > 0)) {
@@ -890,6 +920,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
       if (!confirmed) { setStatusOpen(false); return; }
       setStatus("watchlist");
       setStatusExplicit(true);
+      setInLibrary(true);
       setSeasons((ss) => ss.map((s) => ({
         ...s,
         episodes: s.episodes.map((e) => ({ ...e, watched: false, watchCount: 0, skipped: false, myRating: null })),
@@ -900,6 +931,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     }
     setStatus(id);
     setStatusExplicit(true);
+    setInLibrary(true);
     setShowStatus(user.id, showId, id, "ShowDetailClient:selectStatus", { explicit: true }).catch(console.error);
     // Canonical "Completed" behavior: status + every currently-aired
     // episode marked watched, in one place (see markAllSeasonsWatched) so
@@ -912,14 +944,16 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
 
   const addToLibrary = () => {
     if (!user) { router.push("/login"); return; }
-    // Opens the status picker only — does NOT write anything. It used to
-    // commit a real row immediately using whatever default status
-    // happened to be showing ("watching"), before the user had chosen
-    // anything; that's exactly the kind of write a mere click on a
-    // reveal-the-options button must not cause. The actual row is only
-    // created inside selectStatus, when a specific status is picked.
+    // First click commits Watchlist immediately — do not open the picker
+    // or leave the pill on a blank "Choose Status" state. A later click
+    // on the same pill (now showing Watchlist / Watching / …) opens the
+    // status menu to change it.
+    setDesktopMoreOpen(false);
+    setStatusOpen(false);
+    setStatus("watchlist");
+    setStatusExplicit(true);
     setInLibrary(true);
-    setStatusOpen(true);
+    setShowStatus(user.id, showId, "watchlist", "ShowDetailClient:addToLibrary", { explicit: true }).catch(console.error);
   };
 
   const markWatchedFromDetail = () => {
@@ -928,15 +962,16 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     toggleEp(seasonId, epNumber);
   };
 
-  const markNotWatched = (seasonId, n) => { setEpisodeWatchCount(seasonId, n, 0); setWatchMenuFor(null); };
+  const markNotWatched = (seasonId, n) => { setEpisodeWatchCount(seasonId, n, 0); setWatchMenuFor(null); setWatchNextMenuAnchor(null); };
   const markWatchedOnce = (seasonId, n) => {
-    if (!setEpisodeWatchCount(seasonId, n, 1)) { setWatchMenuFor(null); return; }
+    if (!setEpisodeWatchCount(seasonId, n, 1)) { setWatchMenuFor(null); setWatchNextMenuAnchor(null); return; }
     setWatchMenuFor(null);
+    setWatchNextMenuAnchor(null);
     const season = seasons.find((s) => s.id === seasonId);
     const ep = season.episodes.find((e) => e.n === n);
     setRatingEpisode({ seasonId, ep: { ...ep, watched: true, watchCount: 1 } });
   };
-  const markRewatched = (seasonId, n, currentCount) => { setEpisodeWatchCount(seasonId, n, (currentCount || 1) + 1); setWatchMenuFor(null); };
+  const markRewatched = (seasonId, n, currentCount) => { setEpisodeWatchCount(seasonId, n, (currentCount || 1) + 1); setWatchMenuFor(null); setWatchNextMenuAnchor(null); };
 
   // true if any earlier, already-aired episode (this season before n, or an
   // earlier season) is still unresolved (neither watched nor skipped).
@@ -955,7 +990,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     return false;
   };
 
-  const markOnlyThis = (seasonId, n) => { setSkipMenuFor(null); toggleEp(seasonId, n); };
+  const markOnlyThis = (seasonId, n) => { setSkipMenuFor(null); setWatchNextMenuAnchor(null); toggleEp(seasonId, n); };
 
   // Bug fix: this used to only flip local `seasons` state for the
   // "previous episodes" and never call addEpisodeWatches for them at all
@@ -988,6 +1023,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
       episodes: s.episodes.map((e) => (isBefore(s, e) && e.daysUntil == null && !e.watched && !e.skipped ? { ...e, watched: true, watchCount: Math.max(e.watchCount || 0, 1) } : e)),
     })));
     setSkipMenuFor(null);
+    setWatchNextMenuAnchor(null);
     if (newlyWatched.length > 0) {
       addEpisodeWatches(user.id, showId, newlyWatched).catch(console.error);
       setPendingStatusSync(true);
@@ -1002,13 +1038,21 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     if (!user) { router.push("/login"); return; }
     const target = collections.find((c) => c.id === id);
     if (!target) return;
-    setCollections((cs) => cs.map((c) => {
-      if (c.id !== id) return c;
-      const covers = c.inShow
-        ? (c.covers ?? []).filter((item) => !(item.mediaType === "tv" && item.id === showId))
-        : [{ id: showId, title: show.title, posterPath: show.posterPath, backdropPath: show.backdropPath, mediaType: "tv" }, ...(c.covers ?? [])].slice(0, 5);
-      return { ...c, covers, inShow: !c.inShow, count: c.inShow ? Math.max(0, c.count - 1) : c.count + 1 };
-    }));
+    const adding = !target.inShow;
+    setCollections((cs) => {
+      const updated = cs.map((c) => {
+        if (c.id !== id) return c;
+        const covers = c.inShow
+          ? (c.covers ?? []).filter((item) => !(item.mediaType === "tv" && item.id === showId))
+          : [{ id: showId, title: show.title, posterPath: show.posterPath, backdropPath: show.backdropPath, mediaType: "tv" }, ...(c.covers ?? [])].slice(0, 9);
+        return { ...c, covers, inShow: !c.inShow, count: c.inShow ? Math.max(0, c.count - 1) : c.count + 1 };
+      });
+      // Most-recent add first — bump the collection that just received this
+      // title to the top of the picker list.
+      if (!adding) return updated;
+      const bumped = updated.find((c) => c.id === id);
+      return bumped ? [bumped, ...updated.filter((c) => c.id !== id)] : updated;
+    });
     if (target.inShow) removeShowFromCollection(id, showId).catch(console.error);
     else addShowToCollection(id, showId).catch(console.error);
   };
@@ -1019,9 +1063,8 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     if (!name) return;
     setNewCollectionName("");
     setNewCollectionOpen(false);
-    // Waits for the real row (needs its actual id for subsequent
-    // toggle/remove calls) rather than optimistically inserting a
-    // Date.now()-keyed placeholder that Supabase writes would never match.
+    // Keep the Collections menu open underneath so the new row appears in
+    // place; only the create sheet closes.
     createCollection(user.id, name)
       .then((row) => {
         setCollections((cs) => [{
@@ -1038,190 +1081,611 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
       .catch(console.error);
   };
 
-  // Watch Next — the active season's own full aired-episode row, one
-  // season at a time (the first season with an aired-but-unwatched
-  // episode). ALL of that season's aired episodes stay in the row
-  // permanently — marking one watched doesn't remove its card, it just
-  // stops being the auto-scroll target, so it's "pushed left" out of the
-  // immediately-visible area rather than disappearing.
+  const collectionConfirmActive = collections.some((c) => c.inShow);
+
+  // Watch Next — first season with an aired-but-unwatched episode. All of
+  // that season's aired episodes stay in the row; marking one just shifts
+  // the auto-scroll target. Shown only after real progress exists (any
+  // watched/skipped ep) or the show is already in Watching status.
   const watchNextSeason = seasons.find((s) => s.episodes.some((e) => e.daysUntil == null && !e.watched && !e.skipped));
   const watchNextEpisodes = watchNextSeason ? watchNextSeason.episodes.filter((e) => e.daysUntil == null) : [];
-  // Gates the whole row on real progress existing — without this, a show
-  // the user just added (zero episodes watched) shows a full unwatched
-  // season row immediately, reading as premature clutter on an otherwise
-  // completely empty show. Once at least one episode anywhere is watched
-  // (or skipped — either one is real activity on this show), Watch Next
-  // earns its place.
   const hasAnyWatchedEpisode = seasons.some((s) => s.episodes.some((e) => e.watched || e.skipped));
+  const showWatchNext = Boolean(watchNextSeason && watchNextEpisodes.length > 0 && (hasAnyWatchedEpisode || resolvedStatus === "watching"));
   const watchNextRowRef = useRef(null);
   const watchedFingerprint = watchNextEpisodes.map((e) => (e.watched ? "1" : "0")).join("");
   useEffect(() => {
     const row = watchNextRowRef.current;
-    if (!row) return;
-    const firstUnwatchedIndex = watchNextEpisodes.findIndex((e) => !e.watched);
+    if (!row || !showWatchNext) return;
+    const firstUnwatchedIndex = watchNextEpisodes.findIndex((e) => !e.watched && !e.skipped);
     if (firstUnwatchedIndex < 0) return;
     const card = row.children[firstUnwatchedIndex];
     if (!card) return;
-    // Leaves part of the previous (already-watched) card peeking in from
-    // the left instead of flush-aligning the next-up card to the row's
-    // own edge (scrollIntoView's inline:"start" did that before) — a
-    // flush align gives no visual hint that anything precedes it, reading
-    // as "only the next episode exists" even though every earlier aired
-    // episode is still in the row and it's fully scrollable back to them.
-    // Skipped for the very first episode, which genuinely has nothing
-    // before it to peek.
     const PEEK = 64;
     const target = firstUnwatchedIndex > 0 ? Math.max(0, card.offsetLeft - PEEK) : 0;
     row.scrollTo({ left: target, behavior: "smooth" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the watched fingerprint (a cheap derived string), not watchNextEpisodes' own identity, which is a new array every render
-  }, [watchNextSeason?.id, watchedFingerprint]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fingerprint string, not watchNextEpisodes identity
+  }, [watchNextSeason?.id, watchedFingerprint, showWatchNext]);
+
+  const desktopMetaParts = [
+    show.yearsRange,
+    show.contentRating,
+    show.seasonsCount ? `${show.seasonsCount} Season${show.seasonsCount === 1 ? "" : "s"}` : null,
+    show.episodeCount != null ? `${show.episodeCount} Episode${show.episodeCount === 1 ? "" : "s"}` : null,
+    show.rating ? `★ ${show.rating}` : null,
+  ].filter(Boolean);
+
+  const openTrailer = () => {
+    if (videos[0]) setOpenVideo(videos[0]);
+  };
+
+  const primaryProvider =
+    watchProviders?.flatrate?.[0]
+    || watchProviders?.rent?.[0]
+    || watchProviders?.buy?.[0]
+    || null;
+
+  const desktopSeason = seasons.find((s) => s.id === desktopSeasonId) || seasons[0] || null;
+  const desktopEpisodes = desktopSeason?.episodes ?? [];
+  const desktopSeasonAired = desktopEpisodes.filter((e) => e.daysUntil == null);
+  const desktopSeasonAllWatched = desktopSeasonAired.length > 0 && desktopSeasonAired.every((e) => e.watched || e.skipped);
+
+  const formatUserScore = (value) => {
+    if (value == null) return null;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    return Number.isInteger(n) ? String(n) : n.toFixed(1);
+  };
+  const desktopSeasonRating = desktopSeason ? seasonRatings[desktopSeason.id] : null;
+  const desktopSeasonScore = formatUserScore(desktopSeasonRating?.rating);
+
+  const formatEpisodeDate = (dateStr) => {
+    if (!dateStr || dateStr === "TBA") return null;
+    const [y, m, d] = String(dateStr).split("-").map(Number);
+    if (!y || !m || !d) return dateStr;
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return `${months[m - 1]} ${d}, ${y}`;
+  };
+
+  const onEpisodeCheckClick = (seasonId, e, event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (e.daysUntil != null) return;
+    const key = `${seasonId}-${e.n}`;
+    const alreadyResolved = !!(e.watched || e.skipped || (e.watchCount || 0) > 0);
+
+    // Second+ click on a watched/skipped ep → Mark As… only.
+    if (alreadyResolved) {
+      setSkipMenuFor(null);
+      setWatchNextMenuAnchor(null);
+      setWatchMenuFor((cur) => (cur === key ? null : key));
+      return;
+    }
+
+    // First click on unwatched → mark watched + rating card. Never a menu.
+    markWatchedAndRate(seasonId, e);
+  };
+
+  // Desktop episode menus — same persistence as mobile, then open the
+  // centered episode rating card for the target episode.
+  const desktopMarkWatchedOnce = (seasonId, n) => {
+    if (!setEpisodeWatchCount(seasonId, n, 1)) { setWatchMenuFor(null); return; }
+    setWatchMenuFor(null);
+    const season = seasons.find((s) => s.id === seasonId);
+    const ep = season?.episodes.find((e) => e.n === n);
+    if (ep) setRatingEpisode({ seasonId, ep: { ...ep, watched: true, watchCount: 1 } });
+  };
+  const desktopMarkOnlyThis = (seasonId, n) => {
+    setSkipMenuFor(null);
+    setWatchNextMenuAnchor(null);
+    toggleEp(seasonId, n);
+  };
+  const desktopMarkWithPrevious = (seasonId, n) => {
+    if (!user) { router.push("/login"); return; }
+    const isBefore = (s, e) => s.id !== 0 && (s.id < seasonId || (s.id === seasonId && e.n < n));
+    const newlyWatched = seasons.flatMap((s) =>
+      s.episodes.filter((e) => isBefore(s, e) && e.daysUntil == null && !e.watched && !e.skipped).map((e) => ({ seasonNumber: s.id, episodeNumber: e.n }))
+    );
+    setSeasons((ss) => ss.map((s) => ({
+      ...s,
+      episodes: s.episodes.map((e) => (isBefore(s, e) && e.daysUntil == null && !e.watched && !e.skipped ? { ...e, watched: true, watchCount: Math.max(e.watchCount || 0, 1) } : e)),
+    })));
+    setSkipMenuFor(null);
+    setWatchNextMenuAnchor(null);
+    if (newlyWatched.length > 0) {
+      addEpisodeWatches(user.id, showId, newlyWatched).catch(console.error);
+      setPendingStatusSync(true);
+    }
+    toggleEp(seasonId, n);
+  };
+
+  useEffect(() => {
+    if (!desktopMoreOpen) return undefined;
+    const onKey = (event) => {
+      if (event.key === "Escape") setDesktopMoreOpen(false);
+    };
+    const onPointer = (event) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(event.target)) setDesktopMoreOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onPointer);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onPointer);
+    };
+  }, [desktopMoreOpen]);
+
+  // Place the ••• menu to the right of the trigger, vertically centered on
+  // the button (not dropping below it). Flip left only when the right side
+  // is too tight — never prefer up/down as the primary placement.
+  useLayoutEffect(() => {
+    if (!desktopMoreOpen) {
+      setDesktopMorePos(null);
+      return undefined;
+    }
+
+    const MENU_W = 236;
+    const GAP = 10;
+    const EDGE = 16;
+
+    const place = () => {
+      const btn = moreMenuBtnRef.current;
+      const panel = moreMenuPanelRef.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const menuH = panel?.offsetHeight || 168;
+
+      const spaceRight = vw - rect.right - GAP - EDGE;
+      const spaceLeft = rect.left - GAP - EDGE;
+      const side = spaceRight >= MENU_W || spaceRight >= spaceLeft ? "right" : "left";
+
+      let left = side === "right"
+        ? rect.right + GAP
+        : rect.left - GAP - MENU_W;
+      // Vertically center on the ••• button.
+      let top = rect.top + rect.height / 2 - menuH / 2;
+
+      top = Math.min(top, vh - menuH - EDGE);
+      top = Math.max(EDGE, top);
+      left = Math.min(left, vw - MENU_W - EDGE);
+      left = Math.max(EDGE, left);
+
+      setDesktopMorePos({ top, left, side });
+    };
+
+    place();
+    // Remeasure after paint once the panel has real height.
+    const raf = requestAnimationFrame(place);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [desktopMoreOpen]);
+
+  // Collections modal — Escape closes.
+  useEffect(() => {
+    if (!collectionAllOpen) return undefined;
+    const onKey = (event) => {
+      if (event.key === "Escape") setCollectionAllOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [collectionAllOpen]);
+
+  // Dismiss Mark As… / skip-ahead / mark-season menus on outside click or Escape.
+  // Watch Next already has its own full-screen dismiss layer when anchored.
+  useEffect(() => {
+    const menuOpen = watchMenuFor != null || skipMenuFor != null || skipSeasonMenuFor != null;
+    if (!menuOpen || watchNextMenuAnchor) return undefined;
+
+    const closeMenus = () => {
+      setWatchMenuFor(null);
+      setSkipMenuFor(null);
+      setSkipSeasonMenuFor(null);
+    };
+
+    const onKey = (event) => {
+      if (event.key === "Escape") closeMenus();
+    };
+
+    const onPointer = (event) => {
+      const el = event.target;
+      if (!(el instanceof Element)) return;
+      // Keep the menu open when interacting with it or its trigger controls.
+      if (el.closest(".show-desktop-ep-menu")) return;
+      if (el.closest(".show-desktop-ep-check")) return;
+      if (el.closest(".show-desktop-mark-all")) return;
+      closeMenus();
+    };
+
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onPointer);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onPointer);
+    };
+  }, [watchMenuFor, skipMenuFor, skipSeasonMenuFor, watchNextMenuAnchor]);
 
   return (
     <div className="min-h-dvh" style={{ background: t.bg }}>
       <div className="pb-8">
 
-        {/* hero — 45px taller than the backdrop image alone needs, so the
-            floating poster (and everything below it, which just follows in
-            normal flow right after this div) sits 45px lower, leaving more
-            of the backdrop visible above it. The poster's own `top` below
-            is shifted by the same 45px, so the gap between the poster's
-            bottom edge and the title block underneath is unchanged — only
-            the whole unit's starting position moved, not its internal
-            spacing. */}
-        <div className="relative w-full" style={{ height: 415 }}>
-          <PosterArt posterPath={show.backdropPath} overrideSrc={customBackdropUrl} base={show.base} glow={show.glow} alt={displayTitle} tmdbSize="original" sizes="100vw" />
-          <div className="absolute inset-0" style={{ background: "linear-gradient(0deg, #0A0A0C 0%, rgba(10,10,12,0.2) 60%, transparent 100%)" }} />
-          <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 z-10" style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}>
-            <GlassButton onClick={() => router.back()} style={{ width: 38, height: 38 }}><Icon name="back" size={16} color={t.text} /></GlassButton>
-            <div className="relative">
-              <GlassButton onClick={() => setMoreOpen((v) => !v)} style={{ width: 38, height: 38 }}><Icon name="more" size={16} color={t.text} /></GlassButton>
-              {moreOpen && (
-                <div className="absolute z-20 rounded-2xl" style={{ right: 0, top: "calc(100% + 8px)", width: 200, padding: "6px", background: "rgba(38,38,42,0.93)", border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(24px)", boxShadow: "0 20px 44px rgba(0,0,0,0.55)" }}>
-                  {moreMenuItems.map((m) => (
-                    <button key={m.id} onClick={() => { setMoreOpen(false); if (m.id === "tags") setCollectionSheetOpen(true); else if (m.pickerType) router.push(`/show/${showId}?picker=${m.pickerType}`); }} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "10px 12px" }}>
-                      <Icon name={m.icon} size={16} color="#fff" />
-                      <span style={{ fontSize: 13.5, color: "#fff", fontWeight: 500 }}>{m.label}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+        {/* ---------- Mobile / tablet hero + intro ---------- */}
+        <div className="show-mobile-layout">
+          {/* hero — 45px taller than the backdrop image alone needs, so the
+              floating poster (and everything below it, which just follows in
+              normal flow right after this div) sits 45px lower, leaving more
+              of the backdrop visible above it. The poster's own `top` below
+              is shifted by the same 45px, so the gap between the poster's
+              bottom edge and the title block underneath is unchanged — only
+              the whole unit's starting position moved, not its internal
+              spacing. */}
+          <div className="relative w-full" style={{ height: 415 }}>
+            <PosterArt posterPath={show.backdropPath} overrideSrc={customBackdropUrl} base={show.base} glow={show.glow} alt={displayTitle} tmdbSize="original" sizes="100vw" />
+            <div className="absolute inset-0" style={{ background: "linear-gradient(0deg, #0A0A0C 0%, rgba(10,10,12,0.2) 60%, transparent 100%)" }} />
+            <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 z-10" style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}>
+              <GlassButton onClick={() => router.back()} style={{ width: 38, height: 38 }}><Icon name="back" size={16} color={t.text} /></GlassButton>
+              <div className="relative">
+                <GlassButton onClick={() => setMoreOpen((v) => !v)} style={{ width: 38, height: 38 }}><Icon name="more" size={16} color={t.text} /></GlassButton>
+                {moreOpen && (
+                  <div className="absolute z-20 rounded-2xl" style={{ right: 0, top: "calc(100% + 8px)", width: 200, padding: "6px", background: "rgba(38,38,42,0.93)", border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(24px)", boxShadow: "0 20px 44px rgba(0,0,0,0.55)" }}>
+                    {moreMenuItems.map((m) => (
+                      <button key={m.id} onClick={() => { setMoreOpen(false); if (m.id === "tags") setCollectionSheetOpen(true); else if (m.pickerType) router.push(`/show/${showId}?picker=${m.pickerType}`); }} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "10px 12px" }}>
+                        <Icon name={m.icon} size={16} color="#fff" />
+                        <span style={{ fontSize: 13.5, color: "#fff", fontWeight: 500 }}>{m.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* centered floating poster, smaller */}
+            <div className="absolute left-1/2" style={{ top: 195, transform: "translateX(-50%)", width: 140, height: 200 }}>
+              <div className="relative w-full h-full rounded-2xl overflow-hidden" style={{ boxShadow: "0 16px 40px rgba(0,0,0,0.6)" }}>
+                <PosterArt posterPath={show.posterPath} overrideSrc={customPosterUrl} base={show.base} glow={show.glow} alt={displayTitle} />
+                {!show.posterPath && !customPosterUrl && (
+                  <div className="absolute inset-0 flex items-end justify-center" style={{ paddingBottom: 12 }}>
+                    <span style={{ fontSize: 16, fontWeight: 800, color: "#f4ead9", letterSpacing: "0.25em" }}>{displayTitle.toUpperCase()}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* centered floating poster, smaller */}
-          <div className="absolute left-1/2" style={{ top: 195, transform: "translateX(-50%)", width: 140, height: 200 }}>
-            <div className="relative w-full h-full rounded-2xl overflow-hidden" style={{ boxShadow: "0 16px 40px rgba(0,0,0,0.6)" }}>
-              <PosterArt posterPath={show.posterPath} overrideSrc={customPosterUrl} base={show.base} glow={show.glow} alt={displayTitle} />
-              {/* Fallback only — real poster art already has the title
-                  baked in, so this would otherwise double up on top of it. */}
-              {!show.posterPath && !customPosterUrl && (
-                <div className="absolute inset-0 flex items-end justify-center" style={{ paddingBottom: 12 }}>
-                  <span style={{ fontSize: 16, fontWeight: 800, color: "#f4ead9", letterSpacing: "0.25em" }}>{displayTitle.toUpperCase()}</span>
-                </div>
+          <div className="px-6" style={{ marginTop: 8, position: "relative", zIndex: 20 }}>
+            {show.tagline && (
+              <div className="text-center" style={{ fontSize: 13, fontStyle: "italic", color: t.textDim, marginBottom: 18 }}>
+                {show.tagline}
+              </div>
+            )}
+            {customLogoUrl || autoLogoUrl ? (
+              <div className="flex justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element -- a resolved TMDB CDN URL, not a next/image-managed path */}
+                <img
+                  src={customLogoUrl || autoLogoUrl}
+                  alt={displayTitle}
+                  onError={() => { if (!customLogoUrl) setAutoLogoFailed(true); }}
+                  style={{ maxWidth: "80%", maxHeight: 72, objectFit: "contain" }}
+                />
+              </div>
+            ) : (
+              <div className="text-center" style={{ fontSize: 30, fontWeight: 800, color: "#fff", letterSpacing: "0.01em" }}>{displayTitle}</div>
+            )}
+            <div className="text-center" style={{ fontSize: 12, color: t.textDim, marginTop: 9 }}>{show.yearsRange} · {show.genres} · ★ {show.rating}</div>
+
+            <div className="flex items-center justify-center gap-2.5" style={{ marginTop: 17 }}>
+              {!inLibrary ? (
+                <button onClick={addToLibrary} className="flex items-center gap-2 rounded-full active:scale-95 transition" style={{ padding: "10px 20px", background: "#fff", color: "#111" }}>
+                  <Icon name="plus" size={14} color="#111" />
+                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>Add to List</span>
+                </button>
+              ) : (
+                <>
+                  <div className="relative">
+                    {statusOpen && (
+                      <>
+                        <div className="fixed inset-0 z-20" onClick={() => setStatusOpen(false)} />
+                        <StatusMenu status={resolvedStatus} onSelect={selectStatus} align="center" />
+                      </>
+                    )}
+                    <button onClick={() => setStatusOpen((v) => !v)} className="flex items-center gap-2 rounded-full active:scale-95 transition" style={{ padding: "10px 18px", background: "#fff", color: "#111" }}>
+                      <Icon name={resolvedStatus === "watchlist" ? "bookmarkFilled" : statusMenuOptions.find((s) => s.id === resolvedStatus)?.icon ?? "bookmark"} size={15} color="#111" />
+                      <span style={{ fontSize: 13.5, fontWeight: 600 }}>{statusMenuOptions.find((s) => s.id === resolvedStatus)?.label ?? "Watchlist"}</span>
+                    </button>
+                  </div>
+                  <GlassButton onClick={() => {
+                    if (!user) { router.push("/login"); return; }
+                    toggleFavorite(showId, "ShowDetailClient:toggleFavorite");
+                  }} style={{ width: 40, height: 40 }}>
+                    <Icon name={favorite ? "heart" : "heartOutline"} size={16} color={favorite ? "#e0567a" : "#fff"} />
+                  </GlassButton>
+                </>
               )}
+            </div>
+
+            <div className="mt-4" style={{ fontSize: 13, lineHeight: 1.5, color: "rgba(255,255,255,0.72)" }}>
+              {show.descriptionFull}
             </div>
           </div>
         </div>
 
-        <div className="px-6" style={{ marginTop: 8, position: "relative", zIndex: 20 }}>
-          {/* short description / tagline — right below the poster/hero,
-              ahead of the title, with its own bottom margin so it doesn't
-              crowd into the logo/title that follows. */}
-          {show.tagline && (
-            <div className="text-center" style={{ fontSize: 13, fontStyle: "italic", color: t.textDim, marginBottom: 18 }}>
-              {show.tagline}
+        {/* ---------- Desktop hero + info strip ---------- */}
+        <div className="show-desktop-layout">
+          <section className="show-desktop-hero">
+            <div className="show-desktop-backdrop">
+              <PosterArt posterPath={show.backdropPath} overrideSrc={customBackdropUrl} base={show.base} glow={show.glow} alt="" tmdbSize="original" sizes="100vw" />
+              <div className="show-desktop-backdrop-scrim" />
             </div>
-          )}
-          {/* native title — the user's manually-picked logo art wins when
-              set; otherwise this defaults to TMDB's own logo art (matched
-              to Readable Languages — see autoLogoUrl above) rather than
-              plain text, since most shows really do have real logo art
-              available. Plain text is the last-resort fallback, only for
-              shows TMDB has no logo art for at all, or where the image
-              itself fails to load. */}
-          {customLogoUrl || autoLogoUrl ? (
-            <div className="flex justify-center">
-              {/* eslint-disable-next-line @next/next/no-img-element -- a resolved TMDB CDN URL, not a next/image-managed path */}
-              {/* maxHeight started at the plain-text title's own rendered
-                  height (fontSize 30 * ~1.25 line-height ≈ 38px), bumped
-                  30% for wide wordmarks, then bumped again here — a
-                  squarish/stacked logo (common for CJK titles) is
-                  height-constrained rather than width-constrained, and at
-                  49 it rendered as a tiny sliver that reads as off-center/
-                  adrift rather than a deliberately-sized title. Wide
-                  wordmarks are unaffected either way, since maxWidth
-                  governs those first. maxWidth is just a safety cap so an
-                  unusually wide logo can't overflow the content column. */}
-              <img
-                src={customLogoUrl || autoLogoUrl}
-                alt={displayTitle}
-                onError={() => { if (!customLogoUrl) setAutoLogoFailed(true); }}
-                style={{ maxWidth: "80%", maxHeight: 72, objectFit: "contain" }}
-              />
-            </div>
-          ) : (
-            <div className="text-center" style={{ fontSize: 30, fontWeight: 800, color: "#fff", letterSpacing: "0.01em" }}>{displayTitle}</div>
-          )}
-          {/* basic info */}
-          <div className="text-center" style={{ fontSize: 12, color: t.textDim, marginTop: 9 }}>{show.yearsRange} · {show.genres} · ★ {show.rating}</div>
 
-          {/* status */}
-          <div className="flex items-center justify-center gap-2.5" style={{ marginTop: 17 }}>
-            {!inLibrary ? (
-              <button onClick={addToLibrary} className="flex items-center gap-2 rounded-full active:scale-95 transition" style={{ padding: "10px 20px", background: "#fff", color: "#111" }}>
-                <Icon name="plus" size={14} color="#111" />
-                <span style={{ fontSize: 13.5, fontWeight: 600 }}>Add to Library</span>
-              </button>
-            ) : (
-              <>
-                <div className="relative">
-                  {/* Always the resolved status, never the raw stored one —
-                      this button (and StatusMenu's active-option
-                      highlight) must never disagree with the season
-                      progress rendered in the Episodes tab below. */}
-                  {statusOpen && (
-                    <>
-                      {/* Click-outside catcher — without this, the menu only
-                          closed by tapping the trigger again or picking an
-                          option; tapping anywhere else on the screen did
-                          nothing, matching the reported "sometimes I'm not
-                          selecting anything" bug. Same z-20/z-30 pattern
-                          already used for this screen's own "more options"
-                          menu (Icon name="more" button) below. */}
-                      <div className="fixed inset-0 z-20" onClick={() => setStatusOpen(false)} />
-                      <StatusMenu status={resolvedStatus} onSelect={selectStatus} align="center" />
-                    </>
-                  )}
-                  {/* resolvedStatus can now genuinely be null right after
-                      "Add to Library" (nothing picked yet, no watch
-                      history) — falls back to a neutral "Choose Status"
-                      label/icon instead of statusMenuOptions.find(...)
-                      quietly returning undefined for both. */}
-                  <button onClick={() => setStatusOpen((v) => !v)} className="flex items-center gap-2 rounded-full active:scale-95 transition" style={{ padding: "10px 18px", background: "#fff", color: "#111" }}>
-                    <Icon name={resolvedStatus === "watchlist" ? "bookmarkFilled" : statusMenuOptions.find((s) => s.id === resolvedStatus)?.icon ?? "plus"} size={15} color="#111" />
-                    <span style={{ fontSize: 13.5, fontWeight: 600 }}>{statusMenuOptions.find((s) => s.id === resolvedStatus)?.label ?? "Choose Status"}</span>
-                  </button>
+            <div className="show-desktop-hero-main">
+              <div className="show-desktop-poster">
+                <PosterArt posterPath={show.posterPath} overrideSrc={customPosterUrl} base={show.base} glow={show.glow} alt={displayTitle} />
+              </div>
+
+              <div className="show-desktop-copy">
+                {customLogoUrl || autoLogoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- resolved TMDB CDN URL
+                  <img
+                    className="show-desktop-logo"
+                    src={customLogoUrl || autoLogoUrl}
+                    alt={displayTitle}
+                    onError={() => { if (!customLogoUrl) setAutoLogoFailed(true); }}
+                  />
+                ) : (
+                  <h1>{displayTitle}</h1>
+                )}
+
+                <div className="show-desktop-meta">
+                  {desktopMetaParts.map((part, i) => (
+                    <span key={`${part}-${i}`}>{i > 0 ? `• ${part}` : part}</span>
+                  ))}
+                  {show.statusLabel ? <span className="is-status">• {show.statusLabel}</span> : null}
                 </div>
-                <GlassButton onClick={() => {
-                  if (!user) { router.push("/login"); return; }
-                  toggleFavorite(showId, "ShowDetailClient:toggleFavorite");
-                }} style={{ width: 40, height: 40 }}>
-                  <Icon name={favorite ? "heart" : "heartOutline"} size={16} color={favorite ? "#e0567a" : "#fff"} />
-                </GlassButton>
-              </>
+
+                {show.genresList?.length > 0 && (
+                  <div className="show-desktop-genres">
+                    {show.genresList.map((g) => (
+                      <span key={g} className="show-desktop-genre">{g}</span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="show-desktop-actions">
+                  <div className={`relative show-desktop-status-wrap${statusOpen ? " is-open" : ""}`}>
+                    {statusOpen && (
+                      <>
+                        <div className="show-desktop-status-scrim" onClick={() => setStatusOpen(false)} />
+                        <StatusMenu status={resolvedStatus} onSelect={selectStatus} align="left" style={{ zIndex: 110 }} />
+                      </>
+                    )}
+                    {!inLibrary ? (
+                      <button type="button" className="show-desktop-action is-light" onClick={addToLibrary}>
+                        <Icon name="plus" size={15} color="#111" />
+                        Add to List
+                      </button>
+                    ) : (
+                      <button type="button" className="show-desktop-action is-light" onClick={() => setStatusOpen((v) => !v)}>
+                        <Icon name={resolvedStatus === "watchlist" ? "bookmarkFilled" : statusMenuOptions.find((s) => s.id === resolvedStatus)?.icon ?? "bookmark"} size={15} color="#111" />
+                        {statusMenuOptions.find((s) => s.id === resolvedStatus)?.label ?? "Watchlist"}
+                      </button>
+                    )}
+                  </div>
+
+                  <GlassButton
+                    onClick={() => {
+                      if (!user) { router.push("/login"); return; }
+                      // Favoriting requires a library row — open status picker
+                      // first when this show isn't in the library yet.
+                      if (!inLibrary) {
+                        addToLibrary();
+                        return;
+                      }
+                      toggleFavorite(showId, "ShowDetailClient:desktopFavorite");
+                    }}
+                    style={{ width: 42, height: 42 }}
+                    aria-label={favorite ? "Remove from favorites" : "Add to favorites"}
+                  >
+                    <Icon name={favorite ? "heart" : "heartOutline"} size={16} color={favorite ? "#e0567a" : "#fff"} />
+                  </GlassButton>
+
+                  {videos[0] && (
+                    <button type="button" className="show-desktop-action is-secondary" onClick={openTrailer}>
+                      <Icon name="clapperboard" size={16} color="#fff" strokeWidth={1.7} />
+                      Trailer
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    className={`show-desktop-action is-secondary${desktopSeasonRating ? " is-rated" : ""}`}
+                    onClick={() => {
+                      if (!user) { router.push("/login"); return; }
+                      const target = desktopSeason?.id ?? seasons[0]?.id;
+                      if (target == null) return;
+                      openReviewSeason(target);
+                    }}
+                    aria-label={desktopSeasonScore ? `Your rating ${desktopSeasonScore}` : "Rating"}
+                  >
+                    <Icon
+                      name={desktopSeasonRating ? "star" : "starOutline"}
+                      size={16}
+                      color={desktopSeasonRating ? accent : "#fff"}
+                    />
+                    {desktopSeasonScore ?? "Rating"}
+                  </button>
+
+                  <GlassButton
+                    onClick={() => {
+                      if (!user) { router.push("/login"); return; }
+                      setStatusOpen(false);
+                      setDesktopMoreOpen(false);
+                      setCollectionAllOpen(true);
+                    }}
+                    style={{ width: 42, height: 42 }}
+                    aria-label="Add to a Collection"
+                    aria-haspopup="dialog"
+                    aria-expanded={collectionAllOpen}
+                  >
+                    <Icon name="collection" size={16} color="#fff" />
+                  </GlassButton>
+
+                  <div className="relative" ref={moreMenuRef}>
+                    <button
+                      type="button"
+                      ref={moreMenuBtnRef}
+                      className="show-desktop-more"
+                      aria-label="More options"
+                      aria-haspopup="menu"
+                      aria-expanded={desktopMoreOpen}
+                      onClick={() => { setStatusOpen(false); setDesktopMoreOpen((v) => !v); }}
+                    >
+                      <Icon name="more" size={16} color="#fff" />
+                    </button>
+                    {desktopMoreOpen && (
+                      <div
+                        ref={moreMenuPanelRef}
+                        className={`show-desktop-more-menu${desktopMorePos ? " is-placed" : ""}${desktopMorePos?.side ? ` is-${desktopMorePos.side}` : ""}`}
+                        role="menu"
+                        style={desktopMorePos ? {
+                          top: desktopMorePos.top,
+                          left: desktopMorePos.left,
+                          background: "rgba(48,50,54,0.96)",
+                          border: "1px solid rgba(255,255,255,0.12)",
+                          backdropFilter: "blur(28px) saturate(140%)",
+                          WebkitBackdropFilter: "blur(28px) saturate(140%)",
+                        } : undefined}
+                      >
+                        {moreMenuItems.filter((m) => m.id !== "tags").map((m) => (
+                          <button
+                            key={m.id}
+                            type="button"
+                            role="menuitem"
+                            className="show-desktop-more-item"
+                            onClick={() => {
+                              setDesktopMoreOpen(false);
+                              if (m.pickerType) router.push(`/show/${showId}?picker=${m.pickerType}`);
+                            }}
+                          >
+                            <Icon name={m.icon} size={16} color="#fff" />
+                            <span>{m.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {show.descriptionFull ? <p className="show-desktop-overview">{show.descriptionFull}</p> : null}
+              </div>
+            </div>
+          </section>
+
+          <section className="show-desktop-strip" aria-label="Show details">
+            {primaryProvider ? (
+              watchProviders?.link ? (
+                <a
+                  className="show-desktop-strip-item is-watch"
+                  href={watchProviders.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <div className="show-desktop-strip-logo">
+                    {primaryProvider.logoPath && (
+                      <Image src={tmdbImage(primaryProvider.logoPath, "w92")} alt="" fill sizes="36px" style={{ objectFit: "cover" }} />
+                    )}
+                  </div>
+                  <div>
+                    <span className="show-desktop-strip-kicker">WATCH ON</span>
+                    <strong>
+                      {primaryProvider.name}
+                      <Icon name="chevronRight" size={14} color="rgba(255,255,255,0.55)" />
+                    </strong>
+                  </div>
+                </a>
+              ) : (
+                <div className="show-desktop-strip-item is-watch">
+                  <div className="show-desktop-strip-logo">
+                    {primaryProvider.logoPath && (
+                      <Image src={tmdbImage(primaryProvider.logoPath, "w92")} alt="" fill sizes="36px" style={{ objectFit: "cover" }} />
+                    )}
+                  </div>
+                  <div>
+                    <span className="show-desktop-strip-kicker">WATCH ON</span>
+                    <strong>{primaryProvider.name}</strong>
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="show-desktop-strip-item is-watch">
+                <div className="show-desktop-strip-logo is-empty"><Icon name="tv" size={16} color="rgba(255,255,255,0.45)" /></div>
+                <div>
+                  <span className="show-desktop-strip-kicker">WATCH ON</span>
+                  <strong>Unavailable</strong>
+                </div>
+              </div>
             )}
-          </div>
 
-          {/* description */}
-          <div className="mt-4" style={{ fontSize: 13, lineHeight: 1.5, color: "rgba(255,255,255,0.72)" }}>
-            {show.descriptionFull}
-          </div>
+            <div className="show-desktop-strip-item">
+              <Icon name="clock" size={15} color="rgba(255,255,255,0.45)" />
+              <div>
+                <span className="show-desktop-strip-kicker">STATUS</span>
+                <strong className={show.statusLabel ? "is-status" : undefined}>{show.statusLabel || "—"}</strong>
+              </div>
+            </div>
 
-          {/* tabs */}
-          <div className="mt-5 flex gap-5" style={{ borderBottom: `1px solid ${t.cardBorder}` }}>
-            {[{ id: "episodes", label: "Episodes" }, { id: "details", label: "Details" }, { id: "cast", label: "Cast & Crew" }, { id: "reviews", label: "My Rating" }].map((tb) => (
-              <button key={tb.id} onClick={() => setTab(tb.id)} className="pb-2.5" style={{
-                fontSize: 13.5, fontWeight: 600, color: tab === tb.id ? "#fff" : t.textDim,
+            <div className="show-desktop-strip-item">
+              <Icon name="star" size={15} color="rgba(255,255,255,0.45)" />
+              <div>
+                <span className="show-desktop-strip-kicker">RATING</span>
+                <strong>{show.rating || "—"}</strong>
+              </div>
+            </div>
+
+            <div className="show-desktop-strip-item">
+              <Icon name="calendar" size={15} color="rgba(255,255,255,0.45)" />
+              <div>
+                <span className="show-desktop-strip-kicker">FIRST AIR DATE</span>
+                <strong>{show.firstAirDate || "—"}</strong>
+              </div>
+            </div>
+
+            <div className="show-desktop-strip-item">
+              <Icon name="globe" size={15} color="rgba(255,255,255,0.45)" />
+              <div>
+                <span className="show-desktop-strip-kicker">COUNTRY</span>
+                <strong>{show.originCountry || "—"}</strong>
+              </div>
+            </div>
+
+            <div className="show-desktop-strip-item">
+              <Icon name="user" size={15} color="rgba(255,255,255,0.45)" />
+              <div>
+                <span className="show-desktop-strip-kicker">CREATOR</span>
+                <strong>{show.creator !== "—" ? show.creator : "—"}</strong>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div className="show-detail-body px-6" style={{ marginTop: 8, position: "relative", zIndex: 20 }}>
+          {/* Mobile tabs only — desktop hides the "Episodes" heading and
+              shows season/episode cards directly under the hero. */}
+          <div
+            className="mt-5 flex gap-5 show-detail-tabs"
+            style={{ borderBottom: `1px solid ${t.cardBorder}` }}
+          >
+            {[
+              { id: "episodes", label: "Episodes", hideOnDesktop: true },
+              { id: "details", label: "Details", hideOnDesktop: true },
+              { id: "cast", label: "Cast & Crew", hideOnDesktop: true },
+            ].map((tb) => (
+              <button key={tb.id} onClick={() => setTab(tb.id)} className={`show-detail-tab-btn pb-2.5${tb.hideOnDesktop ? " show-detail-tab-mobile-only" : ""}`} style={{
+                fontWeight: 600, color: tab === tb.id ? "#fff" : t.textDim,
                 borderBottom: tab === tb.id ? `2px solid ${accent}` : "2px solid transparent",
               }}>{tb.label}</button>
             ))}
@@ -1230,66 +1694,61 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
           {/* ---------- Episodes tab ---------- */}
           {tab === "episodes" && (
             <div className="mt-4 flex flex-col gap-3">
-              {/* Watch Next — the active season's own full aired-episode
-                  row (see watchNextSeason/watchNextEpisodes above), one
-                  season at a time. Every aired episode stays in the row
-                  permanently, even once watched — marking one just auto-
-                  scrolls the row so the next unwatched card becomes the
-                  leading visible one, "pushing" the completed card left
-                  out of view rather than removing it. Tapping the ring
-                  runs the exact same mark-watched → rating-flow path as
-                  the accordion below (toggleEp). Ring style matches the
-                  season accordion's own progress indicator: a plain empty
-                  outline when not yet watched (no icon at all), filled
-                  amber with a checkmark once it is. */}
-              {watchNextSeason && watchNextEpisodes.length > 0 && hasAnyWatchedEpisode && (
-                <div>
+              {showWatchNext && (
+                <div className="show-watch-next">
                   <div className="flex items-center justify-between mb-3">
-                    <span style={{ fontSize: 17, fontWeight: 700, color: "#fff" }}>Watch Next</span>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: t.textDim }}>{watchNextSeason.title}</span>
+                    <span className="show-watch-next-title">Watch Next</span>
+                    <span className="show-watch-next-season">{watchNextSeason.title}</span>
                   </div>
                   <div ref={watchNextRowRef} className="flex gap-3 overflow-x-auto" style={{ scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}>
-                    {watchNextEpisodes.map((e) => (
-                      <div
-                        key={e.n}
-                        onClick={() => setActiveEpisode({ seasonId: watchNextSeason.id, epNumber: e.n })}
-                        className="relative flex-shrink-0 rounded-2xl overflow-hidden cursor-pointer active:scale-[0.98] transition"
-                        style={{ width: 220, height: 130 }}
-                      >
-                        <PosterArt posterPath={e.posterPath} base={e.base} glow={e.glow} alt={e.title} />
-                        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(0deg, rgba(0,0,0,0.75) 0%, transparent 55%)" }} />
-                        <div className="absolute left-0 right-0 bottom-0 px-3 pb-2.5">
-                          <div style={{ fontSize: 10.5, fontWeight: 600, color: "rgba(255,255,255,0.7)", letterSpacing: "0.06em" }}>EPISODE {e.n}</div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginTop: 1 }}>{e.title}</div>
+                    {watchNextEpisodes.map((e) => {
+                      const isWatched = !!e.watched && !e.skipped;
+                      const isRewatch = isWatched && (e.watchCount || 1) >= 2;
+                      return (
+                        <div
+                          key={e.n}
+                          onClick={() => setActiveEpisode({ seasonId: watchNextSeason.id, epNumber: e.n })}
+                          className="relative flex-shrink-0 rounded-2xl overflow-hidden cursor-pointer active:scale-[0.98] transition show-watch-next-card"
+                        >
+                          <PosterArt posterPath={e.posterPath} base={e.base} glow={e.glow} alt={e.title} />
+                          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(0deg, rgba(0,0,0,0.75) 0%, transparent 55%)" }} />
+                          <div className="absolute left-0 right-0 bottom-0 show-watch-next-card-copy">
+                            <div className="show-watch-next-ep-label">EPISODE {e.n}</div>
+                            <div className="show-watch-next-ep-title">{e.title}</div>
+                          </div>
+                          <div className="absolute" style={{ right: 10, bottom: 10 }}>
+                            <button
+                              type="button"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                const rect = ev.currentTarget.getBoundingClientRect();
+                                if (e.watched || e.skipped) {
+                                  setSkipMenuFor(null);
+                                  setWatchMenuFor(`${watchNextSeason.id}-${e.n}`);
+                                  setWatchNextMenuAnchor({ rect, seasonId: watchNextSeason.id, epNumber: e.n, watchCount: e.watchCount });
+                                  return;
+                                }
+                                if (hasEarlierUnwatched(watchNextSeason.id, e.n)) {
+                                  setWatchMenuFor(null);
+                                  setSkipMenuFor(`${watchNextSeason.id}-${e.n}`);
+                                  setWatchNextMenuAnchor({ rect, seasonId: watchNextSeason.id, epNumber: e.n });
+                                  return;
+                                }
+                                markWatchedAndRate(watchNextSeason.id, e);
+                              }}
+                              className={`show-desktop-ep-check-btn active:scale-90 transition${isWatched ? " is-watched" : ""}${e.watched || e.skipped ? " is-resolved" : ""}`}
+                              style={e.skipped ? { background: SKIPPED_GREY, borderColor: SKIPPED_GREY } : undefined}
+                            >
+                              {isRewatch
+                                ? <span style={{ fontSize: 11, fontWeight: 700, color: "#111" }}>×{e.watchCount}</span>
+                                : e.skipped
+                                ? <Icon name="skip" size={13} color="#fff" />
+                                : <Icon name="check" size={13} color={isWatched ? "#111" : "#fff"} strokeWidth={2.2} />}
+                            </button>
+                          </div>
                         </div>
-                        <div className="absolute" style={{ right: 10, bottom: 10 }}>
-                          {/* Same watchMenuFor/skipMenuFor state and "seasonId-n"
-                              key the episode accordion below already uses —
-                              tapping an already-watched episode here now opens
-                              the identical "Mark As…" popup (Not Watched /
-                              Rewatched / Watched Once) instead of just
-                              toggling it off directly, so undoing a watch from
-                              this row behaves the same as everywhere else. */}
-                          <button
-                            onClick={(ev) => {
-                              ev.stopPropagation();
-                              const rect = ev.currentTarget.getBoundingClientRect();
-                              if (e.watched || e.skipped) { setSkipMenuFor(null); setWatchMenuFor(`${watchNextSeason.id}-${e.n}`); setWatchNextMenuAnchor({ rect, seasonId: watchNextSeason.id, epNumber: e.n, watchCount: e.watchCount }); return; }
-                              if (hasEarlierUnwatched(watchNextSeason.id, e.n)) { setWatchMenuFor(null); setSkipMenuFor(`${watchNextSeason.id}-${e.n}`); setWatchNextMenuAnchor({ rect, seasonId: watchNextSeason.id, epNumber: e.n }); return; }
-                              toggleEp(watchNextSeason.id, e.n);
-                            }}
-                            className="active:scale-90 transition flex items-center justify-center"
-                            style={{ width: 32, height: 32, borderRadius: "50%", background: e.watched ? ((e.watchCount || 1) >= 2 ? "#7CC950" : accent) : e.skipped ? SKIPPED_GREY : "rgba(255,255,255,0.10)" }}
-                          >
-                            {e.watched && (e.watchCount || 1) >= 2
-                              ? <span style={{ fontSize: 11, fontWeight: 700, color: "#0d1a06" }}>×{e.watchCount}</span>
-                              : e.skipped
-                              ? <Icon name="skip" size={13} color="#fff" />
-                              : <Icon name="check" size={14} color={e.watched ? "#1a1108" : "rgba(255,255,255,0.4)"} strokeWidth={2.4} />}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -1304,53 +1763,31 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
               {watchNextMenuAnchor && (watchMenuFor === `${watchNextMenuAnchor.seasonId}-${watchNextMenuAnchor.epNumber}` || skipMenuFor === `${watchNextMenuAnchor.seasonId}-${watchNextMenuAnchor.epNumber}`) && (() => {
                 const { rect, seasonId, epNumber, watchCount } = watchNextMenuAnchor;
                 const isMarkAs = watchMenuFor === `${seasonId}-${epNumber}`;
-                const width = isMarkAs ? 200 : 220;
+                const width = isMarkAs ? 210 : 220;
                 const estHeight = isMarkAs ? 200 : 110;
                 const fitsBelow = window.innerHeight - rect.bottom >= estHeight + 8;
                 const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
                 const positionStyle = fitsBelow ? { top: rect.bottom + 8 } : { bottom: window.innerHeight - rect.top + 8 };
                 return (
-                  <div className="fixed inset-0 z-30" onClick={() => { setWatchMenuFor(null); setSkipMenuFor(null); }}>
+                  <div className="fixed inset-0 z-40" onClick={() => { setWatchMenuFor(null); setSkipMenuFor(null); setWatchNextMenuAnchor(null); }}>
                     <div
-                      className="fixed rounded-2xl"
-                      style={{ left, width, padding: "8px", background: "rgba(28,22,16,0.97)", border: `1px solid ${t.glassBorder}`, backdropFilter: "blur(24px)", boxShadow: "0 20px 44px rgba(0,0,0,0.55)", ...positionStyle }}
+                      className="fixed show-desktop-ep-menu is-anchored"
+                      style={{ left, width, ...positionStyle }}
                       onClick={(ev) => ev.stopPropagation()}
                     >
                       {isMarkAs ? (
                         <>
-                          <div style={{ fontSize: 10.5, color: t.textDim, fontWeight: 600, letterSpacing: "0.08em", padding: "4px 10px 6px" }}>MARK AS…</div>
-                          <button onClick={() => markNotWatched(seasonId, epNumber)} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
-                            <Icon name="eyeOff" size={15} color="#fff" />
-                            <span style={{ fontSize: 13, color: "#fff", fontWeight: 500 }}>Not Watched</span>
-                          </button>
-                          <button onClick={() => markSkipped(seasonId, epNumber)} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
-                            <Icon name="skip" size={15} color="#fff" />
-                            <span style={{ fontSize: 13, color: "#fff", fontWeight: 500 }}>Skipped</span>
-                          </button>
-                          <button onClick={() => markRewatched(seasonId, epNumber, watchCount)} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
-                            <div style={{ width: 18, height: 18, borderRadius: 5, border: "1.5px solid #fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                              <span style={{ fontSize: 9, fontWeight: 700, color: "#fff" }}>+1</span>
-                            </div>
-                            <span style={{ fontSize: 13, color: "#fff", fontWeight: 500 }}>Rewatched</span>
-                          </button>
-                          <button onClick={() => markWatchedOnce(seasonId, epNumber)} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
-                            <div style={{ width: 18, height: 18, borderRadius: 5, border: "1.5px solid #fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                              <span style={{ fontSize: 9, fontWeight: 700, color: "#fff" }}>1</span>
-                            </div>
-                            <span style={{ fontSize: 13, color: "#fff", fontWeight: 500 }}>Watched Once</span>
-                          </button>
+                          <div className="show-desktop-ep-menu-label">MARK AS…</div>
+                          <button type="button" onClick={() => { markNotWatched(seasonId, epNumber); setWatchNextMenuAnchor(null); }}><Icon name="eyeOff" size={15} color="#fff" /><span>Not Watched</span></button>
+                          <button type="button" onClick={() => { markSkipped(seasonId, epNumber); setWatchNextMenuAnchor(null); }}><Icon name="skip" size={15} color="#fff" /><span>Skipped</span></button>
+                          <button type="button" onClick={() => { markRewatched(seasonId, epNumber, watchCount); setWatchNextMenuAnchor(null); }}><span className="show-desktop-ep-menu-badge">+1</span><span>Rewatched</span></button>
+                          <button type="button" onClick={() => { markWatchedOnce(seasonId, epNumber); setWatchNextMenuAnchor(null); }}><span className="show-desktop-ep-menu-badge">1</span><span>Watched Once</span></button>
                         </>
                       ) : (
                         <>
-                          <div style={{ fontSize: 10.5, color: t.textDim, fontWeight: 600, letterSpacing: "0.08em", padding: "4px 10px 6px" }}>SET WATCH STATUS</div>
-                          <button onClick={() => markOnlyThis(seasonId, epNumber)} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
-                            <Icon name="checkCircle" size={18} color={accent} />
-                            <span style={{ fontSize: 13, color: "#fff", fontWeight: 500 }}>Only for this episode</span>
-                          </button>
-                          <button onClick={() => markWithPrevious(seasonId, epNumber)} className="w-full flex items-center gap-3 rounded-xl active:scale-95 transition" style={{ padding: "9px 10px" }}>
-                            <Icon name="collection" size={17} color="#fff" />
-                            <span style={{ fontSize: 13, color: "#fff", fontWeight: 500 }}>Previous episodes too</span>
-                          </button>
+                          <div className="show-desktop-ep-menu-label">SET WATCH STATUS</div>
+                          <button type="button" onClick={() => { markOnlyThis(seasonId, epNumber); setWatchNextMenuAnchor(null); }}><Icon name="checkCircle" size={18} color={accent} /><span>Only for this episode</span></button>
+                          <button type="button" onClick={() => { markWithPrevious(seasonId, epNumber); setWatchNextMenuAnchor(null); }}><Icon name="collection" size={17} color="#fff" /><span>Previous episodes too</span></button>
                         </>
                       )}
                     </div>
@@ -1358,6 +1795,156 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                 );
               })()}
 
+              {/* Desktop season grid — replaces the mobile accordion below. */}
+              <div className="show-desktop-episodes">
+                <div className="show-desktop-season-tabs" role="tablist" aria-label="Seasons">
+                  {seasons.map((season) => (
+                    <button
+                      key={season.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={(desktopSeason?.id ?? null) === season.id}
+                      className={`show-desktop-season-tab${(desktopSeason?.id ?? null) === season.id ? " is-active" : ""}`}
+                      onClick={() => { setDesktopSeasonId(season.id); setSkipSeasonMenuFor(null); }}
+                    >
+                      {season.title}
+                    </button>
+                  ))}
+                </div>
+
+                {desktopSeason && (
+                  <div className="show-desktop-ep-controls">
+                    <div className="relative">
+                      <button
+                        type="button"
+                        className={`show-desktop-mark-all${desktopSeasonAllWatched ? " is-done" : ""}`}
+                        onClick={() => {
+                          if (desktopSeasonAllWatched) { unmarkSeasonWatched(desktopSeason.id); return; }
+                          if (hasEarlierSeasonUnwatched(desktopSeason.id)) { setSkipSeasonMenuFor(desktopSeason.id); return; }
+                          markSeasonWatched(desktopSeason.id);
+                        }}
+                      >
+                        <span className="show-desktop-mark-all-check">
+                          <Icon
+                            name="check"
+                            size={13}
+                            color={desktopSeasonAllWatched ? "#111" : "rgba(255,255,255,0.55)"}
+                            strokeWidth={2}
+                          />
+                        </span>
+                        {desktopSeasonAllWatched ? "Season watched" : "Mark season as watched"}
+                      </button>
+                      {skipSeasonMenuFor === desktopSeason.id && (
+                        <div className="show-desktop-ep-menu show-desktop-mark-all-menu">
+                          <div className="show-desktop-ep-menu-label">SET WATCH STATUS</div>
+                          <button type="button" onClick={() => markSeasonWatched(desktopSeason.id)}><Icon name="checkCircle" size={18} color={accent} /><span>Mark season watched</span></button>
+                          <button type="button" onClick={() => markSeasonWithPreviousSeasons(desktopSeason.id)}><Icon name="collection" size={17} color="#fff" /><span>Previous seasons too</span></button>
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className={`show-desktop-mark-all${desktopSeasonRating ? " is-rated" : ""}`}
+                      onClick={() => openReviewSeason(desktopSeason.id)}
+                    >
+                      <span className="show-desktop-mark-all-check">
+                        <Icon
+                          name={desktopSeasonRating ? "star" : "starOutline"}
+                          size={13}
+                          color={desktopSeasonRating ? "#111" : "rgba(255,255,255,0.55)"}
+                          strokeWidth={2}
+                        />
+                      </span>
+                      {desktopSeasonScore ?? "Rate this season"}
+                    </button>
+                  </div>
+                )}
+
+                <div className="show-desktop-ep-grid">
+                  {desktopSeason && desktopEpisodes.map((e) => {
+                    const seasonId = desktopSeason.id;
+                    const epDate = formatEpisodeDate(e.date);
+                    const runtimeLabel = e.runtime ? `${e.runtime} min` : null;
+                    const menuKey = `${seasonId}-${e.n}`;
+                    const isWatched = !!e.watched && !e.skipped;
+                    const isRewatch = isWatched && (e.watchCount || 1) >= 2;
+                    return (
+                      <article key={menuKey} className="show-desktop-ep-card">
+                        <div className="show-desktop-ep-thumb-wrap">
+                          <div className="show-desktop-ep-thumb" onClick={() => setActiveEpisode({ seasonId, epNumber: e.n })}>
+                            <PosterArt className="show-desktop-ep-still" posterPath={e.posterPath} base={e.base} glow={e.glow} alt={e.title} flat tmdbSize="w780" sizes="(min-width: 900px) 33vw, 100vw" />
+                            {e.daysUntil != null && e.daysUntil !== Infinity && (
+                              <div className="show-desktop-ep-countdown">{e.daysUntil === 0 ? "Today" : e.daysUntil === 1 ? "Tomorrow" : `${e.daysUntil} days`}</div>
+                            )}
+                          </div>
+                          {e.daysUntil == null && (
+                            <div className="show-desktop-ep-check">
+                              <button
+                                type="button"
+                                aria-label={e.watched ? "Mark episode options" : "Mark watched"}
+                                onClick={(event) => onEpisodeCheckClick(seasonId, e, event)}
+                                className={`show-desktop-ep-check-btn${isWatched ? " is-watched" : ""}${e.watched || e.skipped ? " is-resolved" : ""}`}
+                                style={e.skipped ? { background: SKIPPED_GREY, borderColor: SKIPPED_GREY } : undefined}
+                              >
+                                {isRewatch
+                                  ? <span style={{ fontSize: 11, fontWeight: 700, color: "#111" }}>×{e.watchCount}</span>
+                                  : e.skipped
+                                  ? <Icon name="skip" size={13} color="#fff" />
+                                  : <Icon name="check" size={13} color={isWatched ? "#111" : "#fff"} strokeWidth={2.2} />}
+                              </button>
+                              {watchMenuFor === menuKey && !watchNextMenuAnchor && (e.watched || e.skipped) && (
+                                <div className="show-desktop-ep-menu" onClick={(event) => event.stopPropagation()}>
+                                  <div className="show-desktop-ep-menu-label">MARK AS…</div>
+                                  <button type="button" onClick={() => markNotWatched(seasonId, e.n)}><Icon name="eyeOff" size={15} color="#fff" /><span>Not Watched</span></button>
+                                  <button type="button" onClick={() => markSkipped(seasonId, e.n)}><Icon name="skip" size={15} color="#fff" /><span>Skipped</span></button>
+                                  <button type="button" onClick={() => markRewatched(seasonId, e.n, e.watchCount)}><span className="show-desktop-ep-menu-badge">+1</span><span>Rewatched</span></button>
+                                  <button type="button" onClick={() => desktopMarkWatchedOnce(seasonId, e.n)}><span className="show-desktop-ep-menu-badge">1</span><span>Watched Once</span></button>
+                                </div>
+                              )}
+                              {/* Skip-ahead menu removed from first-mark flow — first click
+                                  always marks watched + opens rating. Keep this slot unused
+                                  on desktop grid so an unwatched ep can never show a dropdown. */}
+                              {false && skipMenuFor === menuKey && !watchNextMenuAnchor && (
+                                <div className="show-desktop-ep-menu" onClick={(event) => event.stopPropagation()}>
+                                  <div className="show-desktop-ep-menu-label">SET WATCH STATUS</div>
+                                  <button type="button" onClick={() => desktopMarkOnlyThis(seasonId, e.n)}><Icon name="checkCircle" size={18} color={accent} /><span>Only for this episode</span></button>
+                                  <button type="button" onClick={() => desktopMarkWithPrevious(seasonId, e.n)}><Icon name="collection" size={17} color="#fff" /><span>Previous episodes too</span></button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <div className="show-desktop-ep-label">
+                          <span>
+                            {desktopSeason.id > 0
+                              ? tr("seasonEpisode", { s: desktopSeason.id, e: e.n })
+                              : `${desktopSeason.title}, Episode ${e.n}`}
+                          </span>
+                        </div>
+                        <h3 className="show-desktop-ep-title" onClick={() => setActiveEpisode({ seasonId, epNumber: e.n })}>
+                          <span>{e.title}</span>
+                          {e.watched && e.myRating ? (
+                            <span className="show-desktop-ep-user-rating">
+                              <Icon name="star" size={10} color={accent} />
+                              <span>{e.myRating.toFixed(1)}/5</span>
+                            </span>
+                          ) : null}
+                        </h3>
+                        {e.synopsis ? <p className="show-desktop-ep-synopsis">{e.synopsis}</p> : null}
+                        <div className="show-desktop-ep-meta">
+                          {runtimeLabel && <span>{runtimeLabel}</span>}
+                          {epDate && <span>{epDate}</span>}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+                {desktopEpisodes.length === 0 && (
+                  <div className="show-desktop-ep-empty">No episodes in this season yet.</div>
+                )}
+              </div>
+
+              <div className="show-mobile-episodes">
               {seasons.map((season) => {
                 // watchedCount: real watches only — feeds the "X/Y watched"
                 // text label below, which must keep meaning literally
@@ -1466,7 +2053,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                             <div onClick={() => setActiveEpisode({ seasonId: season.id, epNumber: e.n })} className="relative flex-shrink-0 cursor-pointer active:scale-95 transition" style={{ width: 106, height: 71, borderRadius: 10, overflow: "hidden" }}>
                               <PosterArt posterPath={e.posterPath} base={e.base} glow={e.glow} alt={e.title} />
                               {e.watched && e.myRating && (
-                                <div className="absolute flex items-center gap-1 rounded-full" style={{ left: 5, bottom: 5, padding: "2px 6px", background: "rgba(0,0,0,0.55)" }}>
+                                <div className="absolute flex items-center gap-1 rounded-full" style={{ right: 5, top: 5, padding: "2px 6px", background: "rgba(0,0,0,0.55)" }}>
                                   <Icon name="star" size={8} color={accent} />
                                   <span style={{ fontSize: 10, fontWeight: 600, color: "#fff" }}>{e.myRating.toFixed(1)}/5</span>
                                 </div>
@@ -1492,7 +2079,6 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                               <div className="relative flex-shrink-0">
                                 <button onClick={() => {
                                   if (e.watched || e.skipped) { setSkipMenuFor(null); setWatchMenuFor(`${season.id}-${e.n}`); return; }
-                                  if (hasEarlierUnwatched(season.id, e.n)) { setWatchMenuFor(null); setSkipMenuFor(`${season.id}-${e.n}`); return; }
                                   toggleEp(season.id, e.n);
                                 }} className="active:scale-90 transition flex items-center justify-center" style={{
                                   width: 32, height: 32, borderRadius: "50%",
@@ -1551,11 +2137,13 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                   </div>
                 );
               })}
+              </div>
             </div>
           )}
 
           {/* ---------- Cast tab ---------- */}
           {tab === "cast" && (
+            <div className="show-detail-panel-mobile-only">
             <SectionErrorBoundary>
               {cast.length === 0 ? (
                 <div className="mt-4" style={{ padding: "24px 0", textAlign: "center", fontSize: 12.5, color: t.textDim }}>No cast or crew listed yet.</div>
@@ -1574,11 +2162,12 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                 </>
               )}
             </SectionErrorBoundary>
+            </div>
           )}
 
           {/* ---------- Details tab ---------- */}
           {tab === "details" && (
-            <div className="mt-4 rounded-2xl overflow-hidden" style={{ background: t.cardFill, border: `1px solid ${t.cardBorder}` }}>
+            <div className="mt-4 rounded-2xl overflow-hidden show-detail-panel-mobile-only" style={{ background: t.cardFill, border: `1px solid ${t.cardBorder}` }}>
               {/* Ordered Show Status, Ratings, Genres, First Air Date,
                   Creator, Network, Where to Watch per explicit request.
                   Show Status is always rendered (unconditional), so it's
@@ -1677,12 +2266,43 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
             </div>
           )}
 
+          {/* ---------- Desktop Cast & Crew (between Episodes and Trailer) ---------- */}
+          <section className="show-desktop-cast">
+            <div className="show-desktop-cast-head">
+              <h2>Cast & Crew</h2>
+            </div>
+            {cast.length === 0 ? (
+              <div className="show-desktop-ep-empty">No cast or crew listed yet.</div>
+            ) : (
+              <div className="show-desktop-cast-row">
+                {cast.map((c) => (
+                  <button
+                    key={`${c.isCast ? "cast" : "crew"}-${c.id}`}
+                    type="button"
+                    className="show-desktop-cast-card"
+                    onClick={() => router.push(`/person/${c.id}`)}
+                  >
+                    <div className="show-desktop-cast-avatar" style={{ background: c.grad }}>
+                      {c.profilePath ? (
+                        <Image src={tmdbImage(c.profilePath, "w185")} alt="" fill sizes="88px" style={{ objectFit: "cover" }} />
+                      ) : (
+                        <span>{c.initials}</span>
+                      )}
+                    </div>
+                    <div className="show-desktop-cast-name">{c.name}</div>
+                    <div className="show-desktop-cast-role">{c.role}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+
           {/* trailer & more — every trailer TMDB has (not just one),
               plus bonus content (teasers/featurettes/behind-the-scenes/
               clips/bloopers), as a horizontal-scroll row instead of a
               single fixed thumbnail. */}
           <div className="mt-7">
-            <div style={{ fontSize: 15, fontWeight: 600, color: "#fff", marginBottom: 10 }}>Trailer & More</div>
+            <div className="show-detail-section-title">Trailer & More</div>
             {videos.length > 0 ? (
               <div className="flex gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
                 {videos.map((v) => (
@@ -1721,24 +2341,31 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
             )}
           </div>
 
-          {/* similar */}
-          <div className="mt-7 mb-2">
-            <div style={{ fontSize: 15, fontWeight: 600, color: "#fff", marginBottom: 10 }}>You May Also Like</div>
-            {resolvedSimilar.length === 0 ? (
-              <span style={{ fontSize: 12.5, color: t.textDim }}>No recommendations yet.</span>
-            ) : (
-              <div className="flex gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                {resolvedSimilar.map((s) => (
-                  <Link key={s.id} href={`/show/${s.id}`} className="flex-shrink-0 block" style={{ width: 100 }}>
-                    <div className="relative rounded-2xl overflow-hidden" style={{ width: 100, height: 140 }}>
-                      <PosterArt posterPath={s.posterPath} base={s.base} glow={s.glow} alt={s.title} />
-                      <MediaStatusBadge status={similarStatusMap[s.id]} />
-                    </div>
-                    <div style={{ fontSize: 11.5, color: "#fff", marginTop: 6, fontWeight: 500 }}>{s.title}</div>
-                  </Link>
-                ))}
-              </div>
-            )}
+          {/* similar — title + posters share the full-bleed edge padding
+              so the heading aligns with the first poster, not the Trailer
+              content column. */}
+          <div className="mt-7 mb-2 show-similar">
+            <div className="show-similar-bleed">
+              <div className="show-similar-title">You May Also Like</div>
+              {resolvedSimilar.length === 0 ? (
+                <span className="show-similar-empty" style={{ fontSize: 12.5, color: t.textDim }}>No recommendations yet.</span>
+              ) : (
+                <div className="show-similar-row">
+                  {resolvedSimilar.map((s) => (
+                    <Link key={s.id} href={`/show/${s.id}`} className="show-similar-card">
+                      <div className="show-similar-poster">
+                        <div className="show-similar-poster-art">
+                          <PosterArt posterPath={s.posterPath} base={s.base} glow={s.glow} alt={s.title} />
+                        </div>
+                        <MediaStatusBadge status={similarStatusMap[s.id]} />
+                      </div>
+                      <div className="show-similar-name">{s.title}</div>
+                      {s.year ? <div className="show-similar-year">{s.year}</div> : null}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -1768,6 +2395,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
             backdropPath={show.backdropPath}
             logoUrl={customLogoUrl || autoLogoUrl}
             showGenre={show.genres}
+            showSynopsis={show.descriptionFull}
             initialEditing={reviewInitialEditing}
             onClose={() => {
               if (reviewOpenedFromProfile) { router.back(); return; }
@@ -1812,6 +2440,9 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
             runtimeMin: ratingEpisode.ep.runtime,
             episodeAirDate: ratingEpisode.ep.date,
             posterPath: ratingEpisode.ep.posterPath,
+            synopsis: ratingEpisode.ep.synopsis,
+            base: ratingEpisode.ep.base,
+            glow: ratingEpisode.ep.glow,
             showId,
             season: ratingEpisode.seasonId,
             episode: ratingEpisode.ep.n,
@@ -1823,52 +2454,51 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
       )}
 
       {/* ---------- Episode quick-view overlay ----------
-          An in-context peek (synopsis, cast, watch toggle) without leaving
-          this screen — same shared EpisodeDetail component the standalone
-          /show/[id]/episode/[season]/[ep] page (Home's Continue Watching
-          hero opens that one) renders; this call site just wraps it in a
-          fixed overlay instead of a full page and wires the callbacks to
-          this component's own local season/episode state. */}
+          Mobile: full-screen sheet. Desktop: centered liquid-glass card
+          (tint + blur + soft radiance) — same EpisodeDetail content, different shell. */}
       {activeEpisode && (() => {
         const { seasonId, epNumber } = activeEpisode;
         const ep = seasons.find((s) => s.id === seasonId).episodes.find((e) => e.n === epNumber);
         return (
-          <div className="fixed inset-0 z-40" style={{ background: t.bg }}>
-            <EpisodeDetail
-              showTitle={displayTitle}
-              seasonNumber={seasonId}
-              episode={ep}
-              cast={cast}
-              hasEarlierUnwatched={hasEarlierUnwatched(seasonId, ep.n)}
-              onClose={() => setActiveEpisode(null)}
-              onCastClick={(id) => router.push(`/person/${id}`)}
-              onMarkWatched={markWatchedFromDetail}
-              onMarkOnlyThis={markOnlyThisFromDetail}
-              onMarkWithPrevious={markWithPreviousFromDetail}
-              onMarkNotWatched={() => markNotWatched(seasonId, ep.n)}
-              onMarkSkipped={() => markSkipped(seasonId, ep.n)}
-              onMarkRewatched={() => markRewatched(seasonId, ep.n, ep.watchCount)}
-              onMarkWatchedOnce={() => markWatchedOnce(seasonId, ep.n)}
-            />
+          <div
+            className="show-ep-detail-overlay fixed inset-0 z-40"
+            onClick={() => setActiveEpisode(null)}
+          >
+            <div className="show-ep-detail-panel" onClick={(event) => event.stopPropagation()}>
+              <EpisodeDetail
+                showTitle={displayTitle}
+                seasonNumber={seasonId}
+                episode={ep}
+                cast={cast}
+                hasEarlierUnwatched={hasEarlierUnwatched(seasonId, ep.n)}
+                onClose={() => setActiveEpisode(null)}
+                onCastClick={(id) => router.push(`/person/${id}`)}
+                onMarkWatched={markWatchedFromDetail}
+                onMarkOnlyThis={markOnlyThisFromDetail}
+                onMarkWithPrevious={markWithPreviousFromDetail}
+                onMarkNotWatched={() => markNotWatched(seasonId, ep.n)}
+                onMarkSkipped={() => markSkipped(seasonId, ep.n)}
+                onMarkRewatched={() => markRewatched(seasonId, ep.n, ep.watchCount)}
+                onMarkWatchedOnce={() => markWatchedOnce(seasonId, ep.n)}
+              />
+            </div>
           </div>
         );
       })()}
 
-      {/* ---------- Add to a Collection — bottom sheet ---------- */}
+      {/* ---------- Add to a Collection — mobile bottom sheet ---------- */}
       {collectionSheetOpen && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setCollectionSheetOpen(false)}>
-          <div className="w-full rounded-t-3xl flex flex-col" style={{ maxHeight: "76%", background: "#161210", border: `1px solid ${t.glassBorder}`, borderBottom: "none", boxShadow: "0 -20px 60px rgba(0,0,0,0.6)" }} onClick={(ev) => ev.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center show-collection-sheet" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setCollectionSheetOpen(false)}>
+          <div className="w-full rounded-t-3xl flex flex-col relative" style={{ maxHeight: "76%", background: "#161210", border: `1px solid ${t.glassBorder}`, borderBottom: "none", boxShadow: "0 -20px 60px rgba(0,0,0,0.6)" }} onClick={(ev) => ev.stopPropagation()}>
             <div className="flex justify-center flex-shrink-0" style={{ paddingTop: 10 }}>
               <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.25)" }} />
             </div>
             <div className="flex items-center justify-between px-5 flex-shrink-0" style={{ paddingTop: 14, paddingBottom: 4 }}>
-              <button onClick={() => setCollectionSheetOpen(false)} className="rounded-full flex items-center justify-center active:scale-90 transition" style={{ width: 36, height: 36, background: accent }}>
-                <Icon name="x" size={16} color="#1a1108" strokeWidth={2.6} />
+              <button onClick={() => setCollectionSheetOpen(false)} className="rounded-full flex items-center justify-center active:scale-90 transition" style={{ width: 36, height: 36, background: "rgba(255,255,255,0.1)" }}>
+                <Icon name="x" size={16} color="#fff" strokeWidth={2.6} />
               </button>
               <span style={{ fontSize: 19, fontWeight: 800, color: "#fff" }}>Collections</span>
-              <button onClick={() => setCollectionSheetOpen(false)} className="rounded-full flex items-center justify-center active:scale-90 transition" style={{ width: 36, height: 36, background: accent }}>
-                <Icon name="check" size={17} color="#1a1108" strokeWidth={2.8} />
-              </button>
+              <div style={{ width: 36 }} />
             </div>
 
             <div className="overflow-y-auto" style={{ padding: "16px 20px", scrollbarWidth: "none" }}>
@@ -1879,25 +2509,98 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                   <CollectionPickerCard key={c.id} collection={c} accent={accent} onClick={() => toggleCollection(c.id)} />
                 ))}
               </div>
-              <div style={{ height: 76 }} />
+              <div style={{ height: 20 }} />
             </div>
 
-            <button onClick={() => setNewCollectionOpen(true)} className="absolute rounded-full flex items-center justify-center active:scale-90 transition" style={{ bottom: 20, right: 20, width: 52, height: 52, background: accent, boxShadow: "0 10px 24px rgba(232,162,76,0.4)" }}>
-              <Icon name="plus" size={22} color="#1a1108" strokeWidth={2.4} />
-            </button>
+            <div className="flex items-center justify-between gap-3 flex-shrink-0" style={{ padding: "12px 20px calc(16px + env(safe-area-inset-bottom))", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+              <button
+                type="button"
+                onClick={() => setNewCollectionOpen(true)}
+                className="flex items-center gap-2 active:opacity-70 transition"
+                style={{ padding: "10px 4px", color: "#fff", fontSize: 14, fontWeight: 600 }}
+              >
+                <Icon name="plus" size={15} color="#fff" strokeWidth={2.2} />
+                Create new
+              </button>
+              <button
+                type="button"
+                disabled={!collectionConfirmActive}
+                onClick={() => setCollectionSheetOpen(false)}
+                className="rounded-full active:scale-95 transition"
+                style={{
+                  minWidth: 108,
+                  padding: "11px 18px",
+                  background: collectionConfirmActive ? "#fff" : "rgba(255,255,255,0.1)",
+                }}
+              >
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: collectionConfirmActive ? "#111" : "rgba(255,255,255,0.42)" }}>Confirm</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* create a new collection, adds the show to it immediately */}
+      {/* Desktop — Add to Collection (centered liquid-glass modal) */}
+      {collectionAllOpen && (
+        <div className="show-collection-all-scrim" onClick={() => setCollectionAllOpen(false)}>
+          <div className="show-collection-all-modal" role="dialog" aria-label="Add to a collection" onClick={(ev) => ev.stopPropagation()}>
+            <div className="show-collection-all-head">
+              <div>
+                <div className="show-collection-all-title">Collections</div>
+                <div className="show-collection-all-sub">Add this show to one or more collections</div>
+              </div>
+              <button type="button" className="show-collection-all-close" aria-label="Close" onClick={() => setCollectionAllOpen(false)}>
+                <Icon name="x" size={16} color="#fff" strokeWidth={2.2} />
+              </button>
+            </div>
+            <div className="show-collection-all-list">
+              {collections.length === 0 ? (
+                <div className="show-collection-empty">No collections yet.</div>
+              ) : (
+                collections.map((c) => (
+                  <CollectionQuickRow key={c.id} collection={c} onClick={() => toggleCollection(c.id)} />
+                ))
+              )}
+            </div>
+            <div className="show-collection-all-footer">
+              <button
+                type="button"
+                className="show-collection-create-new"
+                onClick={() => setNewCollectionOpen(true)}
+              >
+                <Icon name="plus" size={14} color="#fff" strokeWidth={2.2} />
+                Create new
+              </button>
+              <button
+                type="button"
+                className={`show-collection-confirm${collectionConfirmActive ? " is-active" : ""}`}
+                disabled={!collectionConfirmActive}
+                onClick={() => setCollectionAllOpen(false)}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* create a new collection, adds the show to it immediately — sits
+          above the Collections menu without collapsing it. */}
       {newCollectionOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-8" style={{ background: "rgba(0,0,0,0.65)" }} onClick={() => setNewCollectionOpen(false)}>
-          <div className="w-full rounded-3xl" style={{ padding: 22, background: "#1a1512", border: `1px solid ${t.glassBorder}`, boxShadow: "0 30px 60px rgba(0,0,0,0.6)" }} onClick={(ev) => ev.stopPropagation()}>
+        <div className="fixed inset-0 flex items-center justify-center px-8 show-collection-create-scrim" style={{ background: "rgba(0,0,0,0.45)", zIndex: 100 }} onClick={() => { setNewCollectionOpen(false); setNewCollectionName(""); }}>
+          <div className="w-full rounded-3xl show-collection-create-modal" style={{ padding: 22, background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.16)", backdropFilter: "blur(40px) saturate(140%)", WebkitBackdropFilter: "blur(40px) saturate(140%)", boxShadow: "0 30px 60px rgba(0,0,0,0.55)", maxWidth: 420, position: "relative", zIndex: 110 }} onClick={(ev) => ev.stopPropagation()}>
             <div style={{ fontSize: 17, fontWeight: 700, color: "#fff", marginBottom: 14 }}>New Collection</div>
             <input autoFocus value={newCollectionName} onChange={(ev) => setNewCollectionName(ev.target.value)} placeholder="Collection name" className="w-full rounded-2xl outline-none" style={{ padding: "13px 16px", background: t.cardFill, border: `1px solid ${t.cardBorder}`, fontSize: 14.5, color: "#fff" }} />
             <div className="flex gap-2.5" style={{ marginTop: 18 }}>
               <button onClick={() => { setNewCollectionOpen(false); setNewCollectionName(""); }} className="flex-1 rounded-full active:scale-95 transition" style={{ padding: 12, background: t.cardFill, border: `1px solid ${t.glassBorder}` }}><span style={{ fontSize: 13.5, fontWeight: 600, color: "#fff" }}>Cancel</span></button>
-              <button onClick={createCollectionAndAdd} disabled={!newCollectionName.trim()} className="flex-1 rounded-full active:scale-95 transition" style={{ padding: 12, background: newCollectionName.trim() ? accent : t.cardFill }}><span style={{ fontSize: 13.5, fontWeight: 700, color: newCollectionName.trim() ? "#1a1108" : t.textDim }}>Create & Add</span></button>
+              <button
+                onClick={createCollectionAndAdd}
+                disabled={!newCollectionName.trim()}
+                className="flex-1 rounded-full active:scale-95 transition"
+                style={{ padding: 12, background: newCollectionName.trim() ? "#fff" : "rgba(255,255,255,0.1)" }}
+              >
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: newCollectionName.trim() ? "#111" : "rgba(255,255,255,0.42)" }}>Create & Add</span>
+              </button>
             </div>
           </div>
         </div>

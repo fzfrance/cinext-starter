@@ -11,8 +11,7 @@ import { tmdbImage } from "@/lib/tmdb";
 // the front cover has no separate "View show" button, since tapping the
 // disc is the intuitive action (see CaseOverlay's onClick, which navigates
 // to the real show detail route).
-export default function Disc({ show }) {
-  const size = 178;
+export default function Disc({ show, size = 178 }) {
   const posterSrc = tmdbImage(show.posterPath, "w300");
   return (
     // No forced compositing layer here (a prior translateZ(0)/will-change

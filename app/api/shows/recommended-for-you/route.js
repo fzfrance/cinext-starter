@@ -67,8 +67,8 @@ export async function POST(request) {
   const addResults = (results, mediaType) => {
     for (const raw of results ?? []) {
       const item = mediaType === "movie"
-        ? { id: raw.id, mediaType, name: raw.title, originalName: raw.original_title ?? null, originalLanguage: raw.original_language ?? null, genreIds: raw.genre_ids ?? [], dateStr: raw.release_date, voteAverage: raw.vote_average, posterPath: raw.poster_path, backdropPath: raw.backdrop_path, _excluded: isExcludedMovie(raw) }
-        : { id: raw.id, mediaType, name: raw.name, originalName: raw.original_name ?? null, originalLanguage: raw.original_language ?? null, genreIds: raw.genre_ids ?? [], dateStr: raw.first_air_date, voteAverage: raw.vote_average, posterPath: raw.poster_path, backdropPath: raw.backdrop_path, _excluded: isExcludedShow(raw) };
+        ? { id: raw.id, mediaType, name: raw.title, originalName: raw.original_title ?? null, originalLanguage: raw.original_language ?? null, genreIds: raw.genre_ids ?? [], dateStr: raw.release_date, voteAverage: raw.vote_average, posterPath: raw.poster_path, backdropPath: raw.backdrop_path, overview: raw.overview ?? "", _excluded: isExcludedMovie(raw) }
+        : { id: raw.id, mediaType, name: raw.name, originalName: raw.original_name ?? null, originalLanguage: raw.original_language ?? null, genreIds: raw.genre_ids ?? [], dateStr: raw.first_air_date, voteAverage: raw.vote_average, posterPath: raw.poster_path, backdropPath: raw.backdrop_path, overview: raw.overview ?? "", _excluded: isExcludedShow(raw) };
       const key = mediaKey(item);
       if (excludeSet.has(key) || byKey.has(key) || item._excluded) continue;
       byKey.set(key, item);
@@ -123,6 +123,8 @@ export async function POST(request) {
       genre: itemGenres[0] ?? "",
       meta: [...itemGenres, year].filter(Boolean).join(" · "),
       date: item.dateStr ?? "",
+      year: year ?? "",
+      overview: item.overview ?? "",
       rating: item.voteAverage ? item.voteAverage.toFixed(1) : "",
       posterPath: item.posterPath,
       backdropPath: item.backdropPath ?? item.posterPath,

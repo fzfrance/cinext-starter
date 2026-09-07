@@ -99,6 +99,7 @@ export default function PosterQuickStatusMenu({ show, userId, currentStatus = nu
           direction={direction}
           removeLabel={removeLabel}
           options={options}
+          anchored
           style={{ opacity: busy ? 0.5 : 1, pointerEvents: busy ? "none" : "auto" }}
         />
       </div>

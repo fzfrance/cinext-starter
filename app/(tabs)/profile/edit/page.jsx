@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import Icon from "@/components/ui/Icon";
 import Grain from "@/components/ui/Grain";
 import GlassCircle from "@/components/ui/GlassCircle";
+import { useIsDesktopSettings } from "@/components/ui/SettingsModal";
+import { useDesktopModals } from "@/lib/desktop-modals-context";
 import { useAuth } from "@/lib/auth-context";
 import { getProfile, upsertProfile, uploadProfileImage, deleteProfileImage, validateDisplayName, validateBio, validateHandle, validateImageFile, MAX_DISPLAY_NAME_LENGTH, MAX_BIO_LENGTH, MAX_HANDLE_LENGTH } from "@/lib/profile";
 import { getUserShows } from "@/lib/userShows";
@@ -48,12 +50,15 @@ function SectionLabel({ children }) {
 // wrapper around the trigger button); the invisible full-screen backdrop
 // is just there to close it on an outside tap, sitting one z-level below.
 function AnchoredMenu({ align = "center", options, onClose }) {
+  // High z so the menu still wins when Edit Profile is inside the
+  // desktop floating scrim (z-index 200).
   return (
     <>
-      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <div className="fixed inset-0" style={{ zIndex: 220 }} onClick={onClose} />
       <div
-        className="absolute z-50 rounded-2xl"
+        className="absolute rounded-2xl"
         style={{
+          zIndex: 230,
           top: "calc(100% + 8px)",
           ...(align === "center" ? { left: "50%", transform: "translateX(-50%)" } : align === "left" ? { left: 0 } : { right: 0 }),
           width: 230,
@@ -76,14 +81,66 @@ function AnchoredMenu({ align = "center", options, onClose }) {
   );
 }
 
-// Full-screen gallery for picking real backdrop stills or cast headshots
-// pooled from the caller's own library shows (app/api/profile/library-media) —
-// the "Choose Artwork" / "Choose Character" flows. Plain local state, not a
-// URL-param overlay (ShowDetailClient's picker learned that lesson the hard
-// way — see components/ImagePickerScreen.jsx): this is reached from a
-// simple tap, not deep-linkable, so there's nothing history needs to know.
-function LibraryMediaPicker({ type, title, items, loading, onSelect, onClose }) {
+// Full-screen (mobile) / nested floating (desktop) gallery for picking
+// real backdrop stills or cast headshots pooled from the caller's own
+// library shows (app/api/profile/library-media).
+function LibraryMediaPicker({ type, title, items, loading, onSelect, onClose, floating = false }) {
   const isCharacter = type === "character";
+  const body = (
+    <>
+      {loading ? (
+        <div className="edit-profile-picker-empty">Loading your library&apos;s art…</div>
+      ) : items.length === 0 ? (
+        <div className="edit-profile-picker-empty">
+          {isCharacter
+            ? "No characters found for the shows in your library yet."
+            : "No artwork found for the shows in your library yet."}
+        </div>
+      ) : isCharacter ? (
+        <div className={floating ? "edit-profile-picker-chars" : "px-6 grid grid-cols-3 gap-x-3 gap-y-6"} style={floating ? undefined : { marginTop: 22 }}>
+          {items.map((c, i) => (
+            <button key={`${c.personId}-${i}`} onClick={() => onSelect(tmdbImage(c.profilePath, "w500"))} className="flex flex-col items-center text-center active:scale-95 transition">
+              <div className="rounded-full overflow-hidden" style={{ width: floating ? 64 : 76, height: floating ? 64 : 76, boxShadow: "0 6px 16px rgba(0,0,0,0.45)" }}>
+                {/* eslint-disable-next-line @next/next/no-img-element -- TMDB path, not a Storage URL */}
+                <img src={tmdbImage(c.profilePath, "w300")} alt="" className="w-full h-full" style={{ objectFit: "cover" }} />
+              </div>
+              <div className="mt-2 leading-tight" style={{ fontSize: floating ? 11 : 11.5, fontWeight: 600, color: "#fff" }}>{c.character}</div>
+              <div className="leading-tight" style={{ fontSize: 10, color: t.textDim, marginTop: 1 }}>{c.showTitle}</div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className={floating ? "edit-profile-picker-art" : "px-6 grid grid-cols-2 gap-3"} style={floating ? undefined : { marginTop: 22 }}>
+          {items.map((b, i) => (
+            <button key={`${b.showId}-${i}`} onClick={() => onSelect(tmdbImage(b.filePath, "w780"))} className="relative rounded-xl overflow-hidden active:scale-95 transition text-left" style={{ aspectRatio: "16 / 9", boxShadow: "0 6px 16px rgba(0,0,0,0.45)" }}>
+              {/* eslint-disable-next-line @next/next/no-img-element -- TMDB path, not a Storage URL */}
+              <img src={tmdbImage(b.filePath, "w500")} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} />
+              <div className="absolute inset-0 flex items-end p-2" style={{ background: "linear-gradient(0deg, rgba(0,0,0,0.65) 0%, transparent 55%)" }}>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: "#fff" }}>{b.showTitle}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+
+  if (floating) {
+    return (
+      <div className="edit-profile-picker-layer" role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()}>
+        <div className="edit-profile-picker-card">
+          <div className="edit-profile-picker-head">
+            <div className="settings-modal-title">{title}</div>
+            <button type="button" className="settings-modal-close" onClick={onClose} aria-label="Close">
+              <Icon name="x" size={16} />
+            </button>
+          </div>
+          <div className="edit-profile-picker-body">{body}</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-50" style={{ background: t.bg }}>
       <div className="h-full overflow-y-auto pb-24" style={{ scrollbarWidth: "none" }}>
@@ -93,46 +150,7 @@ function LibraryMediaPicker({ type, title, items, loading, onSelect, onClose }) 
             {title}
           </div>
         </div>
-
-        {loading ? (
-          <div style={{ padding: "60px 0", textAlign: "center", fontSize: 13, color: t.textDim }}>Loading your library's art…</div>
-        ) : items.length === 0 ? (
-          <div style={{ padding: "60px 24px", textAlign: "center", fontSize: 13, color: t.textDim }}>
-            {isCharacter
-              ? "No characters found for the shows in your library yet."
-              : "No artwork found for the shows in your library yet."}
-          </div>
-        ) : isCharacter ? (
-          <div className="px-6 grid grid-cols-3 gap-x-3 gap-y-6" style={{ marginTop: 22 }}>
-            {/* Captioned by character, not actor — c.character (e.g.
-                "Oliver Queen"), never c.name (the real person). The photo
-                itself is still TMDB's cast headshot (there's no separate
-                stylized character-art asset in its API), but the label is
-                what actually says "this is a character pick." */}
-            {items.map((c, i) => (
-              <button key={`${c.personId}-${i}`} onClick={() => onSelect(tmdbImage(c.profilePath, "w500"))} className="flex flex-col items-center text-center active:scale-95 transition">
-                <div className="rounded-full overflow-hidden" style={{ width: 76, height: 76, boxShadow: "0 6px 16px rgba(0,0,0,0.45)" }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element -- TMDB path, not a Storage URL */}
-                  <img src={tmdbImage(c.profilePath, "w300")} alt="" className="w-full h-full" style={{ objectFit: "cover" }} />
-                </div>
-                <div className="mt-2 leading-tight" style={{ fontSize: 11.5, fontWeight: 600, color: "#fff" }}>{c.character}</div>
-                <div className="leading-tight" style={{ fontSize: 10, color: t.textDim, marginTop: 1 }}>{c.showTitle}</div>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="px-6 grid grid-cols-2 gap-3" style={{ marginTop: 22 }}>
-            {items.map((b, i) => (
-              <button key={`${b.showId}-${i}`} onClick={() => onSelect(tmdbImage(b.filePath, "w780"))} className="relative rounded-xl overflow-hidden active:scale-95 transition text-left" style={{ aspectRatio: "16 / 9", boxShadow: "0 6px 16px rgba(0,0,0,0.45)" }}>
-                {/* eslint-disable-next-line @next/next/no-img-element -- TMDB path, not a Storage URL */}
-                <img src={tmdbImage(b.filePath, "w500")} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} />
-                <div className="absolute inset-0 flex items-end p-2" style={{ background: "linear-gradient(0deg, rgba(0,0,0,0.65) 0%, transparent 55%)" }}>
-                  <span style={{ fontSize: 11.5, fontWeight: 700, color: "#fff" }}>{b.showTitle}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
+        {body}
       </div>
     </div>
   );
@@ -141,6 +159,20 @@ function LibraryMediaPicker({ type, title, items, loading, onSelect, onClose }) 
 export default function Page() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const isDesktopMq = useIsDesktopSettings();
+  const { openEditProfile } = useDesktopModals();
+  // Avoid SSR/client mismatch — desktop floating UI only after mount.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  const isDesktop = mounted && isDesktopMq;
+
+  // Desktop: open floating Edit Profile over the current page (via
+  // DesktopModalsProvider) and leave /profile so the screen behind stays.
+  useEffect(() => {
+    if (!isDesktop) return;
+    openEditProfile();
+    router.replace("/profile");
+  }, [isDesktop, openEditProfile, router]);
 
   const [displayName, setDisplayName] = useState("");
   const [editingName, setEditingName] = useState(false);
@@ -200,6 +232,11 @@ export default function Page() {
   const [artworkPickerOpen, setArtworkPickerOpen] = useState(false);
   const [libraryMedia, setLibraryMedia] = useState(null);
   const [libraryMediaLoading, setLibraryMediaLoading] = useState(false);
+
+  const close = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) router.back();
+    else router.push("/profile");
+  };
 
   const ensureLibraryMedia = async () => {
     if (libraryMedia || libraryMediaLoading) return;
@@ -372,6 +409,49 @@ export default function Page() {
     }
   };
 
+  const overlays = (
+    <>
+      <input ref={backgroundInputRef} type="file" accept="image/*" onChange={pickBackground} className="hidden" />
+      <input ref={avatarInputRef} type="file" accept="image/*" onChange={pickAvatar} className="hidden" />
+
+      {characterPickerOpen && (
+        <LibraryMediaPicker
+          type="character"
+          title="Choose a Character"
+          items={libraryMedia?.characters ?? []}
+          loading={libraryMediaLoading}
+          onSelect={chooseCharacter}
+          onClose={() => setCharacterPickerOpen(false)}
+          floating={isDesktop}
+        />
+      )}
+
+      {artworkPickerOpen && (
+        <LibraryMediaPicker
+          type="artwork"
+          title="Choose Show Artwork"
+          items={libraryMedia?.backdrops ?? []}
+          loading={libraryMediaLoading}
+          onSelect={chooseArtwork}
+          onClose={() => setArtworkPickerOpen(false)}
+          floating={isDesktop}
+        />
+      )}
+
+      {cropperFile && cropTarget === "avatar" && (
+        <ImageCropper file={cropperFile} onCancel={() => setCropperFile(null)} onConfirm={cropAvatar} />
+      )}
+      {cropperFile && cropTarget === "background" && (
+        // aspectRatio 2 — matches the ~390x190 on-page banner (both here
+        // and on Profile itself) closely enough that object-fit: cover
+        // display never has to crop meaningfully further than what the
+        // user already framed here. rect, not circle — a wide banner, not
+        // an avatar.
+        <ImageCropper file={cropperFile} onCancel={() => setCropperFile(null)} onConfirm={cropBackground} aspectRatio={2} shape="rect" outputFilename="background.jpg" />
+      )}
+    </>
+  );
+
   // Not signed in — same "sign in first" pattern Profile itself uses.
   if (!authLoading && !user) {
     return (
@@ -384,6 +464,9 @@ export default function Page() {
       </div>
     );
   }
+
+  // Desktop hands off to DesktopModalsProvider — nothing to render here.
+  if (isDesktop) return null;
 
   // Still resolving auth, or the profile fetch hasn't finished yet — a
   // real loading state, not a form full of blank fields pretending to be
@@ -476,7 +559,6 @@ export default function Page() {
           </div>
         </div>
       </div>
-      <input ref={backgroundInputRef} type="file" accept="image/*" onChange={pickBackground} className="hidden" />
 
       {/* Same stacked structure as the finished Profile page (avatar on
           top, name/@handle/bio directly under it, not beside it) — this
@@ -520,7 +602,6 @@ export default function Page() {
             />
           )}
         </div>
-        <input ref={avatarInputRef} type="file" accept="image/*" onChange={pickAvatar} className="hidden" />
         <div className="text-left" style={{ marginTop: 10, minWidth: 0, pointerEvents: "auto" }}>
           {/* Plain text + pencil by default; tapping the pencil swaps in
               a real input, auto-focused, right in place. */}
@@ -597,39 +678,7 @@ export default function Page() {
         </button>
       </div>
 
-      {characterPickerOpen && (
-        <LibraryMediaPicker
-          type="character"
-          title="Choose a Character"
-          items={libraryMedia?.characters ?? []}
-          loading={libraryMediaLoading}
-          onSelect={chooseCharacter}
-          onClose={() => setCharacterPickerOpen(false)}
-        />
-      )}
-
-      {artworkPickerOpen && (
-        <LibraryMediaPicker
-          type="artwork"
-          title="Choose Show Artwork"
-          items={libraryMedia?.backdrops ?? []}
-          loading={libraryMediaLoading}
-          onSelect={chooseArtwork}
-          onClose={() => setArtworkPickerOpen(false)}
-        />
-      )}
-
-      {cropperFile && cropTarget === "avatar" && (
-        <ImageCropper file={cropperFile} onCancel={() => setCropperFile(null)} onConfirm={cropAvatar} />
-      )}
-      {cropperFile && cropTarget === "background" && (
-        // aspectRatio 2 — matches the ~390x190 on-page banner (both here
-        // and on Profile itself) closely enough that object-fit: cover
-        // display never has to crop meaningfully further than what the
-        // user already framed here. rect, not circle — a wide banner, not
-        // an avatar.
-        <ImageCropper file={cropperFile} onCancel={() => setCropperFile(null)} onConfirm={cropBackground} aspectRatio={2} shape="rect" outputFilename="background.jpg" />
-      )}
+      {overlays}
     </>
   );
 }

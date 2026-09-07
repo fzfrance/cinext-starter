@@ -39,18 +39,19 @@ export default function GenreTag({
   return (
     <Tag
       onClick={onClick}
-      className="flex-shrink-0 flex items-center gap-2.5 rounded-full active:scale-95 transition"
+      className="flex-shrink-0 flex items-center rounded-full active:scale-95 transition"
       style={{
-        padding: "10px 16px",
+        gap: 11,
+        padding: "11px 17px",
         background: selected ? `${color}14` : t.cardFill,
         border: `1px solid ${selected ? color : t.cardBorder}`,
       }}
     >
       <div
         style={{
-          width: 22,
-          height: 22,
-          borderRadius: 7,
+          width: 24,
+          height: 24,
+          borderRadius: 8,
           background: swatchBg(color),
           display: "flex",
           alignItems: "center",
@@ -58,9 +59,9 @@ export default function GenreTag({
           flexShrink: 0,
         }}
       >
-        {emoji ? <span style={{ fontSize: 12, lineHeight: 1 }}>{emoji}</span> : <Icon name={icon} size={11} color={color} />}
+        {emoji ? <span style={{ fontSize: 13, lineHeight: 1 }}>{emoji}</span> : <Icon name={icon} size={12} color={color} />}
       </div>
-      <span style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>
+      <span style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>
         {name}
       </span>
     </Tag>
@@ -78,10 +79,10 @@ export default function GenreTag({
  *   <GenreTagRow genres={data.topGenres} />
  *   <GenreTagRow genres={allGenres} selected={activeGenre} onSelect={setActiveGenre} />
  */
-export function GenreTagRow({ genres, selected, onSelect }) {
+export function GenreTagRow({ genres, selected, onSelect, className = "" }) {
   return (
     <div
-      className="flex gap-2.5 overflow-x-auto px-6"
+      className={`flex gap-2.5 overflow-x-auto px-6${className ? ` ${className}` : ""}`}
       style={{ scrollbarWidth: "none" }}
     >
       {genres.map((g) => (
