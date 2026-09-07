@@ -293,19 +293,18 @@ export default function LibraryDesktop({
           const url = nextBySide[side];
           if (!url) {
             for (const layer of prev.filter((l) => l.side === side)) {
-              kept.push({ ...layer, visible: false });
+              kept.push({ ...layer, visible: false, pendingExit: false });
             }
             continue;
           }
-          const sameVisible = prev.find((l) => l.side === side && l.url === url && l.visible);
+          const sameVisible = prev.find((l) => l.side === side && l.url === url && l.visible && !l.pendingExit);
           if (sameVisible) {
             kept.push(sameVisible);
             continue;
           }
-          for (const layer of prev.filter((l) => l.side === side)) {
-            // Stay lit while the incoming layer ramps up (staggered exit below).
-            kept.push({ ...layer, visible: true, pendingExit: true });
-          }
+          // Cap: one outgoing + one incoming per side (stops tear from stacked blurs).
+          const outgoing = prev.find((l) => l.side === side && l.visible);
+          if (outgoing) kept.push({ ...outgoing, visible: true, pendingExit: true });
           kept.push({
             side,
             url,
@@ -314,7 +313,7 @@ export default function LibraryDesktop({
             pendingExit: false,
           });
         }
-        return kept.slice(-12);
+        return kept;
       });
 
       const showRaf = window.requestAnimationFrame(() => {
@@ -371,40 +370,53 @@ export default function LibraryDesktop({
     const pickAmbient = () => {
       const nodes = root.querySelectorAll("[data-lib-ambient]");
       if (!nodes.length) return;
-      const focusY = window.innerHeight * 0.42;
+      const focusY = window.innerHeight * 0.4;
       const candidates = [];
       nodes.forEach((node) => {
         const path = node.getAttribute("data-lib-ambient");
         if (!path) return;
         const rect = node.getBoundingClientRect();
-        if (rect.bottom < 40 || rect.top > window.innerHeight - 20) return;
-        const mid = (rect.top + rect.bottom) / 2;
-        candidates.push({ path, left: rect.left, dist: Math.abs(mid - focusY) });
+        if (rect.bottom < 48 || rect.top > window.innerHeight - 24) return;
+        const midY = (rect.top + rect.bottom) / 2;
+        candidates.push({
+          path,
+          left: rect.left,
+          midY,
+          // Bucket posters into visual rows so Watch Next isn't mixed with
+          // the genre shelf beneath it when both are on screen.
+          row: Math.round(rect.top / 56),
+          dist: Math.abs(midY - focusY),
+        });
       });
       if (!candidates.length) return;
-      candidates.sort((a, b) => a.dist - b.dist);
-      // Wider vertical band = more posters contribute, softer scroll handoff.
-      const bandDist = candidates[0].dist;
-      const band = candidates
-        .filter((c) => c.dist <= bandDist + 220)
+
+      // Prefer the single closest row to the focus line, then map L/M/R from
+      // that row's screen order — matches what the eye sees on the page.
+      const rowScores = new Map();
+      for (const c of candidates) {
+        const prev = rowScores.get(c.row);
+        if (!prev || c.dist < prev.dist) rowScores.set(c.row, c);
+      }
+      let bestRow = null;
+      let bestDist = Infinity;
+      for (const c of rowScores.values()) {
+        if (c.dist < bestDist) {
+          bestDist = c.dist;
+          bestRow = c.row;
+        }
+      }
+      const row = candidates
+        .filter((c) => c.row === bestRow)
         .sort((a, b) => a.left - b.left);
-      const next = pathsToAmbient(band.map((c) => c.path));
+      if (!row.length) return;
+
+      const next = pathsToAmbient(row.map((c) => c.path));
       const prev = lastAmbientRef.current;
-      // Hysteresis: ignore tiny swaps so the wash eases instead of thrashing.
       if (
         prev.left === next.left &&
         prev.mid === next.mid &&
         prev.right === next.right
       ) {
-        return;
-      }
-      const changedSides =
-        (prev.left !== next.left ? 1 : 0) +
-        (prev.mid !== next.mid ? 1 : 0) +
-        (prev.right !== next.right ? 1 : 0);
-      // Prefer waiting until at least two sides want to move, unless the
-      // nearest poster is clearly a new focus (deep into the next row).
-      if (changedSides < 2 && candidates[0].dist > 48 && prev.left) {
         return;
       }
       lastAmbientRef.current = next;

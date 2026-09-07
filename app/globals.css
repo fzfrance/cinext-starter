@@ -385,8 +385,10 @@ body {
    desktop behavior stay unchanged. The min-height guard excludes phones in
    landscape even when their CSS viewport happens to be wider than 700px. */
 
-/* Highlights — mobile keeps the existing stacked PWA layout. Subtitle is
-   desktop-only. Hours + stats stack first; personality + genres follow. */
+/* Highlights — MOBILE/PWA DEFAULT (phones & tablets <900px).
+   Mobile Highlights JSX is a separate tree (pre-desktop inline layout).
+   Desktop glass/ambient/grid styles live ONLY under @media (min-width: 900px).
+   Do not put desktop layout in this unscoped block — it will paint on mobile. */
 .highlights-page {
   position: relative;
   isolation: isolate;
@@ -395,471 +397,9 @@ body {
 }
 .highlights-toolbar { display: contents; }
 .highlights-header-sub { display: none; }
-.highlights-glow {
-  display: none;
-}
-.highlights-ambient {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  overflow: hidden;
-  background: #050506;
-}
-.highlights-ambient-art {
-  position: absolute;
-  inset: -40% -20%;
-  background-size: cover;
-  background-position: center 30%;
-  background-repeat: no-repeat;
-  filter: blur(72px) saturate(1.4) brightness(0.78);
-  transform: scale(1.28);
-  opacity: 0;
-  transition: opacity 800ms ease;
-}
-.highlights-ambient-art.is-visible {
-  opacity: 0.72;
-}
-.highlights-ambient-art.is-exit {
-  opacity: 0;
-}
-.highlights-ambient-veil {
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(180deg, rgba(5,5,6,0.22) 0%, rgba(5,5,6,0.38) 32%, rgba(5,5,6,0.78) 72%, #050506 100%),
-    linear-gradient(90deg, rgba(5,5,6,0.32) 0%, transparent 28%, transparent 72%, rgba(5,5,6,0.32) 100%),
-    rgba(8, 9, 12, 0.22);
-}
-.highlights-overview {
-  display: flex;
-  flex-direction: column;
-}
-.highlights-hours-stack {
-  display: flex;
-  flex-direction: column;
-  order: 1;
-  margin: 18px 24px 0;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-}
-.highlights-stat-widget {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: 33px 18px 31px;
-  border-radius: 24px;
-  box-sizing: border-box;
-  background: rgba(255,255,255,0.055);
-  border: 1px solid rgba(255,255,255,0.11);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.08),
-    inset 0 -1px 0 rgba(0,0,0,0.22),
-    0 14px 36px rgba(0,0,0,0.2);
-  backdrop-filter: blur(28px) saturate(140%);
-  -webkit-backdrop-filter: blur(28px) saturate(140%);
-}
-.highlights-hours {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  padding: 0 4px 14px;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-}
-.highlights-hours-n {
-  font-size: clamp(44px, 11vw, 56px);
-  font-weight: 700;
-  letter-spacing: -0.04em;
-  color: #fff;
-  line-height: 1;
-}
-.highlights-hours-label {
-  font-size: 15px;
-  font-weight: 500;
-  color: rgba(255,255,255,0.48);
-  line-height: 1.2;
-}
-.highlights-summary-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  align-items: stretch;
-  margin-top: 4px;
-  overflow: visible;
-}
-.highlights-summary-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0;
-  min-width: 0;
-  padding: 14px 6px 6px;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  text-align: center;
-  box-sizing: border-box;
-}
-.highlights-summary-stat:not(:last-child) {
-  border-right: 1px solid rgba(255,255,255,0.08);
-}
-.highlights-summary-stat-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  margin: 0;
-  background: rgba(232,162,76,0.12);
-  border: 1px solid rgba(255,255,255,0.06);
-}
-.highlights-summary-stat-n {
-  margin-top: 8px;
-  font-size: 22px;
-  font-weight: 800;
-  color: #fff;
-  line-height: 1;
-  text-align: center;
-}
-.highlights-summary-stat-l {
-  margin-top: 4px;
-  font-size: 11px;
-  font-weight: 500;
-  text-align: center;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-.highlights-personality-wrap { order: 2; }
-.highlights-personality-panel {
-  background: rgba(255,255,255,0.055);
-  border: 1px solid rgba(255,255,255,0.11);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.08),
-    inset 0 -1px 0 rgba(0,0,0,0.22),
-    0 14px 36px rgba(0,0,0,0.2);
-  backdrop-filter: blur(28px) saturate(140%);
-  -webkit-backdrop-filter: blur(28px) saturate(140%);
-}
-.highlights-panel {
-  margin: 18px 24px 0;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  box-sizing: border-box;
-}
-.highlights-panel.highlights-history {
-  /* Watch History keeps section chrome; grey lives on each day item. */
-  padding: 0;
-  background: transparent;
-  border: none;
-}
-.highlights-tops .highlights-panel {
-  margin-top: 18px;
-}
-.highlights-tops .highlights-panel:first-child {
-  margin-top: 22px;
-}
-.highlights-tops-primary .highlights-panel:first-child {
-  margin-top: 22px;
-}
-.highlights-panel .highlights-section-title {
-  padding-left: 0 !important;
-  padding-right: 0 !important;
-}
-.highlights-tops-sub {
-  margin-top: 4px;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: rgba(255,255,255,0.45);
-}
-.highlights-tops-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-.highlights-tops-primary {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  min-width: 0;
-}
-.highlights-genre-tag-row {
-  padding-left: 0 !important;
-  padding-right: 0 !important;
-}
-.highlights-year-only {
-  margin-top: 30px;
-  padding: 0 24px;
-  box-sizing: border-box;
-}
-.highlights-year-only-head {
-  justify-content: flex-start;
-}
-.highlights-year-only-posters {
-  justify-content: flex-start;
-}
-.highlights-poster-rating-badge {
-  position: absolute;
-  left: 6px;
-  bottom: 6px;
-  right: auto;
-  top: auto;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 3px 6px;
-  border-radius: 999px;
-  background: rgba(0,0,0,0.68);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  font-size: 10.5px;
-  font-weight: 700;
-  color: #fff;
-  line-height: 1;
-}
-.highlights-poster-title {
-  margin-top: 8px;
-  font-size: 11.5px;
-  font-weight: 700;
-  color: #fff;
-  line-height: 1.25;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.highlights-poster-stat {
-  margin-top: 3px;
-  font-size: 10.5px;
-  color: rgba(255,255,255,0.48);
-}
-.highlights-history {
-  margin-top: 22px;
-  box-sizing: border-box;
-}
-.highlights-history-sub {
-  font-size: 12px;
-  font-weight: 500;
-  color: rgba(255,255,255,0.45);
-}
-.highlights-history-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-.highlights-calendar {
-  padding: 18px 16px 16px;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  box-sizing: border-box;
-  max-width: 100%;
-}
-.highlights-day-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 14px;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  overflow: visible;
-}
-.highlights-day-group {
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.09);
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
-  backdrop-filter: blur(16px) saturate(130%);
-  -webkit-backdrop-filter: blur(16px) saturate(130%);
-}
-.highlights-day-empty {
-  margin-top: 14px;
-  padding: 36px 20px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.09);
-  border-radius: 16px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
-  backdrop-filter: blur(16px) saturate(130%);
-  -webkit-backdrop-filter: blur(16px) saturate(130%);
-}
-
-/* Phone Highlights — restore pre-desktop layout (amber glow, baseline hours,
-   scrollable gold-ish stats, year in header, matte calendar, bottom bulk bar).
-   Desktop ≥900px keeps the new glass/ambient treatment. */
-@media (max-width: 899px) {
-  .highlights-ambient { display: none !important; }
-  .highlights-glow { display: block !important; }
-  .highlights-header-sub { display: none !important; }
-
-  .highlights-overview {
-    display: flex;
-    flex-direction: column;
-  }
-  .highlights-hours-stack,
-  .highlights-stat-widget {
-    display: contents;
-  }
-  .highlights-hours {
-    order: 1;
-    flex-direction: row;
-    align-items: baseline;
-    gap: 6px;
-    margin: 22px 0 0;
-    padding: 0 24px;
-    border-bottom: none;
-  }
-  .highlights-hours-n {
-    font-size: clamp(51px, 12vw, 64px);
-    letter-spacing: -0.04em;
-  }
-  .highlights-hours-label {
-    font-size: 22px;
-    font-weight: 600;
-    color: rgba(255,255,255,0.62);
-  }
-  .highlights-personality-wrap {
-    /* Original mobile order: hours → personality → scrollable stats */
-    order: 2;
-  }
-  .highlights-personality-panel {
-    background: linear-gradient(135deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018)) !important;
-    border: 1px solid rgba(255,255,255,0.09) !important;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 48px rgba(0,0,0,0.28) !important;
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    gap: 16.8px !important;
-    padding: 22.5px !important;
-    border-radius: 28px !important;
-  }
-  .highlights-personality-icon,
-  .highlights-personality-badge {
-    width: 61.7px !important;
-    height: 61.7px !important;
-  }
-  .highlights-personality-glow {
-    width: 112px !important;
-    height: 112px !important;
-  }
-  .highlights-personality-eyebrow { font-size: 13.2px !important; }
-  .highlights-personality-name { font-size: 22.3px !important; }
-  .highlights-personality-desc { font-size: 12.5px !important; margin-top: 2.8px !important; }
-
-  .highlights-summary-stats {
-    order: 3;
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    margin: 14px 0 0;
-    padding: 0 24px;
-    overflow-x: auto;
-    grid-template-columns: none;
-  }
-  .highlights-summary-stat {
-    flex: 0 0 auto;
-    width: 86.36px;
-    padding: 12.7px 11.29px 10px;
-    background: #131313;
-    border-radius: 12.23px;
-    border: 1px solid rgba(255,255,255,0.05);
-    border-right: none !important;
-  }
-  .highlights-summary-stat:not(:last-child) { border-right: none; }
-  .highlights-summary-stat-icon {
-    width: 37.62px;
-    height: 37.62px;
-    border-radius: 50%;
-    background: rgba(206,172,139,0.07);
-    margin: 0 auto 6.75px;
-  }
-  .highlights-summary-stat-icon svg { stroke: #CEAC8B !important; color: #CEAC8B; }
-  .highlights-summary-stat-n {
-    margin-top: 0;
-    font-size: 24.95px;
-    font-weight: 800;
-    color: #fff;
-  }
-  .highlights-summary-stat-l {
-    margin-top: 3.59px;
-    font-size: 10.26px;
-  }
-
-  /* Section chrome: title + shelves use 24px inset (same as legacy px-6 / pl-6).
-     Do not let desktop panel margin:0 / poster padding:0 leak onto phones. */
-  .highlights-panel {
-    background: transparent;
-    border: none;
-    box-shadow: none;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    margin-left: 0 !important;
-    margin-right: 0 !important;
-    padding-left: 0 !important;
-    padding-right: 0 !important;
-    margin-top: 28px;
-  }
-  .highlights-tops-head,
-  .highlights-history-head,
-  .highlights-year-only-head {
-    padding-left: 24px !important;
-    padding-right: 24px !important;
-  }
-  .highlights-tops .highlights-poster-card {
-    flex: 0 0 156px !important;
-    width: 156px !important;
-    min-width: 156px !important;
-    max-width: 156px !important;
-  }
-  .highlights-tops .highlights-poster-row {
-    justify-content: flex-start !important;
-    padding-left: 24px !important;
-    padding-right: 24px !important;
-    margin-left: 0 !important;
-    width: auto !important;
-    max-width: none !important;
-    box-sizing: border-box;
-  }
-  .highlights-genre-tag-row {
-    padding-left: 24px !important;
-    padding-right: 24px !important;
-  }
-  .highlights-calendar-col,
-  .highlights-history-body > .highlights-day-list,
-  .highlights-history-body > .highlights-day-empty {
-    margin-left: 24px;
-    margin-right: 24px;
-  }
-  .highlights-calendar {
-    margin-top: 8px;
-    padding: 24px;
-    background: #171717;
-    border: 1px solid rgba(255,255,255,0.05);
-    border-radius: 24px;
-  }
-  .highlights-day-group,
-  .highlights-day-empty {
-    background: #171717;
-    border: 1px solid rgba(255,255,255,0.05);
-    box-shadow: none;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-  .highlights-bulk-popup { display: none !important; }
-}
-
-@media (min-width: 900px) {
-  .highlights-glow { display: none !important; }
-  .highlights-bulk-bar-mobile { display: none !important; }
-}
+.highlights-glow { display: block; }
+.highlights-ambient { display: none; }
+.highlights-bulk-popup { display: none; }
 
 @media (min-width: 700px) and (min-height: 700px) and (pointer: coarse) {
   .home-hero {
@@ -885,7 +425,47 @@ body {
   }
 
   .highlights-glow {
-    display: none;
+    display: none !important;
+  }
+
+  .highlights-bulk-bar-mobile {
+    display: none !important;
+  }
+
+  /* Poster ambient — desktop only; mobile keeps the amber header glow. */
+  .highlights-ambient {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    overflow: hidden;
+    background: #050506;
+  }
+  .highlights-ambient-art {
+    position: absolute;
+    inset: -40% -20%;
+    background-size: cover;
+    background-position: center 30%;
+    background-repeat: no-repeat;
+    filter: blur(72px) saturate(1.4) brightness(0.78);
+    transform: scale(1.28);
+    opacity: 0;
+    transition: opacity 800ms ease;
+  }
+  .highlights-ambient-art.is-visible {
+    opacity: 0.72;
+  }
+  .highlights-ambient-art.is-exit {
+    opacity: 0;
+  }
+  .highlights-ambient-veil {
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(180deg, rgba(5,5,6,0.22) 0%, rgba(5,5,6,0.38) 32%, rgba(5,5,6,0.78) 72%, #050506 100%),
+      linear-gradient(90deg, rgba(5,5,6,0.32) 0%, transparent 28%, transparent 72%, rgba(5,5,6,0.32) 100%),
+      rgba(8, 9, 12, 0.22);
   }
 
   /* Title left | months truly centered on the row | year right */
@@ -6637,75 +6217,74 @@ html.vt-back::view-transition-new(root) {
   }
 
   .library-desktop-ambient {
-    /* Full-page wash (not sticky 100vh) — avoids the hard band / seam
-       that appeared mid-scroll with the sticky + negative-margin trick. */
-    position: absolute;
+    /* Viewport-locked wash — avoids scrolling huge blurred layers (tearing /
+       “page break” seams at the bottom) while still tracking visible posters. */
+    position: fixed;
     inset: 0;
     z-index: 0;
     pointer-events: none;
     overflow: hidden;
-    background: transparent;
+    background: #0c0d10;
+    contain: paint;
   }
   .library-desktop-ambient-art {
     position: absolute;
-    inset: -55% -28%;
+    inset: -42% -18%;
     background-size: cover;
     background-position: center 30%;
     background-repeat: no-repeat;
-    filter: blur(100px) saturate(1.15) brightness(1.02);
-    transform: scale(1.4);
+    filter: blur(96px) saturate(1.18) brightness(1.02);
+    transform: translateZ(0) scale(1.28);
     opacity: 0;
-    /* Long ease so scroll swaps feel gradual, not a dark/bright whoop */
-    transition: opacity 2.4s cubic-bezier(0.22, 0.08, 0.18, 1);
-    will-change: opacity;
+    transition: opacity 2.2s cubic-bezier(0.22, 0.08, 0.18, 1);
   }
-  /* Softer, wider side masks so L/R/Mid blend into one even wash */
+  /* Side washes stay dominant; mid is a soft bridge (not a full-bleed flood). */
   .library-desktop-ambient-art.is-left {
     -webkit-mask-image:
-      linear-gradient(180deg, #000 0%, #000 58%, rgba(0,0,0,0.65) 100%),
-      linear-gradient(90deg, #000 0%, #000 42%, rgba(0,0,0,0.55) 72%, transparent 100%);
+      linear-gradient(180deg, #000 0%, #000 62%, transparent 100%),
+      linear-gradient(90deg, #000 0%, #000 38%, rgba(0,0,0,0.45) 62%, transparent 88%);
     mask-image:
-      linear-gradient(180deg, #000 0%, #000 58%, rgba(0,0,0,0.65) 100%),
-      linear-gradient(90deg, #000 0%, #000 42%, rgba(0,0,0,0.55) 72%, transparent 100%);
+      linear-gradient(180deg, #000 0%, #000 62%, transparent 100%),
+      linear-gradient(90deg, #000 0%, #000 38%, rgba(0,0,0,0.45) 62%, transparent 88%);
     -webkit-mask-composite: source-in;
     mask-composite: intersect;
-    background-position: 28% 32%;
+    background-position: 22% 30%;
   }
   .library-desktop-ambient-art.is-mid {
     -webkit-mask-image:
-      linear-gradient(180deg, #000 0%, #000 58%, rgba(0,0,0,0.65) 100%),
-      radial-gradient(ellipse 95% 90% at 50% 40%, #000 0%, rgba(0,0,0,0.75) 52%, transparent 82%);
+      linear-gradient(180deg, #000 0%, #000 62%, transparent 100%),
+      radial-gradient(ellipse 48% 70% at 50% 38%, #000 0%, rgba(0,0,0,0.55) 55%, transparent 78%);
     mask-image:
-      linear-gradient(180deg, #000 0%, #000 58%, rgba(0,0,0,0.65) 100%),
-      radial-gradient(ellipse 95% 90% at 50% 40%, #000 0%, rgba(0,0,0,0.75) 52%, transparent 82%);
+      linear-gradient(180deg, #000 0%, #000 62%, transparent 100%),
+      radial-gradient(ellipse 48% 70% at 50% 38%, #000 0%, rgba(0,0,0,0.55) 55%, transparent 78%);
     -webkit-mask-composite: source-in;
     mask-composite: intersect;
-    background-position: center 32%;
+    background-position: center 30%;
   }
   .library-desktop-ambient-art.is-right {
     -webkit-mask-image:
-      linear-gradient(180deg, #000 0%, #000 58%, rgba(0,0,0,0.65) 100%),
-      linear-gradient(270deg, #000 0%, #000 42%, rgba(0,0,0,0.55) 72%, transparent 100%);
+      linear-gradient(180deg, #000 0%, #000 62%, transparent 100%),
+      linear-gradient(270deg, #000 0%, #000 38%, rgba(0,0,0,0.45) 62%, transparent 88%);
     mask-image:
-      linear-gradient(180deg, #000 0%, #000 58%, rgba(0,0,0,0.65) 100%),
-      linear-gradient(270deg, #000 0%, #000 42%, rgba(0,0,0,0.55) 72%, transparent 100%);
+      linear-gradient(180deg, #000 0%, #000 62%, transparent 100%),
+      linear-gradient(270deg, #000 0%, #000 38%, rgba(0,0,0,0.45) 62%, transparent 88%);
     -webkit-mask-composite: source-in;
     mask-composite: intersect;
-    background-position: 72% 32%;
+    background-position: 78% 30%;
   }
   .library-desktop-ambient-art.is-left.is-visible,
-  .library-desktop-ambient-art.is-right.is-visible { opacity: 0.5; }
-  .library-desktop-ambient-art.is-mid.is-visible { opacity: 0.5; }
+  .library-desktop-ambient-art.is-right.is-visible { opacity: 0.58; }
+  .library-desktop-ambient-art.is-mid.is-visible { opacity: 0.34; }
   .library-desktop-ambient-art.is-exit { opacity: 0; }
   .library-desktop-ambient-veil {
     position: absolute;
     inset: 0;
     background:
       linear-gradient(180deg,
-        rgba(12,13,16,0.12) 0%,
-        rgba(12,13,16,0.28) 40%,
-        rgba(12,13,16,0.48) 100%),
-      linear-gradient(90deg, rgba(12,13,16,0.14) 0%, transparent 26%, transparent 74%, rgba(12,13,16,0.14) 100%);
+        rgba(12,13,16,0.18) 0%,
+        rgba(12,13,16,0.28) 38%,
+        rgba(12,13,16,0.52) 100%),
+      linear-gradient(90deg, rgba(12,13,16,0.12) 0%, transparent 24%, transparent 76%, rgba(12,13,16,0.12) 100%);
   }
 
   .library-desktop-shell {
@@ -7472,259 +7051,6 @@ html.vt-back::view-transition-new(root) {
 
 @media (min-width: 900px) {
   .profile-mobile-layout { display: none !important; }
-}
-
-/* Final mobile/PWA Highlights lock — phone system only (<900px).
-   Desktop Highlights styles must never win here (including leftover
-   unscoped/base glass-widget rules). Keep last in the cascade. */
-@media (max-width: 899px) {
-  .highlights-page {
-    --hl-poster-w: 156px;
-    --hl-poster-gap: 12px;
-    --hl-content-max: none;
-    padding: 0 !important;
-    background: transparent !important;
-  }
-
-  .highlights-ambient { display: none !important; }
-  .highlights-glow { display: block !important; }
-  .highlights-header-sub { display: none !important; }
-  .highlights-toolbar { display: contents !important; }
-  .highlights-bulk-popup { display: none !important; }
-
-  .highlights-overview {
-    display: flex !important;
-    flex-direction: column !important;
-    grid-template-columns: none !important;
-    gap: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    width: 100% !important;
-    max-width: none !important;
-  }
-
-  /* Unwrap desktop glass shell → legacy stacked hours + scrollable cards */
-  .highlights-hours-stack,
-  .highlights-stat-widget {
-    display: contents !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-  }
-
-  .highlights-hours {
-    order: 1 !important;
-    display: flex !important;
-    flex-direction: row !important;
-    align-items: baseline !important;
-    justify-content: flex-start !important;
-    gap: 6px !important;
-    margin: 22px 0 0 !important;
-    padding: 0 24px !important;
-    border: none !important;
-    border-bottom: none !important;
-    border-right: none !important;
-    min-width: 0 !important;
-    width: auto !important;
-  }
-  .highlights-hours-n {
-    font-size: clamp(51px, 12vw, 64px) !important;
-    letter-spacing: -0.04em !important;
-    font-weight: 700 !important;
-  }
-  .highlights-hours-label {
-    font-size: 22px !important;
-    font-weight: 600 !important;
-    color: rgba(255,255,255,0.62) !important;
-  }
-
-  .highlights-personality-wrap {
-    order: 2 !important;
-    display: block !important;
-    grid-column: auto !important;
-    grid-row: auto !important;
-    width: 100% !important;
-    max-width: none !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    height: auto !important;
-  }
-  .highlights-personality-panel {
-    background: linear-gradient(135deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018)) !important;
-    border: 1px solid rgba(255,255,255,0.09) !important;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 48px rgba(0,0,0,0.28) !important;
-    backdrop-filter: blur(24px) !important;
-    -webkit-backdrop-filter: blur(24px) !important;
-    gap: 16.8px !important;
-    padding: 22.5px !important;
-    border-radius: 28px !important;
-    height: auto !important;
-    width: auto !important;
-  }
-
-  .highlights-summary-stats {
-    order: 3 !important;
-    display: flex !important;
-    grid-template-columns: none !important;
-    align-items: flex-start !important;
-    gap: 10px !important;
-    margin: 14px 0 0 !important;
-    padding: 0 24px !important;
-    overflow-x: auto !important;
-    overflow-y: hidden !important;
-    flex: none !important;
-    width: auto !important;
-    max-width: none !important;
-  }
-  .highlights-summary-stat {
-    display: flex !important;
-    flex: 0 0 auto !important;
-    flex-direction: column !important;
-    align-items: center !important;
-    justify-content: flex-start !important;
-    width: 86.36px !important;
-    min-width: 86.36px !important;
-    max-width: 86.36px !important;
-    padding: 12.7px 11.29px 10px !important;
-    background: #131313 !important;
-    border-radius: 12.23px !important;
-    border: 1px solid rgba(255,255,255,0.05) !important;
-    border-right: 1px solid rgba(255,255,255,0.05) !important;
-    text-align: center !important;
-  }
-  .highlights-summary-stat:not(:last-child) {
-    border-right: 1px solid rgba(255,255,255,0.05) !important;
-  }
-  .highlights-summary-stat:not(:last-child)::after {
-    display: none !important;
-  }
-  .highlights-summary-stat-icon {
-    width: 37.62px !important;
-    height: 37.62px !important;
-    border-radius: 50% !important;
-    background: rgba(206,172,139,0.07) !important;
-    margin: 0 auto 6.75px !important;
-  }
-  .highlights-summary-stat-icon svg {
-    stroke: #CEAC8B !important;
-    color: #CEAC8B !important;
-  }
-  .highlights-summary-stat-n {
-    margin-top: 0 !important;
-    font-size: 24.95px !important;
-    font-weight: 800 !important;
-    color: #fff !important;
-    text-align: center !important;
-  }
-  .highlights-summary-stat-l {
-    margin-top: 3.59px !important;
-    font-size: 10.26px !important;
-    text-align: center !important;
-  }
-
-  .highlights-tops,
-  .highlights-tops-primary,
-  .highlights-genres-before-history,
-  .highlights-history {
-    display: block !important;
-    width: 100% !important;
-    max-width: none !important;
-    margin-left: 0 !important;
-    margin-right: 0 !important;
-    grid-template-columns: none !important;
-  }
-  .highlights-tops-primary {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 0 !important;
-  }
-  .highlights-history-body {
-    display: flex !important;
-    flex-direction: column !important;
-    grid-template-columns: none !important;
-    gap: 8px !important;
-  }
-
-  .highlights-panel {
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    margin-left: 0 !important;
-    margin-right: 0 !important;
-    padding-left: 0 !important;
-    padding-right: 0 !important;
-  }
-
-  .highlights-tops-head,
-  .highlights-history-head,
-  .highlights-year-only-head {
-    padding-left: 24px !important;
-    padding-right: 24px !important;
-  }
-
-  .highlights-tops .highlights-poster-row {
-    width: auto !important;
-    min-width: 0 !important;
-    overflow-x: auto !important;
-    overflow-y: hidden !important;
-    justify-content: flex-start !important;
-    padding-left: 24px !important;
-    padding-right: 24px !important;
-    box-sizing: border-box;
-    scroll-snap-type: x proximity;
-  }
-
-  .highlights-tops .highlights-poster-card,
-  .highlights-tops-movies .highlights-poster-card {
-    flex: 0 0 156px !important;
-    width: 156px !important;
-    min-width: 156px !important;
-    max-width: 156px !important;
-    scroll-snap-align: start;
-  }
-
-  .highlights-genre-tag-row {
-    display: flex !important;
-    flex-wrap: wrap !important;
-    padding-left: 24px !important;
-    padding-right: 24px !important;
-  }
-
-  .highlights-calendar-col,
-  .highlights-history-body > .highlights-day-list,
-  .highlights-history-body > .highlights-day-empty {
-    margin-left: 24px !important;
-    margin-right: 24px !important;
-  }
-  .highlights-calendar {
-    margin-top: 8px !important;
-    padding: 24px !important;
-    background: #171717 !important;
-    border: 1px solid rgba(255,255,255,0.05) !important;
-    border-radius: 24px !important;
-  }
-  .highlights-day-group,
-  .highlights-day-empty {
-    background: #171717 !important;
-    border: 1px solid rgba(255,255,255,0.05) !important;
-    box-shadow: none !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-  }
-
-  .highlights-year-only {
-    padding: 0 !important;
-  }
-  .highlights-year-only-posters {
-    padding-left: 24px !important;
-    padding-right: 24px !important;
-  }
 }
 
 /* ---------- Streaming provider page (/explore/provider/[id]) ---------- */
