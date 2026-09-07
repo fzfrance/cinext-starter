@@ -26,6 +26,19 @@ const t = themes.dark;
 const accent = DEFAULT_ACCENT;
 const highlightsSessionCache = new Map();
 
+function useIsDesktopHighlights() {
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return undefined;
+    const mq = window.matchMedia("(min-width: 900px)");
+    const sync = () => setIsDesktop(mq.matches);
+    sync();
+    mq.addEventListener?.("change", sync);
+    return () => mq.removeEventListener?.("change", sync);
+  }, []);
+  return isDesktop;
+}
+
 const MONTH_ABBRS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -60,6 +73,7 @@ export default function Page() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const readableLanguages = useReadableLanguages();
+  const isDesktopHighlights = useIsDesktopHighlights();
   // Bangkok "today" — computed fresh on every render (component-scoped,
   // not module-scoped) rather than once at module load. It used to be the
   // latter, deliberately, on the theory that recomputing it was pointless
@@ -1121,15 +1135,6 @@ export default function Page() {
   const leadingDays = Array.from({ length: firstWeekday }, (_, i) => prevMonthDays - firstWeekday + i + 1);
   const trailingDays = Array.from({ length: trailingCount }, (_, i) => i + 1);
 
-  const header = (
-    <div className="highlights-header px-6 relative flex items-center justify-between" style={{ paddingTop: "calc(env(safe-area-inset-top) + 13.2px)" }}>
-      <div>
-        <div className="highlights-header-title" style={{ fontSize: 28, fontWeight: 800, color: "#fff" }}>Highlights</div>
-        <div className="highlights-header-sub">Your viewing journey at a glance.</div>
-      </div>
-    </div>
-  );
-
   const yearSelector = (
     <div className="highlights-year relative flex-shrink-0">
       <button
@@ -1161,8 +1166,17 @@ export default function Page() {
     </div>
   );
 
-  // Mobile: title above, months + year below. Desktop CSS pulls the title
-  // onto the same row as the month chips (left | months | year).
+  const header = (
+    <div className="highlights-header px-6 relative flex items-center justify-between" style={{ paddingTop: "calc(env(safe-area-inset-top) + 13.2px)" }}>
+      <div>
+        <div className="highlights-header-title" style={{ fontSize: 28, fontWeight: 800, color: "#fff" }}>Highlights</div>
+        <div className="highlights-header-sub">Your viewing journey at a glance.</div>
+      </div>
+      {!isDesktopHighlights ? yearSelector : null}
+    </div>
+  );
+
+  // Mobile: title + year in header, months below. Desktop: title | months | year.
   const selectorsRow = (
     <div className="highlights-selectors relative flex items-center px-6" style={{ marginTop: 20 }}>
       {effectiveYearStatus === "ready" ? (
@@ -1180,9 +1194,11 @@ export default function Page() {
       ) : (
         <div className="w-full" style={{ height: 36 }} />
       )}
-      <div className="highlights-year-slot absolute right-6 top-1/2" style={{ transform: "translateY(-50%)" }}>
-        {yearSelector}
-      </div>
+      {isDesktopHighlights ? (
+        <div className="highlights-year-slot absolute right-6 top-1/2" style={{ transform: "translateY(-50%)" }}>
+          {yearSelector}
+        </div>
+      ) : null}
     </div>
   );
 
@@ -1210,7 +1226,20 @@ export default function Page() {
         ))}
         <div className="highlights-ambient-veil" />
       </div>
-      <div className="highlights-glow absolute inset-x-0 top-0 pointer-events-none" aria-hidden="true" />
+      {/* Amber wash — mobile only (desktop uses poster ambient). Restored
+          from the pre-desktop Highlights layout. */}
+      <div
+        className="highlights-glow absolute inset-x-0 top-0 pointer-events-none"
+        aria-hidden="true"
+        style={{
+          height: 420,
+          zIndex: -1,
+          background: `
+            radial-gradient(circle at 50% 0%, rgba(232,162,76,0.4), transparent 62%),
+            linear-gradient(180deg, #120d09 0%, #070605 45%, #050505 100%)
+          `,
+        }}
+      />
       <div className="highlights-toolbar">
         {header}
         {selectorsRow}
@@ -1985,54 +2014,89 @@ export default function Page() {
         />
       )}
 
-      {/* Mid-screen bulk-action popup — floating liquid-glass card (no
-          blocking scrim) so users can keep selecting history rows underneath. */}
+      {/* Bulk actions: mobile bottom bar (original) + desktop mid popup */}
       {bulkMode && (
-        <div
-          className="highlights-bulk-popup"
-          role="dialog"
-          aria-modal="false"
-          aria-label={bulkMode === "remove" ? "Remove from Highlights" : "Change watch date"}
-        >
-          <div className="highlights-bulk-popup-title">
-            {bulkMode === "remove" ? "Remove from Highlights" : "Change watch date"}
-          </div>
-          <div className="highlights-bulk-popup-sub">
-            {bulkSelectedIds.size === 0
-              ? "Select items below, then confirm."
-              : `${bulkSelectedIds.size} item${bulkSelectedIds.size === 1 ? "" : "s"} selected`}
-          </div>
-          <div className="highlights-bulk-popup-actions">
-            <button
-              type="button"
-              className="highlights-bulk-popup-cancel"
-              onClick={cancelBulkSelect}
-            >
-              Cancel
-            </button>
+        <>
+          {!isDesktopHighlights && (
+          <div
+            className="highlights-bulk-bar-mobile fixed left-0 right-0 flex items-center justify-between"
+            style={{ bottom: 0, zIndex: 60, padding: "12px 16px calc(env(safe-area-inset-bottom, 0px) + 12px)", background: "rgba(10,10,12,0.97)", borderTop: `1px solid ${t.glassBorder}`, backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)" }}
+          >
+            <button onClick={cancelBulkSelect} style={{ fontSize: 13.5, fontWeight: 600, color: t.textDim, padding: "10px 16px" }}>Cancel</button>
             {bulkMode === "remove" ? (
               <button
-                type="button"
                 onClick={confirmBulkRemove}
                 disabled={bulkSelectedIds.size === 0 || bulkBusy}
-                className="highlights-bulk-popup-confirm is-danger"
-                style={{ opacity: (bulkSelectedIds.size === 0 || bulkBusy) ? 0.5 : 1 }}
+                className="rounded-full active:scale-95 transition"
+                style={{ padding: "12px 22px", background: "#e0567a", opacity: (bulkSelectedIds.size === 0 || bulkBusy) ? 0.5 : 1 }}
               >
-                {bulkBusy ? "Removing…" : `Remove (${bulkSelectedIds.size})`}
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: "#fff" }}>
+                  {bulkBusy ? "Removing…" : `Remove (${bulkSelectedIds.size} item${bulkSelectedIds.size === 1 ? "" : "s"})`}
+                </span>
               </button>
             ) : (
               <button
-                type="button"
                 onClick={() => setBulkDateSheetOpen(true)}
                 disabled={bulkSelectedIds.size === 0 || bulkBusy}
-                className="highlights-bulk-popup-confirm"
-                style={{ opacity: (bulkSelectedIds.size === 0 || bulkBusy) ? 0.5 : 1 }}
+                className="rounded-full active:scale-95 transition"
+                style={{ padding: "12px 22px", background: accent, opacity: (bulkSelectedIds.size === 0 || bulkBusy) ? 0.5 : 1 }}
               >
-                {bulkBusy ? "Updating…" : `Change (${bulkSelectedIds.size})`}
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: "#1a1108" }}>
+                  {bulkBusy ? "Updating…" : `Change (${bulkSelectedIds.size} item${bulkSelectedIds.size === 1 ? "" : "s"})`}
+                </span>
               </button>
             )}
           </div>
-        </div>
+          )}
+
+          {isDesktopHighlights && (
+          <div
+            className="highlights-bulk-popup"
+            role="dialog"
+            aria-modal="false"
+            aria-label={bulkMode === "remove" ? "Remove from Highlights" : "Change watch date"}
+          >
+            <div className="highlights-bulk-popup-title">
+              {bulkMode === "remove" ? "Remove from Highlights" : "Change watch date"}
+            </div>
+            <div className="highlights-bulk-popup-sub">
+              {bulkSelectedIds.size === 0
+                ? "Select items below, then confirm."
+                : `${bulkSelectedIds.size} item${bulkSelectedIds.size === 1 ? "" : "s"} selected`}
+            </div>
+            <div className="highlights-bulk-popup-actions">
+              <button
+                type="button"
+                className="highlights-bulk-popup-cancel"
+                onClick={cancelBulkSelect}
+              >
+                Cancel
+              </button>
+              {bulkMode === "remove" ? (
+                <button
+                  type="button"
+                  onClick={confirmBulkRemove}
+                  disabled={bulkSelectedIds.size === 0 || bulkBusy}
+                  className="highlights-bulk-popup-confirm is-danger"
+                  style={{ opacity: (bulkSelectedIds.size === 0 || bulkBusy) ? 0.5 : 1 }}
+                >
+                  {bulkBusy ? "Removing…" : `Remove (${bulkSelectedIds.size})`}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setBulkDateSheetOpen(true)}
+                  disabled={bulkSelectedIds.size === 0 || bulkBusy}
+                  className="highlights-bulk-popup-confirm"
+                  style={{ opacity: (bulkSelectedIds.size === 0 || bulkBusy) ? 0.5 : 1 }}
+                >
+                  {bulkBusy ? "Updating…" : `Change (${bulkSelectedIds.size})`}
+                </button>
+              )}
+            </div>
+          </div>
+          )}
+        </>
       )}
 
       {/* Bulk Watch Date sheet — components/WatchDateSheet for TV,
