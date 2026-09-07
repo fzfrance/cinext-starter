@@ -321,6 +321,9 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   // mismatch silently rewrite its status. A library write may only happen
   // as the direct result of a user clicking something.
   const [pendingStatusSync, setPendingStatusSync] = useState(false);
+  // Once Remove is selected, no in-flight watch reconciliation may recreate
+  // the library row while the cascade is being deleted.
+  const suppressStatusSyncRef = useRef(false);
   // Per-"seasonId-episode" in-flight write promise — see
   // setEpisodeWatchCount below for why same-episode writes chain off this
   // instead of firing independently.
@@ -623,7 +626,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   //    for existing at all, so keeping its stored status current is safe
   //    and, unlike case 3, has no "original explicit choice" to clobber).
   useEffect(() => {
-    if (!pendingStatusSync) return;
+    if (!pendingStatusSync || suppressStatusSyncRef.current) return;
     setPendingStatusSync(false);
     if (!user) return;
 
@@ -893,6 +896,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
       setStatusOpen(false);
       // A queued watch reconciliation must not recreate this row after
       // Remove has been selected.
+      suppressStatusSyncRef.current = true;
       setPendingStatusSync(false);
       setInLibrary(false);
       setFavorite(false);
@@ -923,6 +927,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
         `${displayTitle} has watched episodes. Moving it to Watchlist will clear its watch history — this can't be undone. Continue?`
       );
       if (!confirmed) { setStatusOpen(false); return; }
+      suppressStatusSyncRef.current = false;
       setPendingStatusSync(false);
       setStatus("watchlist");
       setStatusExplicit(true);
@@ -938,6 +943,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
       setStatusOpen(false);
       return;
     }
+    suppressStatusSyncRef.current = false;
     setStatus(id);
     setPendingStatusSync(false);
     setStatusExplicit(true);
@@ -963,6 +969,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     // status menu to change it.
     setDesktopMoreOpen(false);
     setStatusOpen(false);
+    suppressStatusSyncRef.current = false;
     setPendingStatusSync(false);
     setStatus("watchlist");
     setStatusExplicit(true);
