@@ -607,12 +607,11 @@ export default function Page() {
               // Raw ids collide across media types — see the same branch in
               // app/(tabs)/profile/ratings/page.jsx for the full reasoning.
               const key = isMovie ? `movie-${r.movieId}` : `tv-${r.showId}-${r.seasonNumber}`;
-              const detailPath = isMovie ? `/movie/${r.movieId}` : `/show/${r.showId}`;
               const ratingPath = isMovie ? `/movie/${r.movieId}?tab=reviews` : `/show/${r.showId}?tab=reviews&reviewSeason=${r.seasonNumber}`;
               const palette = fallbackPalette(isMovie ? r.movieId : r.showId);
               return (
-                // Poster opens the show/movie itself; the rest of the card
-                // opens the season's/movie's official saved rating card
+                // Poster and the rest of the card open the season's/movie's
+                // official saved rating view
                 // directly (same deep link SeasonRatingScreen's/
                 // MovieRatingScreen's own edit-pencil uses, minus &edit=1 —
                 // a rating that already exists should land in its read-only
@@ -626,8 +625,10 @@ export default function Page() {
                   className="flex-shrink-0 flex items-center text-left active:scale-95 transition rounded-2xl cursor-pointer"
                   style={{ width: 264, gap: 12, padding: 12, background: t.cardFill, border: `1px solid ${t.cardBorder}` }}
                 >
-                  <button
-                    onClick={(e) => { e.stopPropagation(); router.push(detailPath); }}
+                  <Link
+                    href={ratingPath}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label={`Open rating for ${displayTitle ?? (isMovie ? "movie" : "show")}`}
                     className="relative rounded-xl overflow-hidden flex-shrink-0"
                     style={{ width: 84, aspectRatio: "2 / 3" }}
                   >
@@ -637,7 +638,7 @@ export default function Page() {
                         <Icon name="sparkle" size={8} color={accent} />
                       </div>
                     )}
-                  </button>
+                  </Link>
                   <div className="min-w-0 flex-1">
                     <div className="truncate" style={{ fontSize: 14.5, fontWeight: 700, color: "#fff" }}>{displayTitle ?? "…"}</div>
                     {/* No mood emoji here — kept deliberately off this

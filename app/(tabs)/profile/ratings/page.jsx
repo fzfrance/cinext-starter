@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Icon from "@/components/ui/Icon";
 import GlassCircle from "@/components/ui/GlassCircle";
@@ -155,7 +156,6 @@ export default function Page() {
             // screen deep-link, and detail-page link all branch on
             // mediaType rather than assuming showId.
             const key = isMovie ? `movie-${r.movieId}` : `tv-${r.showId}-${r.seasonNumber}`;
-            const detailPath = isMovie ? `/movie/${r.movieId}` : `/show/${r.showId}`;
             const ratingPath = isMovie ? `/movie/${r.movieId}?tab=reviews` : `/show/${r.showId}?tab=reviews&reviewSeason=${r.seasonNumber}`;
             const { base, glow } = fallbackPalette(isMovie ? r.movieId : r.showId);
             const moodMetas = moodMetasFromField(r.mood);
@@ -163,18 +163,17 @@ export default function Page() {
               // Same card as Profile's own "My Ratings" preview row
               // (poster + title/season/mood + star row + big number),
               // just full-width instead of a horizontal-scroll strip.
-              // Whole card goes to the saved rating card — same
-              // destination as the trailing ">" — EXCEPT the poster,
-              // which is its own separate control (stopPropagation) that
-              // goes to the show/movie's own page instead.
+              // The whole card and poster open the saved rating view.
               <div
                 key={key}
                 onClick={() => router.push(ratingPath)}
                 className="w-full flex items-center text-left rounded-2xl cursor-pointer active:scale-[0.98] transition"
                 style={{ gap: 11.7, padding: 11.7, background: t.cardFill, border: `1px solid ${t.cardBorder}` }}
               >
-                <button
-                  onClick={(e) => { e.stopPropagation(); router.push(detailPath); }}
+                <Link
+                  href={ratingPath}
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label={`Open rating for ${r.displayTitle ?? (isMovie ? "movie" : "show")}`}
                   className="relative rounded-xl overflow-hidden flex-shrink-0 active:opacity-70 transition"
                   style={{ width: 82.8, aspectRatio: "2 / 3" }}
                 >
@@ -184,7 +183,7 @@ export default function Page() {
                       <Icon name="sparkle" size={8.1} color={accent} />
                     </div>
                   )}
-                </button>
+                </Link>
                 <div className="min-w-0 flex-1">
                   <div className="truncate" style={{ fontSize: 14.4, fontWeight: 700, color: "#fff" }}>{r.displayTitle}</div>
                   <div className="flex items-center gap-1.5" style={{ marginTop: 2 }}>
