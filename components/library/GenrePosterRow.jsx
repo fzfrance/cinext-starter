@@ -55,7 +55,7 @@ export default function GenrePosterRow({
         <div style={{ width: "max-content", minWidth: "100%" }}>
           <div className="genre-poster-row-cases" style={{ display: "flex", gap, padding: "0 20px" }}>
             {items.map((s) => (
-              <div key={s.id} data-lib-ambient={s.posterPath || undefined} style={{ flexShrink: 0 }}>
+              <div key={s.id} style={{ flexShrink: 0 }}>
                 <PosterCard
                   show={s}
                   href={mediaType === "movie" ? `/movie/${s.id}` : `/show/${s.id}`}

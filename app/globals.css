@@ -6229,14 +6229,16 @@ html.vt-back::view-transition-new(root) {
   }
   .library-desktop-ambient-art {
     position: absolute;
-    inset: -42% -18%;
+    inset: -36% -14%;
     background-size: cover;
     background-position: center 30%;
     background-repeat: no-repeat;
-    filter: blur(96px) saturate(1.18) brightness(1.02);
-    transform: translateZ(0) scale(1.28);
+    /* Lighter blur — scroll-sampling hundreds of posters + blur(96) was janking the page. */
+    filter: blur(64px) saturate(1.12) brightness(0.98);
+    transform: translateZ(0) scale(1.2);
     opacity: 0;
-    transition: opacity 2.2s cubic-bezier(0.22, 0.08, 0.18, 1);
+    transition: opacity 900ms ease;
+    will-change: opacity;
   }
   /* Side washes stay dominant; mid is a soft bridge (not a full-bleed flood). */
   .library-desktop-ambient-art.is-left {
@@ -6786,26 +6788,23 @@ html.vt-back::view-transition-new(root) {
 .profile-desktop-identity {
   display: grid;
   grid-template-columns: 110px minmax(0, 1fr);
-  gap: 16px;
-  /* Keep avatar anchored on the left; glass spans the full identity band */
+  gap: 14px;
+  /* Avatar stays on the cover; glass lives only in the copy column. */
   margin-top: -55px;
-  padding: 12px 14px 16px;
+  padding: 0;
   position: relative;
   z-index: 3;
-  border-radius: 22px;
-  background: rgba(14, 16, 20, 0.52);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow:
-    0 12px 36px rgba(0, 0, 0, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(28px) saturate(150%);
-  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 .profile-desktop-avatar-wrap {
   display: flex;
   align-items: flex-start;
   position: relative;
-  z-index: 2;
+  z-index: 4;
 }
 .profile-desktop-avatar {
   width: 110px;
@@ -6831,12 +6830,23 @@ html.vt-back::view-transition-new(root) {
   z-index: 2;
   display: block;
   min-width: 0;
-  padding-bottom: 2px;
+  /* Glass starts at the avatar’s right edge — does not cover the backdrop
+     to the left of the profile icon. */
+  margin-top: 10px;
+  padding: 12px 14px 16px;
+  border-radius: 22px;
+  background: rgba(14, 16, 20, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 12px 36px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
 }
 .profile-desktop-edit-profile {
   position: absolute;
-  top: 64px;
-  right: 0;
+  top: 12px;
+  right: 14px;
   z-index: 2;
   display: inline-flex;
   align-items: center;
@@ -6858,7 +6868,7 @@ html.vt-back::view-transition-new(root) {
 }
 .profile-desktop-identity-copy {
   min-width: 0;
-  padding-top: 64px;
+  padding-top: 4px;
   padding-right: 118px;
 }
 .profile-desktop-name {

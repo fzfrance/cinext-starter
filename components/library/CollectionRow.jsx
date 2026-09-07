@@ -47,7 +47,7 @@ export default function CollectionRow({
               <div
                 key={`${s.mediaType ?? "tv"}-${s.id}`}
                 className="library-collection-poster"
-                data-lib-ambient={s.posterPath || undefined}
+               
               >
                 <PosterCard
                   show={s}

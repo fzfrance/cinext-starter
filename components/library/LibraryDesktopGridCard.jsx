@@ -10,7 +10,7 @@ export default function LibraryDesktopGridCard({ item, mediaType }) {
   const meta = [year, rating != null ? `★ ${rating}` : null].filter(Boolean).join(" · ");
 
   return (
-    <Link href={href} className="library-desktop-grid-card" data-lib-ambient={item.posterPath || undefined}>
+    <Link href={href} className="library-desktop-grid-card">
       <div className="library-desktop-grid-art">
         <PosterArt posterPath={item.posterPath} alt={item.title} tmdbSize="w500" sizes="(min-width: 900px) 18vw, 40vw" />
         <div className="library-desktop-grid-scrim">

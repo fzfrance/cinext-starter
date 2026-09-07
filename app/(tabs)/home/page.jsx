@@ -28,14 +28,11 @@ import { toTmdbLanguage } from "@/lib/languageCodes";
 import { tmdbImage } from "@/lib/tmdb";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 import UpcomingAllModal from "@/components/ui/UpcomingAllModal";
+import { homeSessionCache } from "@/lib/sessionCaches";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
-// Keeps the last rendered Home payload for this browser session. A tab
-// revisit paints it immediately, then the normal live fetch below refreshes
-// it in the background; nothing here survives a reload or replaces Supabase
-// as the source of truth.
-const homeSessionCache = new Map();
+// homeSessionCache: lib/sessionCaches.js (invalidated on Remove).
 
 // Persists See All → In Progress's grid/gallery choice, same localStorage-
 // backed per-browser preference pattern as e.g. Library's own view-mode
@@ -1353,6 +1350,19 @@ export default function Page() {
     window.addEventListener("pageshow", onPageShow);
     return () => window.removeEventListener("pageshow", onPageShow);
   }, []);
+
+  // Immediate refetch when Remove (or watchlist clear) wipes history in
+  // another route/tab in this browser — Supabase is already empty; this
+  // just drops the stale in-memory Continue Watching paint.
+  useEffect(() => {
+    const onWatchDataChanged = (event) => {
+      if (user?.id && event.detail?.userId && event.detail.userId !== user.id) return;
+      silentRefetchRef.current = true;
+      setRefreshToken((n) => n + 1);
+    };
+    window.addEventListener("cinext:watch-data-changed", onWatchDataChanged);
+    return () => window.removeEventListener("cinext:watch-data-changed", onWatchDataChanged);
+  }, [user?.id]);
 
   const heroShow = hero ? {
     showId: hero.id,

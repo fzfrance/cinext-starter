@@ -149,14 +149,12 @@ export default function LibraryDesktop({
   const router = useRouter();
   const pageRef = useRef(null);
   const ambientGenRef = useRef(0);
-  const ambientDebounceRef = useRef(null);
-  const ambientPickRafRef = useRef(null);
   const lastAmbientRef = useRef({ left: null, mid: null, right: null });
   const [sortId, setSortId] = useState("added_desc");
   const [sortOpen, setSortOpen] = useState(false);
-  // Balanced wash: left / mid / right poster art (not a single winner).
+  // Balanced wash from Watch Next only (not scroll-sampled genre posters).
   const [activeAmbient, setActiveAmbient] = useState({ left: null, mid: null, right: null });
-  // Stack of fading layers so scroll swaps ease instead of snapping.
+  // Stack of fading layers so tab/filter swaps ease instead of snapping.
   const [ambientLayers, setAmbientLayers] = useState([]);
 
   useEffect(() => {
@@ -285,8 +283,6 @@ export default function LibraryDesktop({
       await Promise.all(sides.map((side) => preload(nextBySide[side])));
       if (cancelled || ambientGenRef.current !== gen) return;
 
-      // Per-side crossfade: keep the current visible layer until the new
-      // one is ready, then overlap opacities so total wash never dips dark.
       setAmbientLayers((prev) => {
         const kept = [];
         for (const side of sides) {
@@ -302,7 +298,6 @@ export default function LibraryDesktop({
             kept.push(sameVisible);
             continue;
           }
-          // Cap: one outgoing + one incoming per side (stops tear from stacked blurs).
           const outgoing = prev.find((l) => l.side === side && l.visible);
           if (outgoing) kept.push({ ...outgoing, visible: true, pendingExit: true });
           kept.push({
@@ -328,8 +323,6 @@ export default function LibraryDesktop({
       });
       timers.push(showRaf);
 
-      // Let the new wash rise first, then ease the old one out — avoids the
-      // dark→bright→dark “whoop” from both sides being near 0 together.
       const exitTimer = window.setTimeout(() => {
         if (cancelled || ambientGenRef.current !== gen) return;
         setAmbientLayers((prev) =>
@@ -337,7 +330,7 @@ export default function LibraryDesktop({
             layer.pendingExit ? { ...layer, visible: false, pendingExit: false } : layer
           )
         );
-      }, 520);
+      }, 400);
       timers.push(exitTimer);
 
       const pruneTimer = window.setTimeout(() => {
@@ -345,7 +338,7 @@ export default function LibraryDesktop({
         setAmbientLayers((prev) =>
           prev.filter((layer) => layer.visible || String(layer.id || "").startsWith(`${gen}-`))
         );
-      }, 2800);
+      }, 1600);
       timers.push(pruneTimer);
     })();
 
@@ -355,7 +348,6 @@ export default function LibraryDesktop({
         img.onload = null;
         img.onerror = null;
       }
-      // showRaf is a raf id; others are timeouts — cancel both safely.
       for (const id of timers) {
         window.cancelAnimationFrame(id);
         window.clearTimeout(id);
@@ -363,90 +355,8 @@ export default function LibraryDesktop({
     };
   }, [activeAmbient, defaultAmbient]);
 
-  useEffect(() => {
-    const root = pageRef.current;
-    if (!root) return undefined;
-
-    const pickAmbient = () => {
-      const nodes = root.querySelectorAll("[data-lib-ambient]");
-      if (!nodes.length) return;
-      const focusY = window.innerHeight * 0.4;
-      const candidates = [];
-      nodes.forEach((node) => {
-        const path = node.getAttribute("data-lib-ambient");
-        if (!path) return;
-        const rect = node.getBoundingClientRect();
-        if (rect.bottom < 48 || rect.top > window.innerHeight - 24) return;
-        const midY = (rect.top + rect.bottom) / 2;
-        candidates.push({
-          path,
-          left: rect.left,
-          midY,
-          // Bucket posters into visual rows so Watch Next isn't mixed with
-          // the genre shelf beneath it when both are on screen.
-          row: Math.round(rect.top / 56),
-          dist: Math.abs(midY - focusY),
-        });
-      });
-      if (!candidates.length) return;
-
-      // Prefer the single closest row to the focus line, then map L/M/R from
-      // that row's screen order — matches what the eye sees on the page.
-      const rowScores = new Map();
-      for (const c of candidates) {
-        const prev = rowScores.get(c.row);
-        if (!prev || c.dist < prev.dist) rowScores.set(c.row, c);
-      }
-      let bestRow = null;
-      let bestDist = Infinity;
-      for (const c of rowScores.values()) {
-        if (c.dist < bestDist) {
-          bestDist = c.dist;
-          bestRow = c.row;
-        }
-      }
-      const row = candidates
-        .filter((c) => c.row === bestRow)
-        .sort((a, b) => a.left - b.left);
-      if (!row.length) return;
-
-      const next = pathsToAmbient(row.map((c) => c.path));
-      const prev = lastAmbientRef.current;
-      if (
-        prev.left === next.left &&
-        prev.mid === next.mid &&
-        prev.right === next.right
-      ) {
-        return;
-      }
-      lastAmbientRef.current = next;
-      setActiveAmbient(next);
-    };
-
-    const schedulePick = () => {
-      if (ambientPickRafRef.current != null) return;
-      ambientPickRafRef.current = window.requestAnimationFrame(() => {
-        ambientPickRafRef.current = null;
-        if (ambientDebounceRef.current) window.clearTimeout(ambientDebounceRef.current);
-        // Short settle so continuous scroll blends; still gradual via CSS fade.
-        ambientDebounceRef.current = window.setTimeout(() => {
-          ambientDebounceRef.current = null;
-          pickAmbient();
-        }, 90);
-      });
-    };
-
-    pickAmbient();
-    window.addEventListener("scroll", schedulePick, { passive: true });
-    window.addEventListener("resize", schedulePick);
-    return () => {
-      window.removeEventListener("scroll", schedulePick);
-      window.removeEventListener("resize", schedulePick);
-      if (ambientDebounceRef.current) window.clearTimeout(ambientDebounceRef.current);
-      if (ambientPickRafRef.current != null) window.cancelAnimationFrame(ambientPickRafRef.current);
-    };
-  }, [tab, sortedFiltered, sortedCollections, recItems, viewMode, activeFilter]);
-
+  // Ambient is locked to Watch Next / default sample only — no scroll
+  // sampling over hundreds of genre posters (that was the jank source).
   const empty =
     tab === "collections"
       ? loaded && collectionsRaw.length === 0

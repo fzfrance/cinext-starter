@@ -21,11 +21,10 @@ import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { bangkokNow as getBangkokNow } from "@/lib/bangkokDate";
 import { themes, DEFAULT_ACCENT, statIconGold, statCardBg } from "@/lib/theme";
 import { tmdbImage } from "@/lib/tmdb";
+import { highlightsSessionCache } from "@/lib/sessionCaches";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
-const highlightsSessionCache = new Map();
-
 function useIsDesktopHighlights() {
   // null until mounted — avoids SSR/client flash that remounts the wrong tree
   // (mobile markup → desktop markup) and feels like broken/slow loading.
