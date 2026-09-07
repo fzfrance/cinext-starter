@@ -27,10 +27,18 @@ const accent = DEFAULT_ACCENT;
 const highlightsSessionCache = new Map();
 
 function useIsDesktopHighlights() {
-  const [isDesktop, setIsDesktop] = useState(false);
+  // null until mounted — avoids SSR/client flash that remounts the wrong tree
+  // (mobile markup → desktop markup) and feels like broken/slow loading.
+  const [isDesktop, setIsDesktop] = useState(null);
   useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return undefined;
-    const mq = window.matchMedia("(min-width: 900px)");
+    if (typeof window === "undefined" || !window.matchMedia) {
+      setIsDesktop(false);
+      return undefined;
+    }
+    // Desktop Highlights is for mouse/trackpad web layouts only. A tablet
+    // or installed PWA can be wider than 900px, but must keep the mobile
+    // Highlights composition and widgets.
+    const mq = window.matchMedia("(min-width: 900px) and (pointer: fine)");
     const sync = () => setIsDesktop(mq.matches);
     sync();
     mq.addEventListener?.("change", sync);
@@ -74,6 +82,9 @@ export default function Page() {
   const { user, loading: authLoading } = useAuth();
   const readableLanguages = useReadableLanguages();
   const isDesktopHighlights = useIsDesktopHighlights();
+  const layoutReady = isDesktopHighlights !== null;
+  const isDesktop = isDesktopHighlights === true;
+  const isMobile = isDesktopHighlights === false;
   // Bangkok "today" — computed fresh on every render (component-scoped,
   // not module-scoped) rather than once at module load. It used to be the
   // latter, deliberately, on the theory that recomputing it was pointless
@@ -1172,7 +1183,7 @@ export default function Page() {
         <div className="highlights-header-title" style={{ fontSize: 28, fontWeight: 800, color: "#fff" }}>Highlights</div>
         <div className="highlights-header-sub">Your viewing journey at a glance.</div>
       </div>
-      {!isDesktopHighlights ? yearSelector : null}
+      {isMobile ? yearSelector : null}
     </div>
   );
 
@@ -1194,7 +1205,7 @@ export default function Page() {
       ) : (
         <div className="w-full" style={{ height: 36 }} />
       )}
-      {isDesktopHighlights ? (
+      {isDesktop ? (
         <div className="highlights-year-slot absolute right-6 top-1/2" style={{ transform: "translateY(-50%)" }}>
           {yearSelector}
         </div>
@@ -1302,7 +1313,7 @@ export default function Page() {
             </div>
           )}
 
-          {!isDesktopHighlights && monthStatus === "ready" && monthEntries.length > 0 && (
+          {layoutReady && isMobile && monthStatus === "ready" && monthEntries.length > 0 && (
             <>
               {/* headline stat — same concise "N hours watched" copy, just
                   a stronger size hierarchy: the number is the dominant
@@ -1506,7 +1517,7 @@ export default function Page() {
             </>
           )}
 
-          {isDesktopHighlights && monthStatus === "ready" && monthEntries.length > 0 && (
+          {layoutReady && isDesktop && monthStatus === "ready" && monthEntries.length > 0 && (
             <>
               <div
                 className={`highlights-overview${personality ? "" : " highlights-overview-without-personality"}`}
@@ -1636,7 +1647,7 @@ export default function Page() {
           )}
 
           {/* Top Genres — desktop only here; mobile includes genres in the block above. */}
-          {isDesktopHighlights && monthStatus === "ready" && monthEntries.length > 0 && topGenres.length > 0 && (
+          {layoutReady && isDesktop && monthStatus === "ready" && monthEntries.length > 0 && topGenres.length > 0 && (
             <div className="highlights-panel highlights-tops-genres highlights-genres-before-history">
               <div className="highlights-tops-head">
                 <div className="highlights-section-title" style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 0 }}>Top Genres</div>
@@ -1657,8 +1668,8 @@ export default function Page() {
               "No watch activity" copy below. */}
           {monthStatus === "ready" && (
             <div
-              className={isDesktopHighlights ? "highlights-panel highlights-history" : "px-6"}
-              style={isDesktopHighlights ? undefined : { marginTop: 26 }}
+              className={isDesktop ? "highlights-panel highlights-history" : "px-6"}
+              style={isDesktop ? undefined : { marginTop: 26 }}
             >
               <style>{`
                 @keyframes highlightsCalSlide { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: translateX(0); } }
@@ -1666,18 +1677,18 @@ export default function Page() {
               `}</style>
 
               <div
-                className={isDesktopHighlights ? "highlights-history-head" : undefined}
-                style={{ marginBottom: 12, display: "flex", alignItems: isDesktopHighlights ? "baseline" : "center", justifyContent: "space-between", gap: 12 }}
+                className={isDesktop ? "highlights-history-head" : undefined}
+                style={{ marginBottom: 12, display: "flex", alignItems: isDesktop ? "baseline" : "center", justifyContent: "space-between", gap: 12 }}
               >
-                <span className={isDesktopHighlights ? "highlights-section-title" : undefined} style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 0, padding: 0 }}>Watch History</span>
-                <span className={isDesktopHighlights ? "highlights-history-sub" : undefined} style={isDesktopHighlights ? undefined : { fontSize: 12, fontWeight: 500, color: t.textDim }}>{activeDayCount} Active day{activeDayCount === 1 ? "" : "s"}</span>
+                <span className={isDesktop ? "highlights-section-title" : undefined} style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 0, padding: 0 }}>Watch History</span>
+                <span className={isDesktop ? "highlights-history-sub" : undefined} style={isDesktop ? undefined : { fontSize: 12, fontWeight: 500, color: t.textDim }}>{activeDayCount} Active day{activeDayCount === 1 ? "" : "s"}</span>
               </div>
 
-              <div className={isDesktopHighlights ? "highlights-history-body" : undefined}>
-              <div className={isDesktopHighlights ? "highlights-calendar-col" : undefined}>
+              <div className={isDesktop ? "highlights-history-body" : undefined}>
+              <div className={isDesktop ? "highlights-calendar-col" : undefined}>
               <div
-                className={isDesktopHighlights ? "highlights-calendar" : "rounded-[24px]"}
-                style={isDesktopHighlights ? undefined : { padding: 24, background: "#171717", border: "1px solid rgba(255,255,255,0.05)" }}
+                className={isDesktop ? "highlights-calendar" : "rounded-[24px]"}
+                style={isDesktop ? undefined : { padding: 24, background: "#171717", border: "1px solid rgba(255,255,255,0.05)" }}
               >
                 <div className="flex items-center justify-between">
                   <button
@@ -1756,11 +1767,11 @@ export default function Page() {
               </div>
               </div>
 
-              <div className={isDesktopHighlights ? "highlights-day-detail" : undefined}>
+              <div className={isDesktop ? "highlights-day-detail" : undefined}>
               <div
                 key={`${selectedDay}-header`}
-                className={isDesktopHighlights ? "highlights-day-header" : undefined}
-                style={{ marginTop: isDesktopHighlights ? 0 : 20, animation: "highlightsDayFade 200ms ease" }}
+                className={isDesktop ? "highlights-day-header" : undefined}
+                style={{ marginTop: isDesktop ? 0 : 20, animation: "highlightsDayFade 200ms ease" }}
               >
                 <div style={{ fontSize: 22, fontWeight: 600, color: "#fff" }}>
                   {activeDay ? `${MONTH_ABBRS[month - 1]} ${activeDay.day}` : "Select a date"}
@@ -1781,8 +1792,8 @@ export default function Page() {
               {activeDay && activeDay.entries.length > 0 ? (
                 <div
                   key={`${selectedDay}-list`}
-                  className={isDesktopHighlights ? "highlights-day-list" : "rounded-2xl overflow-hidden"}
-                  style={isDesktopHighlights
+                  className={isDesktop ? "highlights-day-list" : "rounded-2xl overflow-hidden"}
+                  style={isDesktop
                     ? { animation: "highlightsDayFade 200ms ease" }
                     : { marginTop: 14, background: "#171717", border: "1px solid rgba(255,255,255,0.05)", animation: "highlightsDayFade 200ms ease" }}
                 >
@@ -1802,8 +1813,8 @@ export default function Page() {
                     return (
                       <div
                         key={group.showId}
-                        className={isDesktopHighlights ? "highlights-day-group" : undefined}
-                        style={isDesktopHighlights ? undefined : { borderTop: gi > 0 ? "1px solid rgba(255,255,255,0.05)" : "none" }}
+                        className={isDesktop ? "highlights-day-group" : undefined}
+                        style={isDesktop ? undefined : { borderTop: gi > 0 ? "1px solid rgba(255,255,255,0.05)" : "none" }}
                         data-hl-ambient={group.entries[0]?.posterPath || group.entries[0]?.backdropPath || undefined}
                       >
                         {/* Two separate tap targets, not one row-wide
@@ -2026,19 +2037,19 @@ export default function Page() {
               desktop; left-aligned to the same content column as posters. */}
           {yearOnlyEntries.length > 0 && (
             <div
-              className={isDesktopHighlights ? "highlights-year-only" : undefined}
-              style={isDesktopHighlights ? undefined : { marginTop: 30 }}
+              className={isDesktop ? "highlights-year-only" : undefined}
+              style={isDesktop ? undefined : { marginTop: 30 }}
             >
               <div
-                className={isDesktopHighlights ? "highlights-year-only-head flex items-baseline gap-2" : "px-6 flex items-baseline gap-2"}
+                className={isDesktop ? "highlights-year-only-head flex items-baseline gap-2" : "px-6 flex items-baseline gap-2"}
                 style={{ marginBottom: 12 }}
               >
-                <span className={isDesktopHighlights ? "highlights-section-title" : undefined} style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 0 }}>Watched in {year}</span>
-                <span className={isDesktopHighlights ? "highlights-year-only-sub" : undefined} style={{ fontSize: 12, color: t.textDim }}>no specific date · {yearOnlyHours}h</span>
+                <span className={isDesktop ? "highlights-section-title" : undefined} style={{ fontSize: 16.5, fontWeight: 700, color: "#fff", marginBottom: 0 }}>Watched in {year}</span>
+                <span className={isDesktop ? "highlights-year-only-sub" : undefined} style={{ fontSize: 12, color: t.textDim }}>no specific date · {yearOnlyHours}h</span>
               </div>
               {yearOnlyTopShows.length > 0 && (
                 <div
-                  className={isDesktopHighlights ? "highlights-year-only-posters flex gap-3 overflow-x-auto" : "flex gap-3 pl-6 overflow-x-auto"}
+                  className={isDesktop ? "highlights-year-only-posters flex gap-3 overflow-x-auto" : "flex gap-3 pl-6 overflow-x-auto"}
                   style={{ scrollbarWidth: "none" }}
                 >
                   {yearOnlyTopShows.map((s) => {
@@ -2047,17 +2058,17 @@ export default function Page() {
                       <button
                         key={s.showId}
                         onClick={() => router.push(`/show/${s.showId}`)}
-                        className={isDesktopHighlights ? "flex-shrink-0 text-left active:scale-95 transition highlights-poster-card highlights-year-only-card" : "flex-shrink-0 text-left active:scale-95 transition"}
-                        style={{ width: isDesktopHighlights ? 126 : 156 }}
+                        className={isDesktop ? "flex-shrink-0 text-left active:scale-95 transition highlights-poster-card highlights-year-only-card" : "flex-shrink-0 text-left active:scale-95 transition"}
+                        style={{ width: isDesktop ? 126 : 156 }}
                         data-hl-ambient={s.posterPath || undefined}
                       >
                         <div
-                          className={isDesktopHighlights ? "relative rounded-2xl overflow-hidden highlights-poster-art" : "relative rounded-2xl overflow-hidden"}
-                          style={{ aspectRatio: "2 / 3", borderRadius: isDesktopHighlights ? 14 : undefined, boxShadow: isDesktopHighlights ? "0 10px 24px rgba(0,0,0,0.34)" : "0 8px 24px rgba(0,0,0,0.5)" }}
+                          className={isDesktop ? "relative rounded-2xl overflow-hidden highlights-poster-art" : "relative rounded-2xl overflow-hidden"}
+                          style={{ aspectRatio: "2 / 3", borderRadius: isDesktop ? 14 : undefined, boxShadow: isDesktop ? "0 10px 24px rgba(0,0,0,0.34)" : "0 8px 24px rgba(0,0,0,0.5)" }}
                         >
                           <PosterArt posterPath={s.posterPath} alt={title} />
                         </div>
-                        {isDesktopHighlights ? (
+                        {isDesktop ? (
                           <>
                             <div className="highlights-poster-title">{title}</div>
                             <div className="highlights-poster-stat">{s.hours}h · {s.episodeCount} ep</div>
@@ -2071,13 +2082,13 @@ export default function Page() {
                       </button>
                     );
                   })}
-                  {!isDesktopHighlights && <div className="w-2 flex-shrink-0" />}
+                  {isMobile && <div className="w-2 flex-shrink-0" />}
                 </div>
               )}
               {yearOnlyTopGenres.length > 0 && (
-                <div className={isDesktopHighlights ? "highlights-year-only-genres" : undefined} style={{ marginTop: 14 }}>
+                <div className={isDesktop ? "highlights-year-only-genres" : undefined} style={{ marginTop: 14 }}>
                   <GenreTagRow
-                    className={isDesktopHighlights ? "highlights-genre-tag-row" : undefined}
+                    className={isDesktop ? "highlights-genre-tag-row" : undefined}
                     genres={yearOnlyTopGenres.map((g) => ({ name: g.genre, color: g.color, icon: g.icon, emoji: g.emoji }))}
                   />
                 </div>
@@ -2259,7 +2270,7 @@ export default function Page() {
       {/* Bulk actions: mobile bottom bar (original) + desktop mid popup */}
       {bulkMode && (
         <>
-          {!isDesktopHighlights && (
+          {isMobile && (
           <div
             className="highlights-bulk-bar-mobile fixed left-0 right-0 flex items-center justify-between"
             style={{ bottom: 0, zIndex: 60, padding: "12px 16px calc(env(safe-area-inset-bottom, 0px) + 12px)", background: "rgba(10,10,12,0.97)", borderTop: `1px solid ${t.glassBorder}`, backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)" }}
@@ -2291,7 +2302,7 @@ export default function Page() {
           </div>
           )}
 
-          {isDesktopHighlights && (
+          {isDesktop && (
           <div
             className="highlights-bulk-popup"
             role="dialog"

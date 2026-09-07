@@ -411,7 +411,7 @@ body {
 
 /* Highlights desktop (≥900px) — equal stats | personality; genres under
    personality; shows/movies stacked rows; history aligned to same width. */
-@media (min-width: 900px) {
+@media (min-width: 900px) and (pointer: fine) {
   .highlights-page {
     background: transparent;
     min-height: 100vh;
