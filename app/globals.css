@@ -243,7 +243,16 @@ body {
 
   /* The cinematic launch screen is for touch/app startup. Web desktop goes
      straight to the sign-in hero instead of showing an extra loading page. */
-  [data-launch-screen] { display: none !important; }
+  [data-launch-screen] {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
+  /* Hard-cap the mark even if display:none is somehow overridden mid-load. */
+  [data-launch-screen] img {
+    max-width: 205px !important;
+    max-height: 220px !important;
+  }
   body:has(.auth-page) { overflow: hidden !important; }
 
   .auth-page {
@@ -403,100 +412,6 @@ body {
 
 /* Keep the pre-desktop Highlights composition on phones and touch tablets.
    This is intentionally separate from the desktop glass layout below. */
-@media (max-width: 899px) {
-  .highlights-ambient { display: none !important; }
-  .highlights-glow { display: block !important; }
-  .highlights-header-sub { display: none !important; }
-
-  .highlights-overview { display: flex; flex-direction: column; }
-  .highlights-hours-stack,
-  .highlights-stat-widget { display: contents; }
-  .highlights-hours {
-    order: 1;
-    flex-direction: row;
-    align-items: baseline;
-    gap: 6px;
-    margin: 22px 0 0;
-    padding: 0 24px;
-    border-bottom: none;
-  }
-  .highlights-hours-n { font-size: clamp(51px, 12vw, 64px); letter-spacing: -0.04em; }
-  .highlights-hours-label { font-size: 22px; font-weight: 600; color: rgba(255,255,255,0.62); }
-  .highlights-personality-wrap { order: 2; }
-  .highlights-personality-panel {
-    background: linear-gradient(135deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018)) !important;
-    border: 1px solid rgba(255,255,255,0.09) !important;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 48px rgba(0,0,0,0.28) !important;
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    gap: 16.8px !important;
-    padding: 22.5px !important;
-    border-radius: 28px !important;
-  }
-  .highlights-personality-icon,
-  .highlights-personality-badge { width: 61.7px !important; height: 61.7px !important; }
-  .highlights-personality-glow { width: 112px !important; height: 112px !important; }
-  .highlights-personality-eyebrow { font-size: 13.2px !important; }
-  .highlights-personality-name { font-size: 22.3px !important; }
-  .highlights-personality-desc { font-size: 12.5px !important; margin-top: 2.8px !important; }
-
-  .highlights-summary-stats {
-    order: 3;
-    display: flex;
-    align-items: stretch;
-    gap: 10px;
-    margin: 14px 0 0;
-    padding: 0 24px;
-    overflow-x: auto;
-    grid-template-columns: none;
-  }
-  .highlights-summary-stat {
-    flex: 0 0 auto;
-    width: 86.36px;
-    padding: 12px 8px 10px;
-    background: #131313;
-    border-radius: 12.23px;
-    border-right: none !important;
-  }
-  .highlights-summary-stat:not(:last-child) { border-right: none; }
-  .highlights-summary-stat-icon {
-    width: 28px;
-    height: 28px;
-    border-radius: 8px;
-    background: rgba(206,172,139,0.12);
-    margin-bottom: 6px;
-  }
-  .highlights-summary-stat-icon svg { stroke: #CEAC8B !important; color: #CEAC8B; }
-  .highlights-summary-stat-n { font-size: 18px; font-weight: 700; color: #fff; }
-  .highlights-summary-stat-l { font-size: 10.5px; }
-
-  .highlights-panel {
-    background: transparent;
-    border: none;
-    box-shadow: none;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    padding: 0 24px;
-    margin-top: 28px;
-  }
-  .highlights-tops .highlights-poster-card { width: 156px !important; }
-  .highlights-calendar {
-    margin-top: 8px;
-    padding: 24px;
-    background: #171717;
-    border: 1px solid rgba(255,255,255,0.05);
-    border-radius: 24px;
-  }
-  .highlights-day-group,
-  .highlights-day-empty {
-    background: #171717;
-    border: 1px solid rgba(255,255,255,0.05);
-    box-shadow: none;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-  .highlights-bulk-popup { display: none !important; }
-}
 
 @media (min-width: 700px) and (min-height: 700px) and (pointer: coarse) {
   .home-hero {
@@ -6779,7 +6694,7 @@ html.vt-back::view-transition-new(root) {
 }
 .profile-modal-card {
   position: relative;
-  width: min(840px, 100%);
+  width: min(805px, 100%);
   height: min(90vh, 950px);
   max-height: min(90vh, 950px);
   display: flex;
@@ -6895,23 +6810,15 @@ html.vt-back::view-transition-new(root) {
 .profile-desktop-identity {
   display: grid;
   grid-template-columns: 110px minmax(0, 1fr);
-  gap: 14px;
-  /* Avatar stays on the cover; glass lives only in the copy column. */
+  gap: 16px;
   margin-top: -55px;
-  padding: 0;
+  padding: 0 2px 0 15%;
   position: relative;
   z-index: 3;
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 .profile-desktop-avatar-wrap {
   display: flex;
   align-items: flex-start;
-  position: relative;
-  z-index: 4;
 }
 .profile-desktop-avatar {
   width: 110px;
@@ -6921,7 +6828,7 @@ html.vt-back::view-transition-new(root) {
   display: grid;
   place-items: center;
   background: linear-gradient(145deg, #9ec4ff 0%, #e8eef8 100%);
-  border: 3px solid rgba(12, 13, 16, 0.85);
+  border: 3px solid #0c0d10;
   box-shadow: 0 8px 24px rgba(0,0,0,0.4);
   color: #1a2433;
   font-size: 34px;
@@ -6934,26 +6841,14 @@ html.vt-back::view-transition-new(root) {
 }
 .profile-desktop-identity-main {
   position: relative;
-  z-index: 2;
   display: block;
   min-width: 0;
-  /* Glass starts at the avatar’s right edge — does not cover the backdrop
-     to the left of the profile icon. */
-  margin-top: 10px;
-  padding: 12px 14px 16px;
-  border-radius: 22px;
-  background: rgba(14, 16, 20, 0.52);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow:
-    0 12px 36px rgba(0, 0, 0, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(28px) saturate(150%);
-  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  padding-bottom: 6px;
 }
 .profile-desktop-edit-profile {
   position: absolute;
-  top: 12px;
-  right: 14px;
+  top: 64px;
+  right: 0;
   z-index: 2;
   display: inline-flex;
   align-items: center;
@@ -6975,7 +6870,7 @@ html.vt-back::view-transition-new(root) {
 }
 .profile-desktop-identity-copy {
   min-width: 0;
-  padding-top: 4px;
+  padding-top: 64px;
   padding-right: 118px;
 }
 .profile-desktop-name {

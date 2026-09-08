@@ -1,6 +1,6 @@
 "use client";
 
-import Icon from "@/components/ui/Icon";
+import Icon from "@/components/mobile-original/ui/Icon";
 
 const STATUS_ITEMS = [
   { id: "watchlist", label: "Watchlist", icon: "bookmark" },
@@ -19,46 +19,26 @@ export const MOVIE_STATUS_ITEMS = [
   { id: "completed", label: "Watched", icon: "select" },
 ];
 
-const ALL_STATUS_ITEM = { id: "all", label: "All", icon: "layers" };
-
 // Horizontal status filter row, directly under Recommended, centered.
 // Collapsed by default to a bare dim icon (no fill/border); whichever
 // status is the current filter value expands into a solid white pill
-// (black icon + black text).
-//
-// Mobile: no "All" pill — every item shows by default with nothing active,
-// and tapping a status filters to just that one. Tapping the ALREADY-active
-// pill again deselects it (onSelect("all")).
-//
-// Desktop (showAllPill): an explicit "All" pill sits next to Watchlist and
-// starts selected whenever the filter is "all".
-export default function StatusFilterRow({
-  statusFilter,
-  counts,
-  onSelect,
-  items = STATUS_ITEMS,
-  showAllPill = false,
-}) {
-  const rowItems = showAllPill ? [ALL_STATUS_ITEM, ...items] : items;
-
+// (black icon + black text). There's no "All" pill — every item shows by
+// default with nothing active, and tapping a status filters to just that
+// one. Tapping the ALREADY-active pill again deselects it (onSelect("all")
+// — an internal-only sentinel the caller already uses for "no filter"),
+// which is how you get back to seeing everything: undo the current pick,
+// don't pick a separate "All" option.
+export default function StatusFilterRow({ statusFilter, counts, onSelect, items = STATUS_ITEMS }) {
   return (
     <div className="no-scrollbar" style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}>
       <div className="flex items-center justify-center" style={{ gap: 16, padding: "0 20px" }}>
-        {rowItems.map((s) => {
+        {items.map((s) => {
           const active = statusFilter === s.id;
           const count = counts?.[s.id] ?? 0;
           return (
             <button
               key={s.id}
-              onClick={() => {
-                if (s.id === "all") {
-                  onSelect("all");
-                  return;
-                }
-                // With an explicit All pill, re-tapping the active status
-                // returns to All; without it, same sentinel clears the filter.
-                onSelect(active ? "all" : s.id);
-              }}
+              onClick={() => onSelect(active ? "all" : s.id)}
               className="flex items-center flex-shrink-0 active:scale-95 transition"
               style={{
                 height: 38,

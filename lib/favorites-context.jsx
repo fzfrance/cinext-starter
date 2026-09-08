@@ -35,6 +35,15 @@ export function FavoritesProvider({ children }) {
   const { user } = useAuth();
   const [libraryById, setLibraryById] = useState({});
   const [loading, setLoading] = useState(true);
+  const [refreshToken, setRefreshToken] = useState(0);
+  useEffect(() => {
+    const refresh = (event) => {
+      if (event.detail?.userId && event.detail.userId !== user?.id) return;
+      setRefreshToken((n) => n + 1);
+    };
+    window.addEventListener("cinext:watch-data-changed", refresh);
+    return () => window.removeEventListener("cinext:watch-data-changed", refresh);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user) { setLibraryById({}); setLoading(false); return; }
@@ -44,7 +53,7 @@ export function FavoritesProvider({ children }) {
       .then((byShow) => { if (!cancelled) { setLibraryById(byShow); setLoading(false); } })
       .catch((err) => { console.error(err); if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, refreshToken]);
 
   const isFavorite = useCallback((tmdbShowId) => libraryById[tmdbShowId]?.favorite === true, [libraryById]);
 

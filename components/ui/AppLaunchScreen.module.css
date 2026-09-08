@@ -93,11 +93,20 @@
 .markWrap {
   position: relative;
   width: clamp(121px, 33.66vw, 168px);
+  max-width: 205px;
   aspect-ratio: 1506 / 1564;
   margin-bottom: -18px;
+  /* If the CSS module fails to load mid-crash, still cap the mark so it
+     can't fill the viewport via Next/Image `fill` leftovers. */
+  max-height: 220px;
 }
 
 .mark {
+  display: block;
+  width: 100% !important;
+  height: auto !important;
+  max-width: 205px;
+  max-height: 220px;
   object-fit: contain;
   transform: translateY(-6%) scale(1.14);
   filter: drop-shadow(0 3px 8px rgba(255, 255, 255, 0.12));

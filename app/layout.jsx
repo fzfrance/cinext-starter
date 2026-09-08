@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import "./globals.css";
+import "./mobile-original.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { FavoritesProvider } from "@/lib/favorites-context";
 import { MovieFavoritesProvider } from "@/lib/movie-favorites-context";

@@ -89,10 +89,12 @@ export default function AppLaunchScreen() {
           <Image
             src="/cinext-launch-mark.png"
             alt=""
-            fill
+            width={168}
+            height={174}
             priority
-            sizes="240px"
+            sizes="(max-width: 699px) 34vw, 205px"
             className={styles.mark}
+            style={{ width: "100%", height: "auto", objectFit: "contain" }}
           />
         </div>
         <Image src="/text/logo.png" alt="Cinext" width={681} height={85} priority className={styles.wordmark} />
