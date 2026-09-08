@@ -248,10 +248,8 @@ export default function EpisodeDetail({
             borderRadius: 999,
             background: ep.daysUntil != null
               ? "rgba(255,255,255,0.06)"
-              : ep.watched
-              ? "#fff"
-              : "rgba(255,255,255,0.12)",
-            color: ep.daysUntil != null ? t.textDim : ep.watched ? "#111" : "#fff",
+              : "#fff",
+            color: ep.daysUntil != null ? t.textDim : "#111",
             border: ep.daysUntil != null ? `1px solid ${t.glassBorder}` : "none",
             backdropFilter: !ep.watched && ep.daysUntil == null ? "blur(12px)" : undefined,
             WebkitBackdropFilter: !ep.watched && ep.daysUntil == null ? "blur(12px)" : undefined,
