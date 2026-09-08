@@ -28,7 +28,12 @@ const PREVIEW_SHOW_LIMIT = 10;
  * Desktop mid-screen floating Profile card. Opens over the current page
  * with a blurred scrim; content scrolls inside the card.
  */
-export default function ProfileModal({ open, onClose }) {
+export default function ProfileModal({
+  open,
+  onClose,
+  expanded = false,
+  onExpandedChange,
+}) {
   const pathname = usePathname();
   const { user } = useAuth();
   const { isFavorite, toggleFavorite, favoriteEntries, loading: favoritesCtxLoading } = useFavorites();
@@ -73,7 +78,12 @@ export default function ProfileModal({ open, onClose }) {
   useEffect(() => {
     if (!open) return undefined;
     const onKey = (event) => {
-      if (event.key === "Escape") onClose?.();
+      if (event.key !== "Escape") return;
+      if (expanded) {
+        onExpandedChange?.(false);
+        return;
+      }
+      onClose?.();
     };
     document.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
@@ -82,7 +92,7 @@ export default function ProfileModal({ open, onClose }) {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
     };
-  }, [open, onClose]);
+  }, [open, onClose, expanded, onExpandedChange]);
 
   useEffect(() => {
     if (!open) return;
@@ -277,15 +287,27 @@ export default function ProfileModal({ open, onClose }) {
   }));
   const displayedFavorites = sortFavorites(resolvedShowFavorites, showFavSort, showFavOrder);
   const displayedMovieFavorites = sortFavorites(
-    movieFavorites.filter((movie) => isMovieFavorite(movie.id)),
+    movieFavorites
+      .filter((movie) => isMovieFavorite(movie.id))
+      .map((movie) => ({
+        ...movie,
+        title: resolveTitle(movie, readableLanguages),
+      })),
     movieFavSort,
     movieFavOrder
   );
 
   return createPortal(
-    <div className="profile-modal-scrim" role="presentation" onClick={onClose}>
+    <div
+      className={`profile-modal-scrim${expanded ? " is-expanded" : ""}`}
+      role="presentation"
+      onClick={() => {
+        if (expanded) onExpandedChange?.(false);
+        else onClose?.();
+      }}
+    >
       <div
-        className="profile-modal-card"
+        className={`profile-modal-card${expanded ? " is-expanded" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label="Profile"
@@ -311,6 +333,12 @@ export default function ProfileModal({ open, onClose }) {
           toggleMovieFavorite={toggleMovieFavorite}
           readableLanguages={readableLanguages}
           onClose={onClose}
+          expanded={expanded}
+          onToggleExpand={() => onExpandedChange?.(!expanded)}
+          onShowFavSortChange={setShowFavSort}
+          onMovieFavSortChange={setMovieFavSort}
+          onShowFavOrderChange={setShowFavOrder}
+          onMovieFavOrderChange={setMovieFavOrder}
         />
       </div>
     </div>,

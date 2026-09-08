@@ -1,38 +1,26 @@
 import { NextResponse } from "next/server";
 import {
-  getShowDetails, getShowRecommendations, discoverShowsByGenre, discoverNewReleasesByGenre, getGenres, isExcludedShow,
-  getMovieDetails, getMovieRecommendations, discoverMoviesByGenre, discoverNewMovieReleasesByGenre, getMovieGenres, isExcludedMovie,
+  getShowDetails, getShowRecommendations, discoverShowsByGenre, discoverShowsForTaste, discoverNewReleasesByGenre, getGenres, isExcludedShow, trendingShows,
+  getMovieDetails, getMovieRecommendations, discoverMoviesByGenre, discoverMoviesForTaste, discoverNewMovieReleasesByGenre, getMovieGenres, isExcludedMovie, trendingMovies,
 } from "@/lib/tmdb";
 import { mediaKey } from "@/lib/media";
 
-const MAX_ITEMS = 12;
-const MAX_SEED_GENRES = 3;
+const MAX_ITEMS = 48;
+const MAX_SEED_GENRES = 4;
+const MAX_SEED_LANGS = 3;
 
-// Real per-user "Recommended for You" — Explore renders this as two
-// separate rows, "Shows For You" and "Movies For You" (not one mixed
-// row — that was tried and reverted; the user wants them split by type),
-// plus a few of each mixed into the hero (see ExploreClient.jsx). This
-// app has no server-side session (no @supabase/ssr — auth only lives in
-// the browser client), so it can't look up "the signed-in user's
-// library" itself; the caller passes a handful of the user's own items
-// as seeds.
-//
-// One route serving both rows, not two separate calls: genre affinity is
-// tallied separately per media type (movie and TV genre id spaces
-// diverge — see lib/tmdb.js's getMovieGenres comment) and discover calls
-// already go out against both /discover/tv and /discover/movie for their
-// own respective top genres — the only thing that changed for the
-// two-row split is the FINAL step (partition the shared dedup pool by
-// mediaType instead of merging it into one array); reusing one seed
-// fetch/genre-affinity pass for both rows is cheaper than two round
-// trips or duplicated seed-resolution work.
-//
-// No `becauseOfGenre`/"BECAUSE YOU WATCH X" attribution on returned items
-// — the hero's "recommended" badge is a flat "RECOMMENDED FOR YOU" label
-// now, per explicit request; nothing here still needs to track which
-// genre surfaced which item.
-//
+function topIds(counts, limit) {
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([id]) => id);
+}
+
+function bump(map, key, amount = 1) {
+  if (!key) return;
+  map.set(key, (map.get(key) ?? 0) + amount);
+}
+
 // POST body: { seedIds: [{id, mediaType}], excludeIds: [{id, mediaType}] }
+// Taste-first For You: similar titles, then popular/trending in the user's
+// genres + original languages (so K-drama / Western / thriller taste sticks).
 export async function POST(request) {
   const { seedIds = [], excludeIds = [] } = await request.json();
   if (seedIds.length === 0) return NextResponse.json({ tvItems: [], movieItems: [] });
@@ -51,64 +39,122 @@ export async function POST(request) {
   const movieGenreName = new Map(movieGenres.map((g) => [g.id, g.name]));
 
   const tvGenreCounts = new Map();
-  for (const show of seedShows) {
-    for (const g of show?.genres ?? []) tvGenreCounts.set(g.id, (tvGenreCounts.get(g.id) ?? 0) + 1);
-  }
   const movieGenreCounts = new Map();
+  const tvLangCounts = new Map();
+  const movieLangCounts = new Map();
+  const tvOriginCounts = new Map();
+
+  for (const show of seedShows) {
+    if (!show) continue;
+    for (const g of show.genres ?? []) bump(tvGenreCounts, g.id);
+    bump(tvLangCounts, show.original_language, 2);
+    for (const c of show.origin_country ?? []) bump(tvOriginCounts, c, 2);
+  }
   for (const movie of seedMovies) {
-    for (const g of movie?.genres ?? []) movieGenreCounts.set(g.id, (movieGenreCounts.get(g.id) ?? 0) + 1);
+    if (!movie) continue;
+    for (const g of movie.genres ?? []) bump(movieGenreCounts, g.id);
+    bump(movieLangCounts, movie.original_language, 2);
   }
 
-  const topGenreIds = (counts) => [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_SEED_GENRES).map(([id]) => id);
-  const topTvGenreIds = topGenreIds(tvGenreCounts);
-  const topMovieGenreIds = topGenreIds(movieGenreCounts);
+  const topTvGenreIds = topIds(tvGenreCounts, MAX_SEED_GENRES);
+  const topMovieGenreIds = topIds(movieGenreCounts, MAX_SEED_GENRES);
+  const topTvLangs = topIds(tvLangCounts, MAX_SEED_LANGS);
+  const topMovieLangs = topIds(movieLangCounts, MAX_SEED_LANGS);
+
+  const tasteScore = (item) => {
+    const genreCounts = item.mediaType === "movie" ? movieGenreCounts : tvGenreCounts;
+    const langCounts = item.mediaType === "movie" ? movieLangCounts : tvLangCounts;
+    let score = 0;
+    for (const g of item.genreIds ?? []) score += (genreCounts.get(g) ?? 0) * 3;
+    score += (langCounts.get(item.originalLanguage) ?? 0) * 6;
+    if (item.mediaType === "tv") {
+      for (const c of item.originCountries ?? []) score += (tvOriginCounts.get(c) ?? 0) * 4;
+    }
+    score += Math.min(Number(item.voteAverage) || 0, 8) * 0.2;
+    return score;
+  };
 
   const byKey = new Map();
-  const addResults = (results, mediaType) => {
+  const addResults = (results, mediaType, sourceBonus = 0) => {
     for (const raw of results ?? []) {
       const item = mediaType === "movie"
-        ? { id: raw.id, mediaType, name: raw.title, originalName: raw.original_title ?? null, originalLanguage: raw.original_language ?? null, genreIds: raw.genre_ids ?? [], dateStr: raw.release_date, voteAverage: raw.vote_average, posterPath: raw.poster_path, backdropPath: raw.backdrop_path, overview: raw.overview ?? "", _excluded: isExcludedMovie(raw) }
-        : { id: raw.id, mediaType, name: raw.name, originalName: raw.original_name ?? null, originalLanguage: raw.original_language ?? null, genreIds: raw.genre_ids ?? [], dateStr: raw.first_air_date, voteAverage: raw.vote_average, posterPath: raw.poster_path, backdropPath: raw.backdrop_path, overview: raw.overview ?? "", _excluded: isExcludedShow(raw) };
+        ? {
+            id: raw.id,
+            mediaType,
+            name: raw.title,
+            originalName: raw.original_title ?? null,
+            originalLanguage: raw.original_language ?? null,
+            genreIds: raw.genre_ids ?? [],
+            originCountries: [],
+            dateStr: raw.release_date,
+            voteAverage: raw.vote_average,
+            posterPath: raw.poster_path,
+            backdropPath: raw.backdrop_path,
+            overview: raw.overview ?? "",
+            _excluded: isExcludedMovie(raw),
+          }
+        : {
+            id: raw.id,
+            mediaType,
+            name: raw.name,
+            originalName: raw.original_name ?? null,
+            originalLanguage: raw.original_language ?? null,
+            genreIds: raw.genre_ids ?? [],
+            originCountries: raw.origin_country ?? [],
+            dateStr: raw.first_air_date,
+            voteAverage: raw.vote_average,
+            posterPath: raw.poster_path,
+            backdropPath: raw.backdrop_path,
+            overview: raw.overview ?? "",
+            _excluded: isExcludedShow(raw),
+          };
       const key = mediaKey(item);
-      if (excludeSet.has(key) || byKey.has(key) || item._excluded) continue;
-      byKey.set(key, item);
+      if (excludeSet.has(key) || item._excluded) continue;
+      const score = tasteScore(item) + sourceBonus;
+      const existing = byKey.get(key);
+      if (!existing || score > existing._score) byKey.set(key, { ...item, _score: score });
     }
   };
 
-  // Priority order (first-added wins ties via addResults' Map dedup):
-  // 1. newest releases within the seed's top genres, both media types.
-  // 2. the existing popularity-ranked genre discovery, both media types.
-  // 3. per-item recommendations, as the original fallback.
-  if (topTvGenreIds.length > 0) {
-    const pages = await Promise.all(topTvGenreIds.map((id) => discoverNewReleasesByGenre(id).catch(() => ({ results: [] }))));
-    pages.forEach((page) => addResults(page.results, "tv"));
+  // 1) Similar-to-seeds (strongest personalization signal)
+  const [showRecLists, movieRecLists] = await Promise.all([
+    Promise.all(seedShowIds.slice(0, 8).map((id) => getShowRecommendations(id).catch(() => ({ results: [] })))),
+    Promise.all(seedMovieIds.slice(0, 8).map((id) => getMovieRecommendations(id).catch(() => ({ results: [] })))),
+  ]);
+  showRecLists.forEach((list) => addResults(list.results, "tv", 110));
+  movieRecLists.forEach((list) => addResults(list.results, "movie", 110));
+
+  // 2) Popular in (genre × language) — keeps K-drama / Western / etc. coherent
+  const tasteDiscover = [];
+  for (const genreId of topTvGenreIds) {
+    for (const language of topTvLangs.slice(0, 2)) {
+      tasteDiscover.push(discoverShowsForTaste({ genreId, language }).catch(() => ({ results: [] })).then((p) => addResults(p.results, "tv", 55)));
+    }
+    tasteDiscover.push(discoverShowsByGenre(genreId).catch(() => ({ results: [] })).then((p) => addResults(p.results, "tv", 28)));
+    tasteDiscover.push(discoverNewReleasesByGenre(genreId).catch(() => ({ results: [] })).then((p) => addResults(p.results, "tv", 22)));
   }
-  if (topMovieGenreIds.length > 0) {
-    const pages = await Promise.all(topMovieGenreIds.map((id) => discoverNewMovieReleasesByGenre(id).catch(() => ({ results: [] }))));
-    pages.forEach((page) => addResults(page.results, "movie"));
+  for (const genreId of topMovieGenreIds) {
+    for (const language of topMovieLangs.slice(0, 2)) {
+      tasteDiscover.push(discoverMoviesForTaste({ genreId, language }).catch(() => ({ results: [] })).then((p) => addResults(p.results, "movie", 55)));
+    }
+    tasteDiscover.push(discoverMoviesByGenre(genreId).catch(() => ({ results: [] })).then((p) => addResults(p.results, "movie", 28)));
+    tasteDiscover.push(discoverNewMovieReleasesByGenre(genreId).catch(() => ({ results: [] })).then((p) => addResults(p.results, "movie", 22)));
+  }
+  // Language-only popular (e.g. more Korean titles even outside top genres)
+  for (const language of topTvLangs.slice(0, 2)) {
+    tasteDiscover.push(discoverShowsForTaste({ language }).catch(() => ({ results: [] })).then((p) => addResults(p.results, "tv", 35)));
+  }
+  for (const language of topMovieLangs.slice(0, 2)) {
+    tasteDiscover.push(discoverMoviesForTaste({ language }).catch(() => ({ results: [] })).then((p) => addResults(p.results, "movie", 35)));
   }
 
-  if (topTvGenreIds.length > 0) {
-    const pages = await Promise.all(topTvGenreIds.map((id) => discoverShowsByGenre(id).catch(() => ({ results: [] }))));
-    pages.forEach((page) => addResults(page.results, "tv"));
-  }
-  if (topMovieGenreIds.length > 0) {
-    const pages = await Promise.all(topMovieGenreIds.map((id) => discoverMoviesByGenre(id).catch(() => ({ results: [] }))));
-    pages.forEach((page) => addResults(page.results, "movie"));
-  }
+  // 3) Trending, scored by the same taste weights (not blindly global)
+  tasteDiscover.push(
+    trendingShows("week").catch(() => ({ results: [] })).then((p) => addResults(p.results, "tv", 18)),
+    trendingMovies("week").catch(() => ({ results: [] })).then((p) => addResults(p.results, "movie", 18)),
+  );
 
-  // Fallback only, per media type — either no genre signal at all for
-  // that type, or genre discovery alone didn't reach MAX_ITEMS for it.
-  const tvSoFar = [...byKey.values()].filter((i) => i.mediaType === "tv").length;
-  const movieSoFar = [...byKey.values()].filter((i) => i.mediaType === "movie").length;
-  if (tvSoFar < MAX_ITEMS || movieSoFar < MAX_ITEMS) {
-    const [showRecLists, movieRecLists] = await Promise.all([
-      Promise.all(seedShowIds.map((id) => getShowRecommendations(id).catch(() => ({ results: [] })))),
-      Promise.all(seedMovieIds.map((id) => getMovieRecommendations(id).catch(() => ({ results: [] })))),
-    ]);
-    showRecLists.forEach((list) => addResults(list.results, "tv"));
-    movieRecLists.forEach((list) => addResults(list.results, "movie"));
-  }
+  await Promise.all(tasteDiscover);
 
   const shapeItem = (item) => {
     const genreName = item.mediaType === "movie" ? movieGenreName : tvGenreName;
@@ -131,13 +177,16 @@ export async function POST(request) {
     };
   };
 
-  const allItems = [...byKey.values()];
-  // Each type capped independently (up to MAX_ITEMS each), not against a
-  // shared total — "Shows For You" and "Movies For You" are two
-  // independent rows now, same as Trending Shows/Trending Movies each
-  // getting their own full pool with no shared cap between them.
-  const tvItems = allItems.filter((i) => i.mediaType === "tv").slice(0, MAX_ITEMS).map(shapeItem);
-  const movieItems = allItems.filter((i) => i.mediaType === "movie").slice(0, MAX_ITEMS).map(shapeItem);
+  const ranked = [...byKey.values()].sort((a, b) => (b._score ?? 0) - (a._score ?? 0));
+  // Require a minimum taste overlap so pure global trending noise drops out
+  // when we already have a clear language/genre profile.
+  const hasTaste = tvGenreCounts.size + movieGenreCounts.size + tvLangCounts.size + movieLangCounts.size > 0;
+  const filtered = hasTaste
+    ? ranked.filter((item) => tasteScore(item) > 0 || (item._score ?? 0) >= 110)
+    : ranked;
+
+  const tvItems = filtered.filter((i) => i.mediaType === "tv").slice(0, MAX_ITEMS).map(shapeItem);
+  const movieItems = filtered.filter((i) => i.mediaType === "movie").slice(0, MAX_ITEMS).map(shapeItem);
 
   return NextResponse.json({ tvItems, movieItems });
 }

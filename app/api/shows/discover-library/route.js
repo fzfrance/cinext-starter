@@ -79,6 +79,7 @@ export async function GET(request) {
   const page = Math.max(1, Number(sp.get("page")) || 1);
   const contentType = sp.get("contentType"); // "movie" | "tv" | null (mixed)
   const list = sp.get("list") || "discover";
+  const region = sp.get("region") || undefined;
 
   try {
     // Theater / calendar lists are movie-only. TV or platform filters that
@@ -141,7 +142,7 @@ export async function GET(request) {
       });
     }
 
-    const baseDiscover = { yearFrom, yearTo, platforms, languages, page };
+    const baseDiscover = { yearFrom, yearTo, platforms, languages, page, ...(region ? { region } : {}) };
 
     if (contentType === "movie") {
       if (!genreMovie && genreTv && !genre) return emptyPage(page);

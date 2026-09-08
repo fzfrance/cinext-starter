@@ -198,8 +198,8 @@ export default function Page() {
               const active = theme === id;
               const comingSoon = id === "light";
               const darkActive = active && id === "dark";
-              const btnBg = darkActive ? "#0A0A0C" : active ? accent : t.inputBg;
-              const btnBorder = darkActive ? "rgba(255,255,255,0.28)" : active ? accent : t.cardBorder;
+              const btnBg = darkActive ? "#2A2A2E" : active ? accent : t.inputBg;
+              const btnBorder = darkActive ? "rgba(255,255,255,0.85)" : active ? accent : t.cardBorder;
               const btnFg = darkActive ? "#fff" : active ? activeText : t.text;
               const btnFgDim = darkActive ? "#fff" : active ? activeText : t.textDim;
               return (
@@ -208,7 +208,13 @@ export default function Page() {
                   onClick={() => !comingSoon && chooseTheme(id)}
                   disabled={comingSoon}
                   className="relative flex-1 flex flex-col items-center gap-1.5 rounded-xl active:scale-95 transition"
-                  style={{ padding: "10px 4px", background: btnBg, border: `1px solid ${btnBorder}`, opacity: comingSoon ? 0.45 : 1 }}
+                  style={{
+                    padding: "10px 4px",
+                    background: btnBg,
+                    border: `1px solid ${btnBorder}`,
+                    opacity: comingSoon ? 0.45 : 1,
+                    boxShadow: darkActive ? "0 0 0 1px rgba(255,255,255,0.35)" : undefined,
+                  }}
                 >
                   <Icon name={icon} size={16} color={btnFg} />
                   <span style={{ fontSize: 11, fontWeight: 500, color: btnFgDim, textTransform: "capitalize" }}>{id}</span>
@@ -227,7 +233,25 @@ export default function Page() {
             <span style={{ fontSize: 10, fontWeight: 700, color: t.textDim, background: t.inputBg, border: `1px solid ${t.cardBorder}`, borderRadius: 999, padding: "2px 7px", letterSpacing: "0.02em" }}>COMING SOON</span>
           </div>
           <div className="flex items-center gap-3" style={{ opacity: 0.45, pointerEvents: "none" }}>
-            {accentPalette.map((c) => <button key={c.id} onClick={() => chooseAccent(c.hex)} className="active:scale-90 transition flex items-center justify-center" style={{ width: 30, height: 30, borderRadius: "50%" }}><div style={{ width: accent === c.hex ? 26 : 22, height: accent === c.hex ? 26 : 22, borderRadius: "50%", background: c.hex, border: accent === c.hex ? "2.5px solid #fff" : "none", boxShadow: accent === c.hex ? `0 0 0 2px ${c.hex}55` : "none" }} /></button>)}
+            {accentPalette.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => chooseAccent(c.hex)}
+                className="active:scale-90 transition flex items-center justify-center"
+                style={{ width: 30, height: 30, borderRadius: "50%" }}
+              >
+                <div
+                  style={{
+                    width: accent === c.hex ? 26 : 22,
+                    height: accent === c.hex ? 26 : 22,
+                    borderRadius: "50%",
+                    background: c.hex,
+                    border: accent === c.hex ? "2.5px solid #fff" : "none",
+                    boxShadow: accent === c.hex ? "0 0 0 2px #fff" : "none",
+                  }}
+                />
+              </button>
+            ))}
             <label className="active:scale-90 transition flex items-center justify-center" style={{ width: 30, height: 30, borderRadius: "50%", position: "relative", cursor: "pointer" }}>
               <input type="color" value={accent} onChange={(e) => chooseCustomAccent(e.target.value)} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
               <div style={{ width: 26, height: 26, borderRadius: "50%", background: !accentPalette.some((c) => c.hex.toLowerCase() === accent.toLowerCase()) ? accent : "conic-gradient(red,yellow,lime,cyan,blue,magenta,red)", border: "2px solid #fff", display: "flex", alignItems: "center", justifyContent: "center" }}>{accentPalette.some((c) => c.hex.toLowerCase() === accent.toLowerCase()) && <Icon name="plus" size={11} color="#fff" strokeWidth={2.6} />}</div>

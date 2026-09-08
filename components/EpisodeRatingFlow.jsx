@@ -14,6 +14,34 @@ import { themes, DEFAULT_ACCENT, initialsOf } from "@/lib/theme";
 import { useNavVisibility } from "@/lib/nav-visibility-context";
 import { useAppLanguage } from "@/lib/languages";
 
+function extractEdgeColor(url) {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const w = 32, h = 32;
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        const stripY = Math.floor(h * 0.66);
+        const { data } = ctx.getImageData(0, stripY, w, h - stripY);
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
+        }
+        resolve([Math.round(r / n), Math.round(g / n), Math.round(b / n)]);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
 
@@ -177,6 +205,24 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
     mq.addEventListener("change", apply);
     return () => mq.removeEventListener("change", apply);
   }, []);
+
+  // Cover-derived atmosphere — same recipe as SeasonRatingScreen so both
+  // ep-rating columns pick up tint from the episode still/poster.
+  const [atmoRGB, setAtmoRGB] = useState([10, 10, 12]);
+  useEffect(() => {
+    const src = subject?.posterPath;
+    if (!src) { setAtmoRGB([10, 10, 12]); return undefined; }
+    let cancelled = false;
+    extractEdgeColor(tmdbImage(src, "w200"))
+      .then((rgb) => { if (!cancelled) setAtmoRGB(rgb); })
+      .catch(() => { if (!cancelled) setAtmoRGB([10, 10, 12]); });
+    return () => { cancelled = true; };
+  }, [subject?.posterPath]);
+  const mixRGB = (amt) => atmoRGB.map((c) => Math.round(c * amt + 12 * (1 - amt))).join(",");
+  const ATMOS_BG = `linear-gradient(180deg, #0A0A0C 0%, rgba(${atmoRGB.map((c) => Math.round(c * 0.22)).join(",")},0.9) 20%, rgba(${atmoRGB.map((c) => Math.round(c * 0.42)).join(",")},0.95) 55%, #0A0A0C 100%)`;
+  const ATMOS_RIGHT = `linear-gradient(165deg, rgba(255,255,255,0.03) 0%, transparent 28%), linear-gradient(180deg, rgba(${mixRGB(0.22)},0.92) 0%, rgba(${mixRGB(0.12)},0.96) 48%, rgba(6,7,9,0.98) 100%)`;
+  const HERO_VEIL = `linear-gradient(0deg, rgba(${mixRGB(0.18)},0.92) 0%, rgba(${mixRGB(0.08)},0.35) 55%, transparent 100%)`;
+
   // Same centered card from every entry point on desktop (Home, Show
   // Detail, Highlights, standalone episode page). Mobile/PWA keeps the
   // full-page sheet. "fullscreen" forces the sheet even on desktop;
@@ -315,10 +361,10 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
         <div className={`ep-rating-panel ep-rating-panel-desktop${stage === "rate" ? "" : " is-saved-confirm"}`} onClick={(event) => event.stopPropagation()}>
           {stage === "rate" ? (
             <div className="ep-rating-desktop">
-              <aside className="ep-rating-desktop-context">
+              <aside className="ep-rating-desktop-context" style={{ background: ATMOS_BG }}>
                 <div className="ep-rating-desktop-art">
                   <PosterArt posterPath={subject.posterPath} base={subject.base} glow={subject.glow} alt={subject.title} flat tmdbSize="w780" />
-                  <div className="ep-rating-desktop-art-fade" />
+                  <div className="ep-rating-desktop-art-fade" style={{ background: HERO_VEIL }} />
                 </div>
                 <div className="ep-rating-desktop-meta">
                   <div className="ep-rating-desktop-eyebrow">{subject.eyebrow}</div>
@@ -334,7 +380,7 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
                 </div>
               </aside>
 
-              <div className="ep-rating-desktop-flow">
+              <div className="ep-rating-desktop-flow" style={{ background: ATMOS_RIGHT }}>
                 <section className="ep-rating-desktop-section">
                   <div className="ep-rating-desktop-section-title">{tr("howWasEpisode")}</div>
                   <div className="ep-rating-desktop-stars">

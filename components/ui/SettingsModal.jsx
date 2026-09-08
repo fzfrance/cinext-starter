@@ -164,10 +164,10 @@ export default function SettingsModal({ open, onClose, onEditProfile, onLanguage
               {[["dark", "moon"], ["light", "sun"], ["system", "auto"]].map(([id, icon]) => {
                 const active = theme === id;
                 const comingSoon = id === "light";
-                // Dark active: black + white (not amber accent).
+                // Dark active: charcoal + white focus (not amber accent).
                 const activeStyle = active
                   ? id === "dark"
-                    ? { background: "#0A0A0C", borderColor: "rgba(255,255,255,0.28)", color: "#fff" }
+                    ? { background: "#2A2A2E", borderColor: "rgba(255,255,255,0.85)", color: "#fff", boxShadow: "0 0 0 1px rgba(255,255,255,0.35)" }
                     : { background: accent, borderColor: accent, color: activeText }
                   : undefined;
                 const iconColor = active
@@ -196,7 +196,7 @@ export default function SettingsModal({ open, onClose, onEditProfile, onLanguage
               <span className="settings-modal-block-label">Accent Color</span>
               <span className="settings-modal-soon-pill">Coming soon</span>
             </div>
-            <div className="settings-modal-accents" aria-hidden="true">
+            <div className="settings-modal-accents is-locked" aria-hidden="true">
               {accentPalette.map((c) => (
                 <span
                   key={c.id}

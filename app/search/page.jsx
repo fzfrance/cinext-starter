@@ -1,6 +1,7 @@
 import SearchClient from "./SearchClient";
 import { getExploreData } from "@/lib/exploreData";
 import { getWatchProvidersList, getWatchProvidersListMovie } from "@/lib/tmdb";
+import { buildProviderLogoMap } from "@/lib/discoverFilters";
 
 // Standalone top-level route (outside the (tabs) group) — reached from
 // the global nav Search control. Mobile keeps Explore behind a bottom
@@ -11,11 +12,10 @@ export default async function Page() {
     getWatchProvidersList().catch(() => ({ results: [] })),
     getWatchProvidersListMovie().catch(() => ({ results: [] })),
   ]);
-  const providerLogos = Object.fromEntries(
-    [...(tvProviders.results ?? []), ...(movieProviders.results ?? [])]
-      .filter((p) => p.logo_path)
-      .map((p) => [p.provider_id, p.logo_path])
-  );
+  const providerLogos = buildProviderLogoMap([
+    ...(tvProviders.results ?? []),
+    ...(movieProviders.results ?? []),
+  ]);
   return (
     <SearchClient
       trendingShows={trendingShows}

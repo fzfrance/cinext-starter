@@ -147,6 +147,7 @@ export default function SeasonRatingScreen({ showTitle, season, manual, auto, ca
   const mixRGB = (amt) => atmoRGB.map((c) => Math.round(c * amt + 12 * (1 - amt))).join(",");
   const CARD_BG = `linear-gradient(180deg, rgb(${mixRGB(0.32)}) 0%, rgb(${mixRGB(0.14)}) 55%, #141414 100%)`;
   const ATMOS_BG = `linear-gradient(180deg, #0A0A0C 0%, rgba(${atmoRGB.map((c) => Math.round(c * 0.22)).join(",")},0.9) 20%, rgba(${atmoRGB.map((c) => Math.round(c * 0.42)).join(",")},0.95) 55%, #0A0A0C 100%)`;
+  const ATMOS_RIGHT = `linear-gradient(165deg, rgba(255,255,255,0.03) 0%, transparent 28%), linear-gradient(180deg, rgba(${mixRGB(0.22)},0.92) 0%, rgba(${mixRGB(0.12)},0.96) 48%, rgba(6,7,9,0.98) 100%)`;
   const HERO_VEIL = "linear-gradient(180deg, rgba(10,8,6,0.15) 0%, rgba(10,8,6,0.35) 45%, #0A0A0C 100%)";
   const leftSynopsis = (season.overview || showSynopsis || "").trim();
 
@@ -529,7 +530,7 @@ export default function SeasonRatingScreen({ showTitle, season, manual, auto, ca
                 </div>
               </aside>
 
-              <div className="season-rating-right">
+              <div className="season-rating-right" style={{ background: ATMOS_RIGHT }}>
                 <button type="button" className="season-rating-desktop-close" onClick={onClose} aria-label="Close">
                   <Icon name="x" size={16} />
                 </button>

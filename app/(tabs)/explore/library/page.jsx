@@ -1,4 +1,5 @@
 import { getWatchProvidersList } from "@/lib/tmdb";
+import { buildProviderLogoMap } from "@/lib/discoverFilters";
 import LibraryClient from "./LibraryClient";
 
 // Genre chips are a curated fixed set (see LibraryClient's own GENRES
@@ -6,8 +7,6 @@ import LibraryClient from "./LibraryClient";
 // them here — only the real provider logos need a server-side call.
 export default async function Page() {
   const providersData = await getWatchProvidersList();
-  const providerLogos = Object.fromEntries(
-    (providersData.results ?? []).map((p) => [p.provider_id, p.logo_path])
-  );
+  const providerLogos = buildProviderLogoMap(providersData.results ?? []);
   return <LibraryClient providerLogos={providerLogos} />;
 }

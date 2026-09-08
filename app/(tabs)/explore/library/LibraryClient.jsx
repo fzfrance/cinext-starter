@@ -20,6 +20,7 @@ import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { hrefForMedia, mediaKey } from "@/lib/media";
 import { themes } from "@/lib/theme";
 import { tmdbImage } from "@/lib/tmdb";
+import { SEARCH_FILTER_LANGUAGES, SEARCH_PLATFORMS } from "@/lib/discoverFilters";
 
 const t = themes.dark;
 
@@ -96,40 +97,12 @@ const MOVIE_GENRES = [
 // provider a given region's watch-providers response doesn't include —
 // the real logo (providerLogos, fetched server-side in page.jsx) is
 // preferred whenever available.
-const PLATFORMS = [
-  { id: 8, name: "Netflix", mono: "N", color: "#d9382f" },
-  { id: 1899, name: "Max", mono: "M", color: "#8060ff" },
-  { id: 337, name: "Disney+", mono: "D+", color: "#2a7ae4" },
-  { id: 350, name: "Apple TV+", mono: "TV", color: "#c8c8cf" },
-  { id: 9, name: "Prime Video", mono: "P", color: "#33c7ee" },
-  { id: 15, name: "Hulu", mono: "H", color: "#3ddc84" },
-  { id: 531, name: "Paramount+", mono: "P+", color: "#4a7fd9" },
-  { id: 386, name: "Peacock", mono: "PC", color: "#cd6fd6" },
-  { id: 283, name: "Crunchyroll", mono: "CR", color: "#f47521" },
-];
+const PLATFORMS = SEARCH_PLATFORMS;
 
 // A flat, un-split language list (unlike the retired browse/language
 // page's English UK/USA + Mandarin China/Taiwan split) — matches what
 // this page's own spec asked for: a plain, searchable "Languages" list.
-const LANGUAGES = [
-  { code: "en", name: "English" },
-  { code: "ko", name: "Korean" },
-  { code: "ja", name: "Japanese" },
-  { code: "zh", name: "Chinese" },
-  { code: "th", name: "Thai" },
-  { code: "es", name: "Spanish" },
-  { code: "fr", name: "French" },
-  { code: "de", name: "German" },
-  { code: "it", name: "Italian" },
-  { code: "pt", name: "Portuguese" },
-  { code: "hi", name: "Hindi" },
-  { code: "ar", name: "Arabic" },
-  { code: "ru", name: "Russian" },
-  { code: "tr", name: "Turkish" },
-  { code: "sv", name: "Swedish" },
-  { code: "nl", name: "Dutch" },
-  { code: "pl", name: "Polish" },
-];
+const LANGUAGES = SEARCH_FILTER_LANGUAGES;
 
 async function fetchLibrary({ genre, yearFrom, yearTo, platforms, languages, contentType, page = 1 }) {
   const params = new URLSearchParams();

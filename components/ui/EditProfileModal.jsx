@@ -155,7 +155,7 @@ function LibraryMediaPicker({ type, title, items, loading, onSelect, onClose, fl
   );
 }
 
-export default function EditProfileModal({ open, onClose }) {
+export default function EditProfileModal({ open, onClose, focusCover = false }) {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
 
@@ -240,6 +240,12 @@ export default function EditProfileModal({ open, onClose }) {
     });
     return () => { cancelled = true; };
   }, [open, user, retryToken]);
+
+  // "Edit cover" from the profile card — open the background picker once ready.
+  useEffect(() => {
+    if (!open || !focusCover || status !== "ready") return;
+    setBackgroundSheetOpen(true);
+  }, [open, focusCover, status]);
 
   useEffect(() => {
     if (!open) return undefined;

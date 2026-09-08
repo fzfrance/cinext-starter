@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 import Icon from "@/components/ui/Icon";
 import PosterArt from "@/components/ui/PosterArt";
@@ -10,6 +10,34 @@ import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
+
+function extractEdgeColor(url) {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const w = 32, h = 32;
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        const stripY = Math.floor(h * 0.66);
+        const { data } = ctx.getImageData(0, stripY, w, h - stripY);
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
+        }
+        resolve([Math.round(r / n), Math.round(g / n), Math.round(b / n)]);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
 
 function GlassButton({ children, onClick, style, className = "" }) {
   return (
@@ -79,6 +107,33 @@ export default function EpisodeDetail({
 }) {
   const [skipMenuOpen, setSkipMenuOpen] = useState(false);
   const [watchMenuOpen, setWatchMenuOpen] = useState(false);
+  const [atmoRGB, setAtmoRGB] = useState([10, 10, 12]);
+  const [isDesktop, setIsDesktop] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 900px)");
+    const sync = () => setIsDesktop(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
+    // Color-wash atmos is desktop-only — keep the mobile episode sheet unchanged.
+    if (!isDesktop) return undefined;
+    const src = ep?.posterPath;
+    if (!src) { setAtmoRGB([10, 10, 12]); return undefined; }
+    let cancelled = false;
+    extractEdgeColor(tmdbImage(src, "w200"))
+      .then((rgb) => { if (!cancelled) setAtmoRGB(rgb); })
+      .catch(() => { if (!cancelled) setAtmoRGB([10, 10, 12]); });
+    return () => { cancelled = true; };
+  }, [ep?.posterPath, isDesktop]);
+
+  const ATMOS_BG = `linear-gradient(180deg, #0A0A0C 0%, rgba(${atmoRGB.map((c) => Math.round(c * 0.22)).join(",")},0.9) 18%, rgba(${atmoRGB.map((c) => Math.round(c * 0.42)).join(",")},0.95) 52%, #0A0A0C 100%)`;
+  const HERO_VEIL = isDesktop
+    ? `linear-gradient(0deg, rgba(${atmoRGB.map((c) => Math.round(c * 0.12)).join(",")},0.95) 8%, transparent 52%, rgba(0,0,0,0.18) 100%)`
+    : "linear-gradient(0deg, #0A0A0C 8%, transparent 50%, rgba(0,0,0,0.1) 100%)";
 
   // Skipped behaves like watched for the purposes of "does tapping the
   // check button open the Mark As… menu" — both are a *resolved* status
@@ -104,10 +159,11 @@ export default function EpisodeDetail({
   };
 
   return (
-    <div className="episode-detail-root overflow-y-auto pb-8" style={{ scrollbarWidth: "none" }}>
+    <div className="episode-detail-root overflow-y-auto pb-8" style={{ scrollbarWidth: "none", ...(isDesktop ? { background: "#0A0A0C" } : null) }}>
+      {isDesktop ? <div className="episode-detail-atmos" style={{ background: ATMOS_BG }} aria-hidden="true" /> : null}
       <div className="episode-detail-hero relative w-full" style={{ height: 300 }}>
         <PosterArt posterPath={ep.posterPath} base={ep.base} glow={ep.glow} alt={ep.title} tmdbSize="original" sizes="100vw" />
-        <div className="episode-detail-hero-fade absolute inset-0" style={{ background: "linear-gradient(0deg, #0A0A0C 8%, transparent 50%, rgba(0,0,0,0.1) 100%)" }} />
+        <div className="episode-detail-hero-fade absolute inset-0" style={{ background: HERO_VEIL }} />
         <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6" style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}>
           <GlassButton onClick={onClose} className="ep-detail-back" style={{ width: 38, height: 38 }}><Icon name="back" size={16} color={t.text} /></GlassButton>
           {breadcrumb ? (

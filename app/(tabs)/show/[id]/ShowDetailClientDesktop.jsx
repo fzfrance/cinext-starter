@@ -34,6 +34,7 @@ import { resolveTitle, useReadableLanguages, useAppLanguage } from "@/lib/langua
 import { themes, DEFAULT_ACCENT, tintColorForShow } from "@/lib/theme";
 import { useNavTint } from "@/lib/nav-tint-context";
 import { useNavVisibility } from "@/lib/nav-visibility-context";
+import { useAmbientPalette } from "@/lib/ambientPalette";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -236,6 +237,10 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   const customBackdropUrl = getCustomBackdrop(showId);
   const customPosterUrl = getCustomPoster(showId);
   const customLogoUrl = getCustomLogo(showId);
+  const ambientArtUrl = customBackdropUrl
+    || (show?.backdropPath ? tmdbImage(show.backdropPath, "w780") : null)
+    || (show?.posterPath ? tmdbImage(show.posterPath, "w500") : null);
+  const ambient = useAmbientPalette(ambientArtUrl);
 
   // Auto title logo — when the user hasn't manually picked one (no
   // customLogoUrl), the hero title still defaults to the show's real TMDB
@@ -1385,8 +1390,16 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   }, [watchMenuFor, skipMenuFor, skipSeasonMenuFor, watchNextMenuAnchor]);
 
   return (
-    <div className="min-h-dvh" style={{ background: t.bg }}>
-      <div className="pb-8">
+    <div
+      className="min-h-dvh"
+      style={{
+        background: t.bg,
+        ["--show-ambient-primary"]: ambient.primary,
+        ["--show-ambient-secondary"]: ambient.secondary,
+      }}
+    >
+      <div className="show-desktop-page-wash" aria-hidden="true" />
+      <div className="pb-8" style={{ position: "relative", zIndex: 1 }}>
 
         {/* ---------- Mobile / tablet hero + intro ---------- */}
         <div className="show-mobile-layout">
@@ -1491,9 +1504,11 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
         {/* ---------- Desktop hero + info strip ---------- */}
         <div className="show-desktop-layout">
           <section className="show-desktop-hero">
-            <div className="show-desktop-backdrop">
-              <PosterArt posterPath={show.backdropPath} overrideSrc={customBackdropUrl} base={show.base} glow={show.glow} alt="" tmdbSize="original" sizes="100vw" />
-              <div className="show-desktop-backdrop-scrim" />
+            <div className="show-desktop-hero-wrapper">
+              <div className="show-desktop-backdrop">
+                <PosterArt posterPath={show.backdropPath} overrideSrc={customBackdropUrl} base={show.base} glow={show.glow} alt="" tmdbSize="original" sizes="100vw" />
+                <div className="show-desktop-backdrop-scrim" />
+              </div>
             </div>
 
             <div className="show-desktop-hero-main">

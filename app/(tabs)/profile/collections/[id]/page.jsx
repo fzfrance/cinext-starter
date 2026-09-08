@@ -9,6 +9,7 @@ import PosterCard from "@/components/ui/PosterCard";
 import PosterQuickStatusMenu from "@/components/ui/PosterQuickStatusMenu";
 import MoviePosterQuickStatusMenu from "@/components/ui/MoviePosterQuickStatusMenu";
 import PosterGrid from "@/components/ui/PosterGrid";
+import CollectionDesktop from "@/components/collections/CollectionDesktop";
 import { useAuth } from "@/lib/auth-context";
 import { useFavorites } from "@/lib/favorites-context";
 import { useMovieFavorites } from "@/lib/movie-favorites-context";
@@ -43,12 +44,25 @@ const initialDetail = {
   covers: [],
 };
 
+function useIsDesktopCollection() {
+  const [isDesktop, setIsDesktop] = useState(null);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 900px)");
+    const apply = () => setIsDesktop(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+  return isDesktop;
+}
+
 export default function Page({ params }) {
   const router = useRouter();
   const { user } = useAuth();
   const { isFavorite, toggleFavorite } = useFavorites();
   const { isFavorite: isMovieFavorite, toggleFavorite: toggleMovieFavorite } = useMovieFavorites();
   const readableLanguages = useReadableLanguages();
+  const isDesktop = useIsDesktopCollection();
   const [detail, setDetail] = useState(initialDetail);
   const [activeMenu, setActiveMenu] = useState(null); // 'detailMenu' | 'showsSort' | null
   const toggleMenu = (key) => setActiveMenu((prev) => (prev === key ? null : prev ? null : key));
@@ -68,9 +82,15 @@ export default function Page({ params }) {
   // problem here as it was for the add-show search screen.
   const [, setNavHidden] = useNavVisibility();
   useEffect(() => {
-    setNavHidden(true);
-    return () => setNavHidden(false);
-  }, [setNavHidden]);
+    // Mobile always hides FloatingNav. Desktop keeps global nav except while
+    // the Add overlay is open (full-screen search).
+    if (isDesktop === false || addShowOpen) {
+      setNavHidden(true);
+      return () => setNavHidden(false);
+    }
+    setNavHidden(false);
+    return undefined;
+  }, [setNavHidden, isDesktop, addShowOpen]);
 
   // collections + collection_shows + collection_movies, joined against
   // TMDB via the two batch routes (this page is client-only, like every
@@ -201,37 +221,38 @@ export default function Page({ params }) {
   });
   const closeAddShow = () => { setAddShowOpen(false); setShowQuery(""); setShowSelected(new Map()); };
 
-  // Debounced live TMDB search, same pattern as Favorites' "Add to
-  // Favorites" (app/(tabs)/profile/favorites/page.jsx).
+  // Debounced live TMDB search; empty query loads popular so the Add
+  // panel isn't a blank "Search to find titles" wall.
   useEffect(() => {
+    if (!addShowOpen) return undefined;
     const trimmed = showQuery.trim();
-    if (trimmed === "") { setCatalog([]); return; }
     let cancelled = false;
     const handle = setTimeout(() => {
-      fetch(`/api/search/shows?q=${encodeURIComponent(trimmed)}`)
+      const url = trimmed
+        ? `/api/search/shows?q=${encodeURIComponent(trimmed)}`
+        : `/api/shows/discover-library?list=popular&contentType=tv`;
+      fetch(url)
         .then((res) => res.json())
         .then((data) => {
           if (cancelled) return;
-          setCatalog((data.results ?? []).map((show) => ({
+          const rows = data.results ?? [];
+          setCatalog(rows.map((show) => ({
             id: show.id,
-            // This overlay is TV-only (see /api/search/shows' own
-            // comment) — set explicitly, not left for the covers grid's
-            // mediaKey()/removeFromCollection to fall into the right
-            // branch by accident of `undefined !== "movie"` happening to
-            // take the show path anyway.
             mediaType: "tv",
-            title: show.name,
-            originalTitle: show.original_name ?? null,
-            originalLanguage: show.original_language ?? null,
-            year: show.first_air_date ? show.first_air_date.slice(0, 4) : "TBA",
+            title: show.name || show.title || "",
+            originalTitle: show.original_name ?? show.originalTitle ?? null,
+            originalLanguage: show.original_language ?? show.originalLanguage ?? null,
+            year: (show.first_air_date || show.year || "").toString().slice(0, 4) || "TBA",
             type: "TV Series",
-            posterPath: show.poster_path,
+            posterPath: show.poster_path ?? show.posterPath ?? null,
+            base: show.base,
+            glow: show.glow,
           })));
         })
         .catch((err) => { if (!cancelled) { console.error("Search failed:", err); setCatalog([]); } });
-    }, 350);
+    }, trimmed ? 350 : 0);
     return () => { cancelled = true; clearTimeout(handle); };
-  }, [showQuery]);
+  }, [showQuery, addShowOpen]);
 
   const commitAddShows = () => {
     if (!user || !detail.id) { router.push("/login"); return; }
@@ -240,6 +261,76 @@ export default function Page({ params }) {
     closeAddShow();
     toAdd.forEach((s) => addShowToCollection(detail.id, s.id).catch(console.error));
   };
+
+  const longPressMenus = longPress?.show?.mediaType === "movie" ? (
+    <MoviePosterQuickStatusMenu
+      show={longPress?.show ?? null}
+      anchorRect={longPress?.rect ?? null}
+      userId={user?.id}
+      source="CollectionDetail:posterLongPress"
+      onClose={() => setLongPress(null)}
+    />
+  ) : (
+    <PosterQuickStatusMenu
+      show={longPress?.show ?? null}
+      anchorRect={longPress?.rect ?? null}
+      userId={user?.id}
+      source="CollectionDetail:posterLongPress"
+      onClose={() => setLongPress(null)}
+    />
+  );
+
+  // Separate desktop tree — never restyle the mobile collection page.
+  if (isDesktop) {
+    return (
+      <>
+        <CollectionDesktop
+          detail={detail}
+          editingList={editingList}
+          reorderMode={reorderMode}
+          showsSortMode={showsSortMode}
+          backdropPickerOpen={backdropPickerOpen}
+          addShowOpen={addShowOpen}
+          catalog={catalog}
+          showQuery={showQuery}
+          showSelected={showSelected}
+          dragKey={dragKey}
+          fileInputRef={fileInputRef}
+          isFavorite={isFavorite}
+          isMovieFavorite={isMovieFavorite}
+          onStartEdit={() => setEditingList(true)}
+          onStartReorder={() => {
+            setReorderMode(true);
+            setShowsSortMode("userOrder");
+          }}
+          onDeleteCollection={removeCollection}
+          onRename={renameCollection}
+          onUpdateDescription={updateDescription}
+          onSaveListChanges={saveListChanges}
+          onSetShowsSortMode={setShowsSortMode}
+          onDoneReorder={() => setReorderMode(false)}
+          onDrop={handleDrop}
+          onDragStart={setDragKey}
+          onRemoveFromCollection={removeFromCollection}
+          onToggleFavorite={(id) => toggleFavorite(id, "CollectionDetail:favoriteBadge")}
+          onToggleMovieFavorite={(id) => toggleMovieFavorite(id, "CollectionDetail:favoriteBadge")}
+          onLongPress={setLongPress}
+          onOpenAdd={() => setAddShowOpen(true)}
+          onCloseAdd={closeAddShow}
+          onSetShowQuery={setShowQuery}
+          onToggleShowSelect={toggleShowSelect}
+          onCommitAdd={commitAddShows}
+          onOpenBackdropPicker={() => setBackdropPickerOpen(true)}
+          onCloseBackdropPicker={() => setBackdropPickerOpen(false)}
+          onUpdateCoverStyle={updateCoverStyle}
+          onImageUpload={handleImageUpload}
+        />
+        {longPressMenus}
+      </>
+    );
+  }
+
+  if (isDesktop === null) return null;
 
   return (
     <>
@@ -485,23 +576,7 @@ export default function Page({ params }) {
           long-pressed item's own mediaType — a mixed collection can hold
           both, and each writes to a different table (user_shows vs
           user_movies). */}
-      {longPress?.show?.mediaType === "movie" ? (
-        <MoviePosterQuickStatusMenu
-          show={longPress?.show ?? null}
-          anchorRect={longPress?.rect ?? null}
-          userId={user?.id}
-          source="CollectionDetail:posterLongPress"
-          onClose={() => setLongPress(null)}
-        />
-      ) : (
-        <PosterQuickStatusMenu
-          show={longPress?.show ?? null}
-          anchorRect={longPress?.rect ?? null}
-          userId={user?.id}
-          source="CollectionDetail:posterLongPress"
-          onClose={() => setLongPress(null)}
-        />
-      )}
+      {longPressMenus}
     </>
   );
 }

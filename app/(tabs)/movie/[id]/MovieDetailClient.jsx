@@ -27,6 +27,7 @@ import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { themes, DEFAULT_ACCENT, tintColorForShow } from "@/lib/theme";
 import { useNavTint } from "@/lib/nav-tint-context";
 import { useNavVisibility } from "@/lib/nav-visibility-context";
+import { useAmbientPalette } from "@/lib/ambientPalette";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -136,6 +137,10 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
   const customBackdropUrl = getCustomBackdrop(movieId);
   const customPosterUrl = getCustomPoster(movieId);
   const customLogoUrl = getCustomLogo(movieId);
+  const ambientArtUrl = customBackdropUrl
+    || (movie?.backdropPath ? tmdbImage(movie.backdropPath, "w780") : null)
+    || (movie?.posterPath ? tmdbImage(movie.posterPath, "w500") : null);
+  const ambient = useAmbientPalette(ambientArtUrl);
 
   const [moreOpen, setMoreOpen] = useState(false);
   const [desktopMoreOpen, setDesktopMoreOpen] = useState(false);
@@ -463,8 +468,16 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
   );
 
   return (
-    <div className="min-h-dvh" style={{ background: t.bg }}>
-      <div className="pb-8">
+    <div
+      className="min-h-dvh"
+      style={{
+        background: t.bg,
+        ["--show-ambient-primary"]: ambient.primary,
+        ["--show-ambient-secondary"]: ambient.secondary,
+      }}
+    >
+      <div className="show-desktop-page-wash" aria-hidden="true" />
+      <div className="pb-8" style={{ position: "relative", zIndex: 1 }}>
 
         {/* ---------- Mobile / tablet hero + intro ---------- */}
         <div className="show-mobile-layout">
@@ -554,9 +567,11 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
         {/* ---------- Desktop hero + info strip ---------- */}
         <div className="show-desktop-layout">
           <section className="show-desktop-hero">
-            <div className="show-desktop-backdrop">
-              <PosterArt posterPath={movie.backdropPath} overrideSrc={customBackdropUrl} alt="" tmdbSize="original" sizes="100vw" />
-              <div className="show-desktop-backdrop-scrim" />
+            <div className="show-desktop-hero-wrapper">
+              <div className="show-desktop-backdrop">
+                <PosterArt posterPath={movie.backdropPath} overrideSrc={customBackdropUrl} alt="" tmdbSize="original" sizes="100vw" />
+                <div className="show-desktop-backdrop-scrim" />
+              </div>
             </div>
 
             <div className="show-desktop-hero-main">

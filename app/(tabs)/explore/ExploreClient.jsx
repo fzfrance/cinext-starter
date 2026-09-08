@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Icon from "@/components/ui/Icon";
@@ -8,6 +9,7 @@ import PosterArt from "@/components/ui/PosterArt";
 import PosterFanStack from "@/components/PosterFanStack";
 import MediaFavoriteBadge from "@/components/ui/MediaFavoriteBadge";
 import MediaStatusBadge from "@/components/ui/MediaStatusBadge";
+import MediaTypeLabel from "@/components/ui/MediaTypeLabel";
 import { useAuth } from "@/lib/auth-context";
 import { useShowCustomizations } from "@/lib/show-customizations-context";
 import { getUserShows, removeUserShow, setWatchlistAndClearProgress } from "@/lib/userShows";
@@ -18,6 +20,9 @@ import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { hrefForMedia, mediaKey } from "@/lib/media";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 import { tmdbImage } from "@/lib/tmdb";
+import { collectRecommendSignals } from "@/lib/recommend/collectSignals";
+import { loadImpressions, recordImpressions, recordHeroImpression } from "@/lib/recommend/impressions";
+import { interleaveExploreRows } from "@/lib/recommend/assemble";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
@@ -57,15 +62,6 @@ function GenreChip({ label, active, onClick }) {
     }}>
       <span style={{ fontSize: 13, fontWeight: 600, color: active ? "#111" : "#fff" }}>{label}</span>
     </button>
-  );
-}
-
-function MediaTypeLabel({ mediaType }) {
-  if (mediaType !== "movie" && mediaType !== "tv") return null;
-  return (
-    <span className="explore-media-type-label" aria-hidden="true">
-      {mediaType === "movie" ? "Movie" : "TV Show"}
-    </span>
   );
 }
 
@@ -340,7 +336,255 @@ function SectionGridPage({ title, subtitle, items, onBack, showMediaLabel = fals
   );
 }
 
-function ExploreDesktopLayout({ heroSlides, trendingShows, trendingMovies, genreRails = [], providers, resolvedStatusMap, recommended, recommendedLoading, onToggleWatchlist }) {
+function loadYouTubeIframeApi() {
+  if (typeof window === "undefined") return Promise.resolve(null);
+  if (window.YT?.Player) return Promise.resolve(window.YT);
+  if (window.__cinextYtApiPromise) return window.__cinextYtApiPromise;
+  window.__cinextYtApiPromise = new Promise((resolve) => {
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      try { prev?.(); } catch { /* ignore prior hook errors */ }
+      resolve(window.YT);
+    };
+    if (!document.getElementById("cinext-yt-iframe-api")) {
+      const script = document.createElement("script");
+      script.id = "cinext-yt-iframe-api";
+      script.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(script);
+    } else if (window.YT?.Player) {
+      resolve(window.YT);
+    }
+  });
+  return window.__cinextYtApiPromise;
+}
+
+const EXPLORE_HERO_STILL_MS = 5000;
+const EXPLORE_HERO_YT_CHROME_S = 1.15;
+
+function ExploreDesktopHeroTrailer({ item }) {
+  const hostRef = useRef(null);
+  const playerRef = useRef(null);
+  const stillStartedAtRef = useRef(0);
+  const [trailerKey, setTrailerKey] = useState(null);
+  const [visible, setVisible] = useState(false);
+  const [muted, setMuted] = useState(true);
+  const [desktopReady, setDesktopReady] = useState(false);
+  const [heroRoot, setHeroRoot] = useState(null);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 900px)");
+    const sync = () => setDesktopReady(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
+    setVisible(false);
+    setMuted(true);
+    stillStartedAtRef.current = 0;
+    if (!desktopReady || !item?.id || !item?.mediaType) {
+      setTrailerKey(null);
+      return undefined;
+    }
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setTrailerKey(null);
+      return undefined;
+    }
+    // Still countdown starts with the hero; trailer loads/plays under it immediately.
+    stillStartedAtRef.current = Date.now();
+    let cancelled = false;
+    const controller = new AbortController();
+    fetch(`/api/media/trailer?mediaType=${encodeURIComponent(item.mediaType)}&id=${item.id}`, {
+      signal: controller.signal,
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled) setTrailerKey(data?.key || null);
+      })
+      .catch(() => {
+        if (!cancelled) setTrailerKey(null);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [desktopReady, item?.id, item?.mediaType]);
+
+  useEffect(() => {
+    if (!desktopReady || !trailerKey || !hostRef.current) return undefined;
+    let cancelled = false;
+    let player = null;
+    let revealTimer = null;
+    let timePoll = null;
+
+    const msUntilStillDone = () => {
+      const started = stillStartedAtRef.current || Date.now();
+      return Math.max(0, EXPLORE_HERO_STILL_MS - (Date.now() - started));
+    };
+
+    const tryReveal = (eventTarget) => {
+      if (cancelled || document.hidden) return;
+      let t = 0;
+      try { t = eventTarget.getCurrentTime?.() ?? 0; } catch { t = 0; }
+      // Keep the still up for the full 5s and until YT chrome has settled.
+      if (msUntilStillDone() > 0 || t < EXPLORE_HERO_YT_CHROME_S) return;
+      window.clearInterval(timePoll);
+      timePoll = null;
+      window.clearTimeout(revealTimer);
+      revealTimer = null;
+      setVisible(true);
+    };
+
+    const armRevealPolling = (eventTarget) => {
+      window.clearInterval(timePoll);
+      const wait = msUntilStillDone();
+      const kick = () => {
+        if (cancelled) return;
+        tryReveal(eventTarget);
+        if (!cancelled && !document.hidden) {
+          timePoll = window.setInterval(() => tryReveal(eventTarget), 120);
+        }
+      };
+      if (wait > 0) {
+        revealTimer = window.setTimeout(kick, wait);
+      } else {
+        kick();
+      }
+    };
+
+    const onVis = () => {
+      if (document.hidden) {
+        setVisible(false);
+        try { playerRef.current?.pauseVideo?.(); } catch { /* player may be gone */ }
+        return;
+      }
+      // Resume under the still; restart the 5s cover so chrome never flashes.
+      stillStartedAtRef.current = Date.now();
+      setVisible(false);
+      try {
+        playerRef.current?.mute?.();
+        playerRef.current?.playVideo?.();
+      } catch { /* ignore */ }
+    };
+    document.addEventListener("visibilitychange", onVis);
+
+    loadYouTubeIframeApi().then((YT) => {
+      if (cancelled || !YT?.Player || !hostRef.current) return;
+      hostRef.current.replaceChildren();
+      const mount = document.createElement("div");
+      hostRef.current.appendChild(mount);
+      player = new YT.Player(mount, {
+        videoId: trailerKey,
+        host: "https://www.youtube-nocookie.com",
+        playerVars: {
+          autoplay: 1,
+          mute: 1,
+          controls: 0,
+          disablekb: 1,
+          fs: 0,
+          iv_load_policy: 3,
+          modestbranding: 1,
+          playsinline: 1,
+          rel: 0,
+          loop: 1,
+          playlist: trailerKey,
+          cc_load_policy: 0,
+          enablejsapi: 1,
+          origin: window.location.origin,
+        },
+        events: {
+          onReady: (event) => {
+            if (cancelled) return;
+            try {
+              event.target.mute();
+              event.target.playVideo();
+            } catch { /* autoplay may still be blocked */ }
+          },
+          onStateChange: (event) => {
+            if (cancelled) return;
+            if (event.data === YT.PlayerState.PLAYING) {
+              armRevealPolling(event.target);
+            } else if (event.data === YT.PlayerState.ENDED) {
+              try { event.target.playVideo(); } catch { /* ignore */ }
+            }
+          },
+          onError: () => {
+            if (cancelled) return;
+            setVisible(false);
+            setTrailerKey(null);
+          },
+        },
+      });
+      playerRef.current = player;
+    });
+
+    return () => {
+      cancelled = true;
+      setVisible(false);
+      document.removeEventListener("visibilitychange", onVis);
+      window.clearTimeout(revealTimer);
+      window.clearInterval(timePoll);
+      try { player?.destroy?.(); } catch { /* ignore */ }
+      if (playerRef.current === player) playerRef.current = null;
+      if (hostRef.current) hostRef.current.replaceChildren();
+    };
+  }, [desktopReady, trailerKey]);
+
+  useEffect(() => {
+    setHeroRoot(hostRef.current?.closest(".explore-desktop-hero") ?? null);
+  }, [visible, trailerKey, desktopReady]);
+
+  useEffect(() => {
+    const art = hostRef.current?.closest(".explore-desktop-hero-art");
+    if (!art) return undefined;
+    art.classList.toggle("is-trailer-live", visible);
+    return () => art.classList.remove("is-trailer-live");
+  }, [visible]);
+
+  const toggleMute = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const player = playerRef.current;
+    if (!player) return;
+    try {
+      if (muted) {
+        player.unMute();
+        player.setVolume?.(100);
+        setMuted(false);
+      } else {
+        player.mute();
+        setMuted(true);
+      }
+    } catch { /* ignore */ }
+  };
+
+  if (!desktopReady || !trailerKey) return null;
+
+  const muteButton = visible ? (
+    <button
+      type="button"
+      className="explore-desktop-hero-mute"
+      onClick={toggleMute}
+      aria-label={muted ? "Unmute trailer" : "Mute trailer"}
+    >
+      <Icon name={muted ? "volumeMute" : "volume"} size={18} color="#fff" strokeWidth={1.9} />
+    </button>
+  ) : null;
+
+  return (
+    <>
+      <div
+        ref={hostRef}
+        className="explore-desktop-hero-trailer-host"
+        aria-hidden="true"
+      />
+      {muteButton && heroRoot ? createPortal(muteButton, heroRoot) : null}
+    </>
+  );
+}
+
+function ExploreDesktopLayout({ heroSlides, trendingShows, trendingMovies, genreRails = [], providers, resolvedStatusMap, recommended, recommendedLoading, onToggleWatchlist, readableLanguages = [], personalSections = [] }) {
   const router = useRouter();
   const hero = heroSlides[0];
   const showItems = trendingShows.slice(0, 10);
@@ -349,16 +593,21 @@ function ExploreDesktopLayout({ heroSlides, trendingShows, trendingMovies, genre
   const heroStatus = heroKey ? resolvedStatusMap[heroKey] : undefined;
   const heroSaved = Boolean(heroStatus);
   const heroWatchlisted = heroStatus === "watchlist";
+  const resolveItemTitle = (item) => ({ ...item, title: resolveTitle(item, readableLanguages) });
+  const exploreTail = useMemo(
+    () => interleaveExploreRows(genreRails, personalSections),
+    [genreRails, personalSections]
+  );
   return (
     <div className="explore-desktop-layout">
       {hero && (
         <section className="explore-desktop-hero">
-          <Link href={hrefForMedia(hero)} className="explore-desktop-hero-hit" aria-label={hero.title}>
-            <span className="explore-desktop-hero-art">
-              <PosterArt posterPath={hero.posterPath} alt="" tmdbSize="w1280" sizes="100vw" />
-            </span>
-            <span className="explore-desktop-hero-scrim" />
-          </Link>
+          <div className="explore-desktop-hero-art">
+            <PosterArt posterPath={hero.posterPath} alt="" tmdbSize="w1280" sizes="100vw" />
+            <ExploreDesktopHeroTrailer item={hero} />
+          </div>
+          <div className="explore-desktop-hero-scrim" aria-hidden="true" />
+          <Link href={hrefForMedia(hero)} className="explore-desktop-hero-hit" aria-label={hero.title} />
           <div className="explore-desktop-hero-copy">
             <HeroTitleLogo item={hero} />
             {hero.overview ? <p className="explore-desktop-hero-overview">{hero.overview}</p> : null}
@@ -402,6 +651,9 @@ function ExploreDesktopLayout({ heroSlides, trendingShows, trendingMovies, genre
         </section>
       )}
 
+      <DesktopShelf title="Top 10 TV Shows" items={showItems} resolvedStatusMap={resolvedStatusMap} />
+      <DesktopShelf title="Top 10 Movies" items={movieItems} resolvedStatusMap={resolvedStatusMap} />
+
       <section className="explore-desktop-section explore-desktop-providers">
         <h2>Streaming Services</h2>
         {providers.length > 0 ? (
@@ -415,19 +667,29 @@ function ExploreDesktopLayout({ heroSlides, trendingShows, trendingMovies, genre
         )}
       </section>
 
-      <DesktopShelf title="Top 10 TV Shows" items={showItems} resolvedStatusMap={resolvedStatusMap} />
-      <DesktopShelf title="Top 10 Movies" items={movieItems} resolvedStatusMap={resolvedStatusMap} />
-
-      {genreRails.map((rail) => (
-        <DesktopShelf
-          key={rail.name}
-          title={rail.name}
-          items={rail.items}
-          resolvedStatusMap={resolvedStatusMap}
-          showRank={false}
-          showMediaLabel
-        />
-      ))}
+      {exploreTail.map((row) => {
+        if (row.type === "personal") {
+          const section = row.section;
+          return (
+            <DesktopShelf
+              key={section.id}
+              title={section.title}
+              items={(section.items ?? []).map(resolveItemTitle)}
+              resolvedStatusMap={resolvedStatusMap}
+              showRank={false}
+              showMediaLabel
+            />
+          );
+        }
+        return (
+          <DesktopGenreShelf
+            key={row.rail.name}
+            rail={row.rail}
+            resolvedStatusMap={resolvedStatusMap}
+            resolveItemTitle={resolveItemTitle}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -516,32 +778,115 @@ function desktopItemYear(item) {
   return "";
 }
 
-function DesktopShelf({ title, items, resolvedStatusMap, showRank = true, showMediaLabel = false }) {
+function DesktopShelf({ title, items, resolvedStatusMap, showRank = true, showMediaLabel = false, onLoadMore = null, hasMore = false, loadingMore = false }) {
+  const rowRef = useRef(null);
+  const sentinelRef = useRef(null);
+  const loadLock = useRef(false);
+
+  useEffect(() => {
+    if (!onLoadMore || !hasMore) return undefined;
+    const root = rowRef.current;
+    const sentinel = sentinelRef.current;
+    if (!root || !sentinel) return undefined;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        if (loadLock.current || loadingMore || !hasMore) return;
+        loadLock.current = true;
+        Promise.resolve(onLoadMore())
+          .catch(() => {})
+          .finally(() => { loadLock.current = false; });
+      },
+      { root, rootMargin: "0px 480px 0px 0px", threshold: 0 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [onLoadMore, hasMore, loadingMore, items.length]);
+
   return (
     <section className="explore-desktop-section explore-desktop-shelf">
       <h2>{title}</h2>
-      <div className="explore-desktop-poster-row">
+      <div className="explore-desktop-poster-row" ref={rowRef}>
         {items.map((item, index) => {
           const year = desktopItemYear(item);
+          const status = resolvedStatusMap[mediaKey(item)];
           return (
             <Link href={hrefForMedia(item)} className="explore-desktop-poster-card" key={mediaKey(item)}>
               <div className="explore-desktop-poster-wrap">
                 <div className="explore-desktop-poster-art">
                   <PosterArt posterPath={item.posterPath} alt={item.title} />
+                  {showMediaLabel ? <MediaTypeLabel mediaType={item.mediaType} /> : null}
+                  {status
+                    ? <MediaStatusBadge status={status} />
+                    : <MediaFavoriteBadge item={item} source="Explore:desktopBadge" />}
                 </div>
                 {showRank && <div className="explore-desktop-rank">{index + 1}</div>}
-                {showMediaLabel ? <MediaTypeLabel mediaType={item.mediaType} /> : null}
-                {resolvedStatusMap[mediaKey(item)]
-                  ? <MediaStatusBadge status={resolvedStatusMap[mediaKey(item)]} />
-                  : <MediaFavoriteBadge item={item} source="Explore:desktopBadge" />}
               </div>
               <div className="explore-desktop-poster-title">{item.title}</div>
               {year ? <div className="explore-desktop-poster-year">{year}</div> : null}
             </Link>
           );
         })}
+        {onLoadMore && hasMore ? (
+          <div ref={sentinelRef} className="explore-desktop-poster-sentinel" aria-hidden="true">
+            {loadingMore ? <div className="explore-desktop-poster-card explore-desktop-poster-skeleton"><div className="explore-desktop-poster-wrap"><div className="explore-desktop-poster-art" /></div></div> : null}
+          </div>
+        ) : null}
       </div>
     </section>
+  );
+}
+
+function DesktopGenreShelf({ rail, resolvedStatusMap, resolveItemTitle }) {
+  const [items, setItems] = useState(() => rail.items ?? []);
+  const [nextPage, setNextPage] = useState(() => rail.nextPage ?? 3);
+  const [hasMore, setHasMore] = useState(() => rail.hasMore !== false);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  useEffect(() => {
+    setItems(rail.items ?? []);
+    setNextPage(rail.nextPage ?? 3);
+    setHasMore(rail.hasMore !== false);
+  }, [rail.name, rail.items, rail.nextPage, rail.hasMore]);
+
+  const loadMore = async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetch(`/api/explore/genre-rail?name=${encodeURIComponent(rail.name)}&page=${nextPage}`);
+      if (!res.ok) throw new Error("genre-rail failed");
+      const data = await res.json();
+      const incoming = (data.items ?? []).map((item) => resolveItemTitle(item));
+      const seen = new Set(items.map((item) => mediaKey(item)));
+      const unique = incoming.filter((item) => !seen.has(mediaKey(item)));
+      if (unique.length === 0) {
+        setHasMore(false);
+      } else {
+        setItems((prev) => [...prev, ...unique]);
+        setHasMore(Boolean(data.hasMore));
+      }
+      setNextPage((data.page ?? nextPage) + 1);
+    } catch {
+      setHasMore(false);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  if (items.length === 0) return null;
+
+  return (
+    <DesktopShelf
+      title={rail.name}
+      items={items}
+      resolvedStatusMap={resolvedStatusMap}
+      showRank={false}
+      showMediaLabel
+      onLoadMore={loadMore}
+      hasMore={hasMore}
+      loadingMore={loadingMore}
+    />
   );
 }
 
@@ -561,7 +906,7 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
   const genreRails = useMemo(
     () => genreRailsRaw.map((rail) => ({
       ...rail,
-      items: rail.items.map((item) => ({ ...item, title: resolveTitle(item, readableLanguages) })),
+      items: (rail.items ?? []).map((item) => ({ ...item, title: resolveTitle(item, readableLanguages) })),
     })),
     [genreRailsRaw, readableLanguages]
   );
@@ -573,31 +918,61 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
   // for how these get populated, and combinedHeroSlides for the mix.
   const [recommendedShows, setRecommendedShows] = useState([]);
   const [recommendedMovies, setRecommendedMovies] = useState([]);
+  const [recommendedItems, setRecommendedItems] = useState([]);
+  const [recommendedHero, setRecommendedHero] = useState([]);
+  const [personalSections, setPersonalSections] = useState([]);
   const [recommendedReady, setRecommendedReady] = useState(false);
-  // Keep the server-provided hero order fixed for this mount. Personalized
-  // recommendations arrive after first paint; reshuffling the entire array
-  // at that moment used to replace the poster already on screen and looked
-  // like an accidental auto-advance. Recommendations are shuffled only
-  // within their own appended group, so index 0 never changes underneath
-  // the user.
+  // Prefer engine hero (taste + backdrop + freshness) when ready; otherwise
+  // keep the server editorial hero so first paint isn't empty.
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `shuffled` is a pure module-level helper, stable across renders
   const combinedHeroSlides = useMemo(() => {
-    // The hero renders a full-bleed landscape background — swap in each
-    // recommended item's backdropPath as its effective posterPath for
-    // this hero-only copy. The row/grid version below keeps the real
-    // portrait poster untouched.
-    const recommendedForHero = [...recommendedShows, ...recommendedMovies].slice(0, 5).map((item) => ({ ...item, posterPath: item.backdropPath }));
-    return [...heroSlidesRaw, ...shuffled(recommendedForHero)];
-  }, [heroSlidesRaw, recommendedShows, recommendedMovies]);
+    const fromEngine = (recommendedHero.length > 0 ? recommendedHero : [])
+      .filter((item) => item.backdropPath || item.posterPath)
+      .slice(0, 5)
+      .map((item) => ({
+        ...item,
+        mode: "recommended",
+        posterPath: item.backdropPath || item.posterPath,
+      }));
+
+    if (fromEngine.length >= 2) {
+      const seen = new Set(fromEngine.map((item) => mediaKey(item)));
+      const fillers = heroSlidesRaw.filter((item) => !seen.has(mediaKey(item))).slice(0, Math.max(0, 5 - fromEngine.length));
+      return [...fromEngine, ...fillers].slice(0, 5);
+    }
+
+    const recommendedForHero = shuffled([...recommendedShows, ...recommendedMovies])
+      .filter((item) => item.backdropPath || item.posterPath)
+      .slice(0, 5)
+      .map((item) => ({
+        ...item,
+        mode: "recommended",
+        posterPath: item.backdropPath || item.posterPath,
+      }));
+
+    if (recommendedForHero.length >= 2) {
+      const seen = new Set(recommendedForHero.map((item) => mediaKey(item)));
+      const fillers = heroSlidesRaw.filter((item) => !seen.has(mediaKey(item))).slice(0, Math.max(0, 5 - recommendedForHero.length));
+      return [...recommendedForHero, ...fillers].slice(0, 5);
+    }
+
+    return [...heroSlidesRaw, ...recommendedForHero].slice(0, 5);
+  }, [heroSlidesRaw, recommendedShows, recommendedMovies, recommendedHero]);
   const heroSlides = combinedHeroSlides.map((item) => ({ ...item, title: resolveTitle(item, readableLanguages) }));
-  // "For You" — mixed shows+movies in one row (per explicit request,
-  // reverting the earlier split into separate Shows For You/Movies For
-  // You rows). Shuffled once per (recommendedShows, recommendedMovies)
-  // identity change, same reasoning/pattern as combinedHeroSlides above —
-  // not reshuffled on every unrelated re-render.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- shuffled is a pure module-level helper, stable across renders
-  const combinedRecommended = useMemo(() => shuffled([...recommendedShows, ...recommendedMovies]), [recommendedShows, recommendedMovies]);
+  // Engine already diversifies For You — prefer its mixed list; fall back to tv+movie merge.
+  const combinedRecommended = useMemo(() => {
+    if (recommendedItems.length > 0) return recommendedItems;
+    return shuffled([...recommendedShows, ...recommendedMovies]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- shuffled helper is stable
+  }, [recommendedItems, recommendedShows, recommendedMovies]);
   const recommendedAllResolved = combinedRecommended.map((item) => ({ ...item, title: resolveTitle(item, readableLanguages) }));
+  const personalSectionsResolved = useMemo(
+    () => personalSections.map((section) => ({
+      ...section,
+      items: (section.items ?? []).map((item) => ({ ...item, title: resolveTitle(item, readableLanguages) })),
+    })),
+    [personalSections, readableLanguages]
+  );
   const [activeGenre, setActiveGenre] = useState("All");
   const [sectionView, setSectionView] = useState(null); // { title, subtitle, items }
   const [toastVisible, setToastVisible] = useState(false);
@@ -673,18 +1048,9 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
     return () => { cancelled = true; };
   }, [user]);
 
-  // "For You" + hero picks — real per-user picks, not a placeholder.
-  // Fetched as two separate arrays (recommendedShows/recommendedMovies)
-  // since the route still returns tvItems/movieItems independently, but
-  // rendered as one mixed row below (combinedRecommended) — only the row
-  // presentation reverted, not the underlying data shape. Runs once per
-  // signed-in user (own fetch rather
-  // than reusing the effect above's, so this isn't coupled to that
-  // effect's exact timing/shape): seeds the recommended-for-you route
-  // with a few of the user's own library items — shows AND movies,
-  // preferring Watching/Completed across both (the strongest recent-taste
-  // signal) — and excludes anything already in either library, plus
-  // whatever's currently trending, from the results.
+  // Rule-based recommendation engine — taste profile from watch/rate/
+  // favorite/drop signals, scored candidates, diversified For You + hero
+  // + personalized Explore sections. Impressions live in localStorage.
   const authSettled = !authLoading || Boolean(user);
   useEffect(() => {
     if (!authSettled) {
@@ -694,6 +1060,9 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
     if (!user) {
       setRecommendedShows([]);
       setRecommendedMovies([]);
+      setRecommendedItems([]);
+      setRecommendedHero([]);
+      setPersonalSections([]);
       setRecommendedReady(true);
       return;
     }
@@ -701,70 +1070,68 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
     let cancelled = false;
     const safety = setTimeout(() => {
       if (!cancelled) setRecommendedReady(true);
-    }, 10000);
-    // Same reasoning as the status-map effect above — getUserMovies fails
-    // independently so shows-side recommendations still populate even
-    // when user_movies doesn't exist yet. getUserShows is caught the same
-    // way so a library read failure cannot leave For You spinning forever.
-    Promise.all([
-      getUserShows(user.id).catch((err) => { console.error(err); return {}; }),
-      getUserMovies(user.id).catch((err) => { console.error(err); return {}; }),
-    ]).then(([byShow, byMovie]) => {
-      if (cancelled) return;
-      const showEntries = Object.entries(byShow ?? {}).map(([id, s]) => ({ id: Number(id), mediaType: "tv", ...s }));
-      const movieEntries = Object.entries(byMovie ?? {}).map(([id, s]) => ({ id: Number(id), mediaType: "movie", ...s }));
-      const entries = [...showEntries, ...movieEntries];
-      if (entries.length === 0) {
-        setRecommendedShows([]);
-        setRecommendedMovies([]);
-        return;
-      }
-      const preferred = entries.filter((s) => s.status === "watching" || s.status === "completed");
-      const seedPool = preferred.length > 0 ? preferred : entries;
-      const seedIds = seedPool
-        .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-        .slice(0, 3)
-        .map((s) => ({ id: s.id, mediaType: s.mediaType }));
-      // Also excludes whatever's currently shown in either Trending row —
-      // the route itself no longer sources from trending at all (see its
-      // own comment), but this is a second guard against the same item
-      // reaching both sections by coincidence.
-      const excludeIds = [
-        ...entries.map((s) => ({ id: s.id, mediaType: s.mediaType })),
-        ...trendingAll.map((s) => ({ id: s.id, mediaType: s.mediaType })),
-      ];
+    }, 20000);
 
-      return fetch("/api/shows/recommended-for-you", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ seedIds, excludeIds }),
-      })
-        .then((res) => {
-          if (!res.ok) throw new Error(`recommended-for-you failed (${res.status})`);
-          return res.json();
-        })
-        .then((data) => {
-          if (cancelled) return;
-          const withYear = (item) => ({
-            ...item,
-            mode: "recommended",
-            year: item.date ? String(item.date).slice(0, 4) : (item.year ?? ""),
-          });
-          setRecommendedShows((data.tvItems ?? []).map(withYear));
-          setRecommendedMovies((data.movieItems ?? []).map(withYear));
+    (async () => {
+      try {
+        const titles = await collectRecommendSignals(user.id);
+        if (cancelled) return;
+        if (titles.length === 0) {
+          setRecommendedShows([]);
+          setRecommendedMovies([]);
+          setRecommendedItems([]);
+          setRecommendedHero([]);
+          setPersonalSections([]);
+          return;
+        }
+        const impressions = loadImpressions(user.id);
+        const res = await fetch("/api/recommend", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ titles, impressions }),
         });
-    }).catch((err) => {
-      console.error(err);
-      if (!cancelled) {
-        setRecommendedShows([]);
-        setRecommendedMovies([]);
+        if (!res.ok) throw new Error(`recommend failed (${res.status})`);
+        const data = await res.json();
+        if (cancelled) return;
+
+        const withYear = (item) => ({
+          ...item,
+          mode: item.mode || "recommended",
+          year: item.date ? String(item.date).slice(0, 4) : (item.year ?? ""),
+        });
+        const fyItems = (data.forYou?.items ?? []).map(withYear);
+        const tvItems = (data.forYou?.tvItems ?? []).map(withYear);
+        const movieItems = (data.forYou?.movieItems ?? []).map(withYear);
+        setRecommendedItems(fyItems);
+        setRecommendedShows(tvItems);
+        setRecommendedMovies(movieItems);
+        setRecommendedHero((data.hero ?? []).map(withYear));
+        setPersonalSections(data.sections ?? []);
+
+        const impressionRows = [
+          ...fyItems.slice(0, 24).map((item) => ({ key: mediaKey(item), surface: "foryou" })),
+          ...(data.sections ?? []).flatMap((section) =>
+            (section.items ?? []).slice(0, 8).map((item) => ({ key: mediaKey(item), surface: section.kind || "section" }))
+          ),
+        ];
+        recordImpressions(user.id, impressionRows);
+        if (data.hero?.[0]) recordHeroImpression(user.id, data.hero[0]);
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) {
+          setRecommendedShows([]);
+          setRecommendedMovies([]);
+          setRecommendedItems([]);
+          setRecommendedHero([]);
+          setPersonalSections([]);
+        }
+      } finally {
+        clearTimeout(safety);
+        if (!cancelled) setRecommendedReady(true);
       }
-    }).finally(() => {
-      clearTimeout(safety);
-      if (!cancelled) setRecommendedReady(true);
-    });
+    })();
+
     return () => { cancelled = true; clearTimeout(safety); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- trendingAll is a derived useMemo over trendingShows/trendingMovies (themselves derived from stable props), not something this effect should re-run on identity changes of
   }, [user, authSettled]);
 
   // Watchlist is definitionally zero watched episodes (lib/statusResolver.js)
@@ -863,7 +1230,7 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
 
   return (
     <>
-      <ExploreDesktopLayout heroSlides={visibleHeroSlides} trendingShows={trendingShows} trendingMovies={trendingMovies} genreRails={genreRails} providers={providers} resolvedStatusMap={resolvedStatusMap} recommended={recommendedAllResolved} recommendedLoading={!recommendedReady && (authLoading || Boolean(user))} onToggleWatchlist={toggleWatchlist} />
+      <ExploreDesktopLayout heroSlides={visibleHeroSlides} trendingShows={trendingShows} trendingMovies={trendingMovies} genreRails={genreRails} providers={providers} resolvedStatusMap={resolvedStatusMap} recommended={recommendedAllResolved} recommendedLoading={!recommendedReady && (authLoading || Boolean(user))} onToggleWatchlist={toggleWatchlist} readableLanguages={readableLanguages} personalSections={personalSectionsResolved} />
       <div className="explore-mobile-layout">
       {/* ---------- Hero (stays mixed-type) ---------- */}
       <ExploreHero heroSlides={visibleHeroSlides} watchlist={watchlist} libraryKeys={libraryKeys} onToggleWatchlist={toggleWatchlist} onOpenSlide={(slide) => router.push(hrefForMedia(slide))} />

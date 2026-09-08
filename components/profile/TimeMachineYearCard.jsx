@@ -4,8 +4,8 @@ import { useState, useEffect } from "react";
 import Grain from "@/components/ui/Grain";
 import { tmdbImage } from "@/lib/tmdb";
 
-export const CARD_W = 168;
-export const CARD_H = 113; // ~1.49:1, landscape per spec (1.45-1.55:1)
+export const CARD_W = 185;
+export const CARD_H = 124; // ~1.49:1, landscape per spec (1.45-1.55:1)
 
 const NEUTRAL_RGB = [26, 24, 22];
 
@@ -96,8 +96,8 @@ export default function TimeMachineYearCard({ year, titleCount, posterPath, onSe
   return (
     <button
       onClick={onSelect}
-      className="relative flex-shrink-0 overflow-hidden text-left active:scale-95 transition"
-      style={{ width: CARD_W, height: CARD_H, borderRadius: 20, border: `1px solid ${base}55` }}
+      className="time-machine-year-card relative flex-shrink-0 overflow-hidden text-left active:scale-95 transition"
+      style={{ width: CARD_W, height: CARD_H, borderRadius: 22, border: `1px solid ${base}55` }}
     >
       <div style={{ position: "absolute", inset: 0, background: `linear-gradient(115deg, ${glow}38 0%, ${base} 55%, ${base} 100%)` }}>
         <div style={{ position: "absolute", inset: 0, background: `radial-gradient(circle at 12% 35%, ${glow}45, transparent 62%)` }} />
@@ -120,9 +120,9 @@ export default function TimeMachineYearCard({ year, titleCount, posterPath, onSe
 
       <div className="absolute inset-0" style={{ background: "linear-gradient(90deg, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.4) 42%, transparent 72%)" }} />
 
-      <div className="absolute left-0 bottom-0" style={{ padding: "12px 14px" }}>
-        <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", lineHeight: 1 }}>{year}</div>
-        <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.72)", marginTop: 4 }}>
+      <div className="time-machine-year-copy absolute left-0 bottom-0" style={{ padding: "13px 15px" }}>
+        <div className="time-machine-year-label" style={{ fontSize: 24, fontWeight: 800, color: "#fff", lineHeight: 1 }}>{year}</div>
+        <div className="time-machine-year-meta" style={{ fontSize: 12.7, color: "rgba(255,255,255,0.72)", marginTop: 4 }}>
           {titleCount} title{titleCount === 1 ? "" : "s"}
         </div>
       </div>

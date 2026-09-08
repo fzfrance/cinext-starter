@@ -30,7 +30,7 @@ export default function TabsLayout({ children }) {
     // chrome at all, so 100dvh there is just the true full screen. This
     // was already in place. overflow-x:hidden added as a defensive
     // horizontal-overflow guard at the one wrapper every tab shares.
-    <div className="relative min-h-dvh" style={{ background: t.bg, overflowX: "hidden" }}>
+    <div className="tabs-root relative min-h-dvh" style={{ background: t.bg, overflowX: "hidden" }}>
       {/* FloatingNav is `position: fixed`, so it never pushes this content
           up on its own — without this padding, the last bit of any tab's
           content (e.g. Highlights' Watch History, whose last date card is
@@ -45,8 +45,10 @@ export default function TabsLayout({ children }) {
           every tab benefits without repeating it per screen. Still enough
           clearance when a page's own bottom bar (e.g. Highlights' bulk-edit
           toolbar below) temporarily replaces FloatingNav, since that bar's
-          own footprint is shorter than the nav's. */}
-      <div style={{ paddingBottom: "calc(100px + env(safe-area-inset-bottom, 0px))" }}>{children}</div>
+          own footprint is shorter than the nav's.
+          Desktop hides FloatingNav — .tabs-content-pad is 0 there so page
+          washes can reach the true bottom (see app/globals.css). */}
+      <div className="tabs-content-pad">{children}</div>
       {!navHidden && <FloatingNav tintColor={tintColor} />}
     </div>
   );

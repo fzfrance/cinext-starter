@@ -141,7 +141,7 @@ async function copyText(text) {
   if (!copied) throw new Error("Copy failed");
 }
 
-export default function MovieShareRatingCard({ userId, movieId, movieTitle, originalTitle, originalLanguage, movie, manual, backdropPath, username, onClose, onEdit }) {
+export default function MovieShareRatingCard({ userId, movieId, movieTitle, originalTitle, originalLanguage, movie, manual, backdropPath, username, onClose, onEdit, elevated = false }) {
   const [, setNavHidden] = useNavVisibility();
   useEffect(() => {
     setNavHidden(true);
@@ -436,9 +436,9 @@ export default function MovieShareRatingCard({ userId, movieId, movieTitle, orig
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col items-center"
+      className={`fixed inset-0 flex flex-col items-center${elevated ? " share-rating-overlay-elevated" : " z-50"}`}
       style={{
-        background: "rgba(0,0,0,0.92)",
+        background: elevated ? undefined : "rgba(0,0,0,0.92)",
         minHeight: "100dvh",
         overflowY: "auto",
         paddingTop: "calc(env(safe-area-inset-top, 0px) + 62px)",

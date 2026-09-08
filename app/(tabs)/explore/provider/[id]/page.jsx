@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { getWatchProvidersList, getWatchProvidersListMovie } from "@/lib/tmdb";
+import { resolveWatchProvider } from "@/lib/discoverFilters";
 import ProviderClient from "./ProviderClient";
 
 export default async function Page({ params }) {
@@ -11,8 +12,10 @@ export default async function Page({ params }) {
     getWatchProvidersListMovie().catch(() => ({ results: [] })),
   ]);
 
-  const provider = [...(tvProviders.results ?? []), ...(movieProviders.results ?? [])]
-    .find((p) => p.provider_id === providerId);
+  const provider = resolveWatchProvider(
+    [...(tvProviders.results ?? []), ...(movieProviders.results ?? [])],
+    providerId
+  );
 
   if (!provider) notFound();
 

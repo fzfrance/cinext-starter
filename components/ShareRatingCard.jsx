@@ -213,7 +213,7 @@ async function copyText(text) {
 // The shareable ticket card (opened from Profile's "My Ratings" route or
 // Show Detail's share button), with separate save-image, public-link, and
 // native social-share actions.
-export default function ShareRatingCard({ userId, showId, showTitle, originalTitle, originalLanguage, season, manual, auto, backdropPath, username, onClose, onEdit }) {
+export default function ShareRatingCard({ userId, showId, showTitle, originalTitle, originalLanguage, season, manual, auto, backdropPath, username, onClose, onEdit, elevated = false }) {
   const [, setNavHidden] = useNavVisibility();
   useEffect(() => {
     setNavHidden(true);
@@ -615,9 +615,9 @@ export default function ShareRatingCard({ userId, showId, showTitle, originalTit
     // viewports where even previewScale's 0.15 floor can't make
     // everything fit — it should never actually engage on a normal phone.
     <div
-      className="fixed inset-0 z-50 flex flex-col items-center"
+      className={`fixed inset-0 flex flex-col items-center${elevated ? " share-rating-overlay-elevated" : " z-50"}`}
       style={{
-        background: "rgba(0,0,0,0.92)",
+        background: elevated ? undefined : "rgba(0,0,0,0.92)",
         minHeight: "100dvh",
         overflowY: "auto",
         // Real layout clearance includes the actual safe-area-inset-top;

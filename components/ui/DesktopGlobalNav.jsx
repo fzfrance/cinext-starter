@@ -28,7 +28,7 @@ export default function DesktopGlobalNav() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { user } = useAuth();
-  const { openSettings, openProfile } = useDesktopModals();
+  const { openSettings, openProfile, profileExpanded } = useDesktopModals();
   const {
     query,
     setQuery,
@@ -43,31 +43,68 @@ export default function DesktopGlobalNav() {
     { href: "/home", labelKey: "navSeeNext", icon: "playSquare", match: (p) => p?.startsWith("/home") },
     { href: "/explore", labelKey: "navExplore", icon: "sparkle", match: (p) => p?.startsWith("/explore") },
     {
-      href: "/library?tab=shows",
-      labelKey: "navShows",
-      icon: "tv",
-      match: (p) => p?.startsWith("/library") && (libraryTab === "shows" || !libraryTab),
-    },
-    {
       href: "/library?tab=movies",
       labelKey: "navMovies",
       icon: "clapperboard",
       match: (p) => p?.startsWith("/library") && libraryTab === "movies",
     },
     {
+      href: "/library?tab=shows",
+      labelKey: "navShows",
+      icon: "tv",
+      match: (p) => p?.startsWith("/library") && (libraryTab === "shows" || !libraryTab),
+    },
+    { href: "/highlights", labelKey: "navHighlights", icon: "sparkle", match: (p) => p?.startsWith("/highlights") },
+    {
       href: "/library?tab=collections",
       labelKey: "navCollections",
       icon: "layers",
-      match: (p) => p?.startsWith("/library") && libraryTab === "collections",
+      match: (p) =>
+        (p?.startsWith("/library") && libraryTab === "collections") ||
+        p?.startsWith("/profile/collections"),
     },
-    { href: "/highlights", labelKey: "navHighlights", icon: "sparkle", match: (p) => p?.startsWith("/highlights") },
   ];
   const [avatarUrl, setAvatarUrl] = useState(null);
   const [initials, setInitials] = useState("?");
   const [menuOpen, setMenuOpen] = useState(false);
   const menuWrapRef = useRef(null);
   const searchInputRef = useRef(null);
+  const navRef = useRef(null);
+  const [lockedNavWidth, setLockedNavWidth] = useState(null);
   const searchMode = lensOpen || pathname?.startsWith("/search");
+
+  // Keep search-mode pill the same width as the menu pill (don't shrink).
+  useEffect(() => {
+    if (!searchMode) {
+      setLockedNavWidth(null);
+      return undefined;
+    }
+    setLockedNavWidth((prev) => {
+      if (prev != null) return prev;
+      const el = navRef.current;
+      const fromData = el?.dataset?.menuWidth ? Number(el.dataset.menuWidth) : null;
+      const measured = el ? Math.round(el.getBoundingClientRect().width) : null;
+      const w = fromData || measured;
+      return w > 0 ? w : null;
+    });
+    return undefined;
+  }, [searchMode]);
+
+  // While menus are visible, keep a live measurement so openSearch can
+  // lock to the true menu width before is-search restyles the pill.
+  useEffect(() => {
+    if (searchMode) return undefined;
+    const el = navRef.current;
+    if (!el) return undefined;
+    const measure = () => {
+      const w = Math.round(el.getBoundingClientRect().width);
+      if (w > 0) el.dataset.menuWidth = String(w);
+    };
+    measure();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
+    return () => ro?.disconnect();
+  }, [searchMode]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -137,12 +174,18 @@ export default function DesktopGlobalNav() {
       searchInputRef.current?.focus();
       return;
     }
+    const el = navRef.current;
+    const fromData = el?.dataset?.menuWidth ? Number(el.dataset.menuWidth) : null;
+    const measured = el ? Math.round(el.getBoundingClientRect().width) : null;
+    const w = fromData || measured;
+    if (w > 0) setLockedNavWidth(w);
     if (!openDesktopSearch()) {
       router.push("/search");
     }
   };
 
   const closeSearch = () => {
+    setLockedNavWidth(null);
     if (lensOpen) {
       closeDesktopSearch();
       return;
@@ -161,8 +204,14 @@ export default function DesktopGlobalNav() {
 
   return (
     <nav
+      ref={navRef}
       className={`desktop-global-nav${searchMode ? " is-search" : ""}`}
       aria-label="Cinext navigation"
+      style={
+        searchMode && lockedNavWidth
+          ? { ["--desktop-nav-locked-width"]: `${lockedNavWidth}px` }
+          : undefined
+      }
     >
       <Link
         href="/home"
@@ -180,7 +229,10 @@ export default function DesktopGlobalNav() {
         <div className="desktop-global-nav-tabs-pane" aria-hidden={searchMode}>
           <div className="desktop-global-nav-tabs">
             {desktopTabs.map((tab) => {
-              const active = tab.match(pathname);
+              // Full-page profile overlays the current route — don't keep
+              // highlighting Library/Collections (or any other tab) as if
+              // that page were still the focus.
+              const active = !profileExpanded && tab.match(pathname);
               return (
                 <Link
                   key={tab.href}
@@ -198,7 +250,6 @@ export default function DesktopGlobalNav() {
               );
             })}
           </div>
-          <span className="desktop-global-nav-divider desktop-global-nav-auto" aria-hidden="true" />
           <button
             type="button"
             className="desktop-global-nav-item desktop-global-nav-search-trigger"

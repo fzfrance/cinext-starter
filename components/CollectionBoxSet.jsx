@@ -68,7 +68,7 @@ const SLOTS = [
   { key: "outerRight", z: 1, transform: "translate(calc(-50% + 90%), calc(-50% + 4%)) rotate(15deg) rotateY(-6deg) scale(0.76)", shadow: "0 7px 16px rgba(0,0,0,0.34)", brightness: 0.78 },
 ];
 
-function FannedPoster({ show, slot, width, centerX }) {
+function FannedPoster({ show, slot, width, centerX, bare = false }) {
   const src = show?.posterPath ? tmdbImage(show.posterPath, "w500") : null;
   const base = show?.base || FALLBACK_BASE;
   const glow = show?.glow || FALLBACK_GLOW;
@@ -81,7 +81,7 @@ function FannedPoster({ show, slot, width, centerX }) {
         top: "50%",
         width: `${width}%`,
         aspectRatio: "2 / 3",
-        borderRadius: 10,
+        borderRadius: bare ? 14 : 10,
         overflow: "hidden",
         transform: slot.transform,
         transformOrigin: "center center",
@@ -103,7 +103,14 @@ function FannedPoster({ show, slot, width, centerX }) {
   );
 }
 
-export default function CollectionBoxSet({ shows = [], compact = false, width, centerX = "50%" }) {
+export default function CollectionBoxSet({
+  shows = [],
+  compact = false,
+  width,
+  centerX = "50%",
+  bare = false,
+  className = "",
+}) {
   const realShows = shows.filter(Boolean).slice(0, 5);
   // compact reverted to 37 and the background reverted to flat/neutral —
   // a further enlarge (to 43) + a tone-tinted background were tried and
@@ -113,27 +120,41 @@ export default function CollectionBoxSet({ shows = [], compact = false, width, c
   // revert. `width`, when given, overrides this default entirely (see
   // the Collections list's own call site, which needs a smaller size
   // than either default).
-  const posterWidth = width ?? (compact ? 37 : 24);
+  const posterWidth = width ?? (compact ? 37 : bare ? 30 : 24);
 
   return (
     <div
-      className="absolute inset-0 overflow-hidden collector-boxset"
-      style={{ background: "radial-gradient(120% 100% at 50% 20%, #23201c 0%, #100e0b 75%)", perspective: 1000 }}
+      className={`absolute inset-0 overflow-hidden collector-boxset${bare ? " is-bare" : ""}${className ? ` ${className}` : ""}`}
+      style={{
+        background: bare
+          ? "transparent"
+          : "radial-gradient(120% 100% at 50% 20%, #23201c 0%, #100e0b 75%)",
+        perspective: 1000,
+      }}
     >
       {/* Desktop-only micro hover tilt, per the "avoid heavy animation"
           brief — @media(hover:hover) keeps touch devices from getting a
           stuck hover state on tap. Plain global <style>, not styled-jsx,
           matching ExploreHero's own inline-keyframes pattern; a shared
           class name is fine since every instance wants the same effect. */}
-      <style>{`
-        @media (hover: hover) {
-          .collector-boxset { transition: transform 300ms ease; }
-          button:hover > .collector-boxset { transform: rotateY(-2deg) scale(1.015); }
-        }
-      `}</style>
+      {!bare ? (
+        <style>{`
+          @media (hover: hover) {
+            .collector-boxset:not(.is-bare) { transition: transform 300ms ease; }
+            button:hover > .collector-boxset:not(.is-bare) { transform: rotateY(-2deg) scale(1.015); }
+          }
+        `}</style>
+      ) : null}
 
       {realShows.map((show, i) => (
-        <FannedPoster key={`${show.mediaType ?? "tv"}-${show.id}`} show={show} slot={SLOTS[i]} width={posterWidth} centerX={centerX} />
+        <FannedPoster
+          key={`${show.mediaType ?? "tv"}-${show.id}`}
+          show={show}
+          slot={SLOTS[i]}
+          width={posterWidth}
+          centerX={centerX}
+          bare={bare}
+        />
       ))}
 
       {/* soft cast shadow the whole arrangement sits on */}

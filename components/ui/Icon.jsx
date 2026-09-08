@@ -33,11 +33,64 @@ export default function Icon({ name, size = 18, color = "#fff", strokeWidth = 1.
       return <svg {...p}><path d="M6 9l6 6 6-6" /></svg>;
     case "external":
       return <svg {...p}><path d="M7 17L17 7M9 7h8v8" /></svg>;
+    case "expand":
+      return (
+        <svg {...p}>
+          <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M20 15v5h-5" />
+        </svg>
+      );
+    case "collapse":
+      return (
+        <svg {...p}>
+          <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M20 15h-5v5" />
+        </svg>
+      );
     case "globe":
       return (
         <svg {...p}>
           <circle cx="12" cy="12" r="9" />
           <path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z" />
+        </svg>
+      );
+    case "instagram":
+      return (
+        <svg {...p}>
+          <rect x="3.5" y="3.5" width="17" height="17" rx="4.5" />
+          <circle cx="12" cy="12" r="4" />
+          <circle cx="17.2" cy="6.8" r="1" fill={color} stroke="none" />
+        </svg>
+      );
+    case "twitter":
+      return (
+        <svg {...p}>
+          <path d="M4 4l6.8 8.2L4.4 20h2.5l5.2-6.1L17.4 20H20l-7-8.4L19.4 4H16.9l-4.8 5.6L7 4H4z" />
+        </svg>
+      );
+    case "facebook":
+      return (
+        <svg {...p}>
+          <path d="M14 8h2.5V5.2C15.9 5.1 15 5 14.1 5 11.7 5 10 6.5 10 9.2V11H7.5v3H10v8h3.5v-8H16l.5-3h-3V9.4c0-.9.3-1.4 1.5-1.4z" fill={color} stroke="none" />
+        </svg>
+      );
+    case "tiktok":
+      return (
+        <svg {...p}>
+          <path d="M14.5 4v9.2a3.7 3.7 0 1 1-2.8-3.6V12a1.5 1.5 0 1 0 1.1 1.4V4h1.7z" />
+          <path d="M14.5 4c.6 2.4 2.2 4 4.5 4.4" />
+        </svg>
+      );
+    case "youtube":
+      return (
+        <svg {...p}>
+          <rect x="2.5" y="6" width="19" height="12" rx="3.5" />
+          <path d="M10.5 9.5v5l4.5-2.5-4.5-2.5z" fill={color} stroke="none" />
+        </svg>
+      );
+    case "imdb":
+      return (
+        <svg {...p} viewBox="0 0 24 24">
+          <rect x="2.5" y="6" width="19" height="12" rx="2.2" />
+          <path d="M6 9.2v5.6M8.2 9.2v5.6M6 12h2.2M10.2 14.8V9.2l2.4 5.6 2.4-5.6v5.6M16.6 9.2h1.4c1.2 0 2 .8 2 2.1v1.4c0 1.3-.8 2.1-2 2.1h-1.4V9.2z" />
         </svg>
       );
     case "logout":
@@ -175,9 +228,9 @@ export default function Icon({ name, size = 18, color = "#fff", strokeWidth = 1.
       );
     case "search":
       return (
-        <svg {...p}>
-          <circle cx="11" cy="11" r="7" />
-          <path d="M21 21l-4.3-4.3" />
+        <svg {...p} viewBox="1.5 1.5 21 21">
+          <circle cx="10.5" cy="10.5" r="6.75" />
+          <path d="M20.25 20.25l-4.05-4.05" />
         </svg>
       );
     case "home":
@@ -229,6 +282,20 @@ export default function Icon({ name, size = 18, color = "#fff", strokeWidth = 1.
       return (
         <svg {...p} fill={color} stroke="none">
           <path d="M7 5.5v13a1 1 0 0 0 1.5.87l11-6.5a1 1 0 0 0 0-1.74l-11-6.5A1 1 0 0 0 7 5.5z" />
+        </svg>
+      );
+    case "volume":
+      return (
+        <svg {...p}>
+          <path d="M4 10v4h3.2L12 18V6L7.2 10H4z" fill={color} stroke="none" />
+          <path d="M15.2 9.2a3.2 3.2 0 0 1 0 5.6M17.6 7a5.8 5.8 0 0 1 0 10" />
+        </svg>
+      );
+    case "volumeMute":
+      return (
+        <svg {...p}>
+          <path d="M4 10v4h3.2L12 18V6L7.2 10H4z" fill={color} stroke="none" />
+          <path d="M16 10l4 4M20 10l-4 4" />
         </svg>
       );
     case "playSquare":

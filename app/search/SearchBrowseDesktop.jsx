@@ -3,8 +3,24 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import PosterArt from "@/components/ui/PosterArt";
+import MediaFavoriteBadge from "@/components/ui/MediaFavoriteBadge";
+import MediaStatusBadge from "@/components/ui/MediaStatusBadge";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { hrefForMedia, mediaKey } from "@/lib/media";
+import { useLibraryStatus } from "@/lib/useLibraryStatus";
+import {
+  BROWSE_ALL_GENRES,
+  BROWSE_MOVIE_GENRES,
+  BROWSE_TV_GENRES,
+  genresForContentType,
+} from "@/lib/discoverFilters";
+
+export {
+  BROWSE_ALL_GENRES,
+  BROWSE_MOVIE_GENRES,
+  BROWSE_TV_GENRES,
+  genresForContentType,
+};
 
 const MAX_YEAR = new Date().getFullYear();
 
@@ -43,59 +59,6 @@ function parseGenreParts(...raw) {
   return [...new Set(ids)];
 }
 
-/** Shared with SearchClient filter popover genre catalogs. */
-export const BROWSE_MOVIE_GENRES = [
-  { id: "m-action", name: "Action", movieId: "28|12" },
-  { id: "m-animation", name: "Animation", movieId: "16" },
-  { id: "m-comedy", name: "Comedy", movieId: "35" },
-  { id: "m-crime", name: "Crime", movieId: "80" },
-  { id: "m-documentary", name: "Documentary", movieId: "99" },
-  { id: "m-drama", name: "Drama", movieId: "18" },
-  { id: "m-family", name: "Family", movieId: "10751" },
-  { id: "m-fantasy", name: "Fantasy", movieId: "14" },
-  { id: "m-horror", name: "Horror", movieId: "27" },
-  { id: "m-mystery", name: "Mystery", movieId: "9648|53" },
-  { id: "m-romance", name: "Romance", movieId: "10749" },
-  { id: "m-scifi", name: "Sci-Fi", movieId: "878" },
-  { id: "m-war", name: "War", movieId: "10752" },
-];
-
-export const BROWSE_TV_GENRES = [
-  { id: "t-action", name: "Action", tvId: "10759" },
-  { id: "t-animation", name: "Animation", tvId: "16" },
-  { id: "t-comedy", name: "Comedy", tvId: "35" },
-  { id: "t-crime", name: "Crime", tvId: "80" },
-  { id: "t-documentary", name: "Documentary", tvId: "99" },
-  { id: "t-drama", name: "Drama", tvId: "18" },
-  { id: "t-family", name: "Family", tvId: "10751" },
-  { id: "t-kids", name: "Kids", tvId: "10762" },
-  { id: "t-mystery", name: "Mystery", tvId: "9648" },
-  { id: "t-reality", name: "Reality", tvId: "10764" },
-  { id: "t-scifi", name: "Sci-Fi", tvId: "10765" },
-  { id: "t-war", name: "War", tvId: "10768" },
-];
-
-export const BROWSE_ALL_GENRES = [
-  { id: "a-action", name: "Action", movieId: "28|12", tvId: "10759" },
-  { id: "a-animation", name: "Animation", movieId: "16", tvId: "16" },
-  { id: "a-comedy", name: "Comedy", movieId: "35", tvId: "35" },
-  { id: "a-crime", name: "Crime", movieId: "80", tvId: "80" },
-  { id: "a-documentary", name: "Documentary", movieId: "99", tvId: "99" },
-  { id: "a-drama", name: "Drama", movieId: "18", tvId: "18" },
-  { id: "a-family", name: "Family", movieId: "10751", tvId: "10751" },
-  { id: "a-horror", name: "Horror", movieId: "27", tvId: "9648" },
-  { id: "a-mystery", name: "Mystery", movieId: "9648|53", tvId: "9648" },
-  { id: "a-romance", name: "Romance", movieId: "10749", tvId: "18" },
-  { id: "a-scifi", name: "Sci-Fi", movieId: "878|14", tvId: "10765" },
-  { id: "a-war", name: "War", movieId: "10752", tvId: "10768" },
-];
-
-export function genresForContentType(contentType) {
-  if (contentType === "tv") return BROWSE_TV_GENRES;
-  if (contentType === "movie") return BROWSE_MOVIE_GENRES;
-  return BROWSE_ALL_GENRES;
-}
-
 function genresFromFilters(filters) {
   const ids = filters?.genreIds ?? [];
   if (ids.length === 0) return [];
@@ -127,11 +90,14 @@ async function fetchBrowse({ list, genreMovie, genreTv, filters, page = 1 }) {
   return res.json();
 }
 
-function BrowsePosterCard({ item, onNavigate }) {
+function BrowsePosterCard({ item, onNavigate, status }) {
   return (
     <Link href={hrefForMedia(item)} onClick={onNavigate} className="search-desktop-browse-card">
       <div className="search-desktop-browse-poster">
         <PosterArt posterPath={item.posterPath} alt={item.title} tmdbSize="w342" sizes="18vw" />
+        {status
+          ? <MediaStatusBadge status={status} />
+          : <MediaFavoriteBadge item={item} source="SearchBrowse:badge" />}
         <div className="search-desktop-browse-poster-meta">
           <div className="search-desktop-browse-poster-title">{item.title}</div>
           <div className="search-desktop-browse-poster-sub">
@@ -145,6 +111,7 @@ function BrowsePosterCard({ item, onNavigate }) {
 
 export default function SearchBrowseDesktop({ filters, filterSidebar, onNavigate }) {
   const readableLanguages = useReadableLanguages();
+  const { resolvedStatusMap } = useLibraryStatus("SearchBrowse");
   const [items, setItems] = useState([]);
   const [totalResults, setTotalResults] = useState(0);
   const [page, setPage] = useState(1);
@@ -242,7 +209,12 @@ export default function SearchBrowseDesktop({ filters, filterSidebar, onNavigate
           <>
             <div className="search-desktop-browse-grid">
               {items.map((item) => (
-                <BrowsePosterCard key={mediaKey(item)} item={item} onNavigate={onNavigate} />
+                <BrowsePosterCard
+                  key={mediaKey(item)}
+                  item={item}
+                  onNavigate={onNavigate}
+                  status={resolvedStatusMap[mediaKey(item)]}
+                />
               ))}
             </div>
             {loadingMore ? (

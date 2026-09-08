@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Icon from "@/components/ui/Icon";
@@ -13,10 +13,22 @@ import { getUserMovies } from "@/lib/userMovies";
 import { getShowWatchSummary } from "@/lib/episodeWatches";
 import { resolveShowStatus } from "@/lib/statusResolver";
 import { tmdbImage } from "@/lib/tmdb";
-import { resolveTitle, useReadableLanguages } from "@/lib/languages";
+import { resolveTitle, resolvePersonName, useReadableLanguages } from "@/lib/languages";
 import { themes, CAST_GRADIENTS } from "@/lib/theme";
 
 const t = themes.dark;
+
+function useIsDesktopPerson() {
+  const [isDesktop, setIsDesktop] = useState(null);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 900px)");
+    const sync = () => setIsDesktop(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  return isDesktop;
+}
 
 function GlassButton({ children, onClick, style }) {
   return (
@@ -41,24 +53,7 @@ function PersonBackdropArt({ grad }) {
   );
 }
 
-export default function PersonDetailClient({ person }) {
-  const router = useRouter();
-  const { user } = useAuth();
-  const readableLanguages = useReadableLanguages();
-  const [filmTab, setFilmTab] = useState("tv");
-  // Status badges for the filmography grid — a browsing surface, same
-  // "already tracking this" glance-badge Explore/Show Detail's own
-  // recommendation rows show (see MediaStatusBadge's own comment).
-  // Replaces the old bare "watched" checkmark (which only ever covered
-  // TV, driven by episode_watches presence rather than real status) with
-  // the full watchlist/watching/completed/paused/drop vocabulary, for
-  // both tabs. Shows are live-resolved through resolveShowStatus (same as
-  // Explore/Show Detail) — a raw user_shows.status column can silently
-  // drift out of sync with real watch history (e.g. every episode marked
-  // watched without ever explicitly picking "Watching"), and this grid
-  // must never disagree with reality. Movies have no such drift (no
-  // progress-vs-explicit distinction exists for them — see
-  // lib/userMovies.js), so their raw stored status is already the real one.
+function usePersonCreditsStatus(user, credits) {
   const [showStatusMap, setShowStatusMap] = useState({});
   const [movieStatusMap, setMovieStatusMap] = useState({});
   useEffect(() => {
@@ -71,7 +66,7 @@ export default function PersonDetailClient({ person }) {
 
     (async () => {
       const byShow = await getUserShows(user.id);
-      const ids = person.credits.filter((c) => c.type === "tv").map((c) => c.id).filter((id) => byShow[id]);
+      const ids = credits.filter((c) => c.type === "tv").map((c) => c.id).filter((id) => byShow[id]);
       if (ids.length === 0) { if (!cancelled) setShowStatusMap({}); return; }
 
       const map = {};
@@ -104,23 +99,30 @@ export default function PersonDetailClient({ person }) {
     })().catch(console.error);
 
     return () => { cancelled = true; };
-  }, [user, person.credits]);
+  }, [user, credits]);
 
-  const grad = CAST_GRADIENTS[person.id % CAST_GRADIENTS.length];
-  const work = person.credits
-    .filter((c) => c.type === filmTab)
-    .map((c) => ({ ...c, title: resolveTitle(c, readableLanguages) }));
+  return { showStatusMap, movieStatusMap };
+}
 
+function buildInfoRows(person) {
   const bornLine = person.born
     ? person.died
       ? `${person.born} – ${person.died}${person.age != null ? ` (Age ${person.age})` : ""}`
       : person.age != null ? `${person.born} (Age ${person.age})` : person.born
     : null;
+  return [
+    ["Born", bornLine],
+    ["Birthplace", person.birthplace],
+    ["Nationality", person.nationality],
+  ].filter(([, v]) => v);
+}
 
-  const infoRows = [["Born", bornLine], ["Birthplace", person.birthplace], ["Nationality", person.nationality], ["Known For", person.department]].filter(([, v]) => v);
+function PersonMobile({ person, filmTab, setFilmTab, work, showStatusMap, movieStatusMap, infoRows, displayName }) {
+  const router = useRouter();
+  const grad = CAST_GRADIENTS[person.id % CAST_GRADIENTS.length];
 
   return (
-    <div className="min-h-dvh" style={{ background: t.bg }}>
+    <div className="min-h-dvh person-mobile" style={{ background: t.bg }}>
       {/* hero — the photo itself IS the backdrop (full-bleed, same
           treatment as Show Detail's hero: PosterArt-style full-width
           image, gradient scrim, glass back button), not an inset card
@@ -186,7 +188,7 @@ export default function PersonDetailClient({ person }) {
           {/* name overlaps the photo's lower portion, sitting on the
               scrim above — not stacked below it. */}
           <div className="absolute left-0 right-0 px-6 text-center" style={{ zIndex: 5, bottom: 20 }}>
-            <span style={{ fontSize: 22, fontWeight: 800, color: "#fff", lineHeight: 1.2 }}>{person.name}</span>
+            <span style={{ fontSize: 22, fontWeight: 800, color: "#fff", lineHeight: 1.2 }}>{displayName}</span>
           </div>
         </div>
       </div>
@@ -199,61 +201,268 @@ export default function PersonDetailClient({ person }) {
           Home) uses, not nested inside the hero's phone-frame cap above. */}
       <div className="px-6" style={{ marginTop: 20, paddingBottom: 32, position: "relative", zIndex: 5 }}>
         <div className="mx-auto" style={{ maxWidth: 420 }}>
-            {person.bio && (
-              <div className="mt-5" style={{ fontSize: 12.5, lineHeight: 1.6, color: "rgba(255,255,255,0.75)" }}>
-                {person.bio.length > 420 ? `${person.bio.slice(0, 420)}…` : person.bio}
-              </div>
-            )}
+          {person.bio && (
+            <div className="mt-5" style={{ fontSize: 12.5, lineHeight: 1.6, color: "rgba(255,255,255,0.75)" }}>
+              {person.bio.length > 420 ? `${person.bio.slice(0, 420)}…` : person.bio}
+            </div>
+          )}
 
-            {infoRows.length > 0 && (
-              <div className="mt-5">
+          {infoRows.length > 0 && (
+            <div className="mt-5">
+              {infoRows.map(([k, v]) => (
+                <div key={k} className="grid" style={{ gridTemplateColumns: "108px 1fr", padding: "9px 0" }}>
+                  <span style={{ fontSize: 12, color: t.textDim }}>{k}</span>
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.8)", fontWeight: 500, textAlign: "left" }}>{v}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ borderTop: `1px solid ${t.cardBorder}`, marginTop: 20 }} />
+
+        {/* filmography */}
+        <div className="mt-7">
+          <div className="flex rounded-full mx-auto" style={{ padding: 3, background: "rgba(255,255,255,0.06)", width: "fit-content" }}>
+            {[{ id: "tv", label: "TV Shows" }, { id: "movie", label: "Movies" }].map((tb) => (
+              <button key={tb.id} onClick={() => setFilmTab(tb.id)} className="rounded-full transition" style={{ padding: "7px 16px", fontSize: 12.5, fontWeight: 600, background: filmTab === tb.id ? "#fff" : "transparent", color: filmTab === tb.id ? "#111" : t.textDim }}>
+                {tb.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Multi-column gallery, not a horizontal scroll row — same
+              grid pattern Explore's own poster grid uses. */}
+          <div className="grid grid-cols-3 gap-x-3 gap-y-5" style={{ marginTop: 16 }}>
+            {work.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: t.textDim, padding: "18px 0", gridColumn: "1 / -1" }}>No titles yet.</div>
+            ) : work.map((w) => {
+              const card = (
+                <div className="relative rounded-xl overflow-hidden" style={{ aspectRatio: "2 / 3", boxShadow: "0 6px 16px rgba(0,0,0,0.45)" }}>
+                  <PosterArt posterPath={w.posterPath} alt={w.title} />
+                  <MediaStatusBadge status={w.type === "tv" ? showStatusMap[w.id] : movieStatusMap[w.id]} />
+                </div>
+              );
+              // TV credits go to Show Detail, movie credits to Movie
+              // Detail (movies-as-content-type plan) — both are real
+              // routes now, so every credit card is clickable.
+              return (
+                <button key={`${w.type}-${w.id}`} onClick={() => router.push(w.type === "tv" ? `/show/${w.id}` : `/movie/${w.id}`)} className="text-left active:scale-95 transition">
+                  {card}
+                  <div className="mt-1.5" style={{ fontSize: 11.5, fontWeight: 500, color: "#fff", lineHeight: 1.3 }}>{w.title}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PersonDesktop({ person, filmTab, setFilmTab, work, showStatusMap, movieStatusMap, infoRows, displayName }) {
+  const router = useRouter();
+  const grad = CAST_GRADIENTS[person.id % CAST_GRADIENTS.length];
+  const heroKind = person.heroKind || (person.heroPath ? "portrait" : "none");
+  const heroSrc = person.heroPath
+    ? tmdbImage(person.heroPath, heroKind === "landscape" ? "w1280" : "original")
+    : null;
+  const ambientSrc = person.profilePath
+    ? tmdbImage(person.profilePath, "original")
+    : heroSrc;
+  const socialLinks = person.socialLinks ?? [];
+
+  const bio = person.bio
+    ? (person.bio.length > 720 ? `${person.bio.slice(0, 720).trim()}…` : person.bio)
+    : null;
+
+  return (
+    <div
+      className={`person-desktop${heroKind === "landscape" ? " is-landscape-hero" : heroKind === "portrait" ? " is-portrait-hero" : ""}`}
+    >
+      <div className="person-desktop-wash" aria-hidden="true" />
+
+      <div className="person-desktop-hero-wrapper">
+        <div className="person-desktop-hero-art">
+          {heroSrc ? (
+            <>
+              {/* Layer 1: blur-stretch ambient — real backdrop color/lighting */}
+              <div className="person-desktop-hero-ambient" aria-hidden="true">
+                <Image
+                  src={ambientSrc || heroSrc}
+                  alt=""
+                  fill
+                  priority
+                  sizes="100vw"
+                  className="person-desktop-hero-ambient-img"
+                />
+              </div>
+              {/* Dark vignette → #0c0d10 at page edges */}
+              <div className="person-desktop-hero-vignette" aria-hidden="true" />
+              {/* Layer 2: crisp portrait with aggressive edge dissolve */}
+              <div className={`person-desktop-hero-photo is-${heroKind}`}>
+                <Image
+                  src={heroSrc}
+                  alt={displayName}
+                  fill
+                  priority
+                  sizes={heroKind === "portrait" ? "36vw" : "100vw"}
+                  className="person-desktop-hero-photo-img"
+                />
+              </div>
+            </>
+          ) : (
+            <PersonBackdropArt grad={grad} />
+          )}
+          <div className="person-desktop-hero-scrim" aria-hidden="true" />
+          <div className="person-desktop-hero-side-fade" aria-hidden="true" />
+        </div>
+      </div>
+
+      <div className="person-desktop-shell">
+        <header className="person-desktop-intro">
+          <h1 className="person-desktop-name">{displayName}</h1>
+          {person.roleLabel ? <p className="person-desktop-role">{person.roleLabel}</p> : null}
+          {socialLinks.length > 0 ? (
+            <div className="person-desktop-socials">
+              {socialLinks.map((link) => (
+                <a
+                  key={link.id}
+                  href={link.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="person-desktop-social"
+                  aria-label={link.label}
+                  title={link.label}
+                >
+                  <Icon
+                    name={
+                      link.id === "instagram" ? "instagram"
+                        : link.id === "twitter" ? "twitter"
+                          : link.id === "facebook" ? "facebook"
+                            : link.id === "tiktok" ? "tiktok"
+                              : link.id === "youtube" ? "youtube"
+                                : link.id === "imdb" ? "imdb"
+                                  : "globe"
+                    }
+                    size={16}
+                    color="#fff"
+                    strokeWidth={1.7}
+                  />
+                </a>
+              ))}
+            </div>
+          ) : null}
+        </header>
+
+        <div className="person-desktop-grid">
+          <aside className="person-desktop-about">
+            {bio ? <p className="person-desktop-bio">{bio}</p> : null}
+            {infoRows.length > 0 ? (
+              <dl className="person-desktop-meta">
                 {infoRows.map(([k, v]) => (
-                  <div key={k} className="grid" style={{ gridTemplateColumns: "108px 1fr", padding: "9px 0" }}>
-                    <span style={{ fontSize: 12, color: t.textDim }}>{k}</span>
-                    <span style={{ fontSize: 12, color: "rgba(255,255,255,0.8)", fontWeight: 500, textAlign: "left" }}>{v}</span>
+                  <div key={k} className="person-desktop-meta-row">
+                    <dt>{k}</dt>
+                    <dd>{v}</dd>
                   </div>
+                ))}
+              </dl>
+            ) : null}
+          </aside>
+
+          <section className="person-desktop-works">
+            <div className="person-desktop-works-head">
+              <h2>Works</h2>
+              <div className="person-desktop-seg">
+                {[{ id: "tv", label: "TV Shows" }, { id: "movie", label: "Movies" }].map((tb) => (
+                  <button
+                    key={tb.id}
+                    type="button"
+                    className={filmTab === tb.id ? "is-active" : undefined}
+                    onClick={() => setFilmTab(tb.id)}
+                  >
+                    {tb.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {work.length === 0 ? (
+              <div className="person-desktop-works-empty">No titles yet.</div>
+            ) : (
+              <div className="person-desktop-works-grid">
+                {work.map((w) => (
+                  <button
+                    key={`${w.type}-${w.id}`}
+                    type="button"
+                    className="person-desktop-works-card"
+                    onClick={() => router.push(w.type === "tv" ? `/show/${w.id}` : `/movie/${w.id}`)}
+                  >
+                    <div className="person-desktop-works-poster">
+                      <PosterArt posterPath={w.posterPath} alt={w.title} />
+                      <MediaStatusBadge status={w.type === "tv" ? showStatusMap[w.id] : movieStatusMap[w.id]} />
+                    </div>
+                    <span className="person-desktop-works-title">{w.title}</span>
+                    {w.yearLabel ? <span className="person-desktop-works-year">{w.yearLabel}</span> : null}
+                  </button>
                 ))}
               </div>
             )}
-          </div>
-
-          <div style={{ borderTop: `1px solid ${t.cardBorder}`, marginTop: 20 }} />
-
-          {/* filmography */}
-          <div className="mt-7">
-            <div className="flex rounded-full mx-auto" style={{ padding: 3, background: "rgba(255,255,255,0.06)", width: "fit-content" }}>
-              {[{ id: "tv", label: "TV Shows" }, { id: "movie", label: "Movies" }].map((tb) => (
-                <button key={tb.id} onClick={() => setFilmTab(tb.id)} className="rounded-full transition" style={{ padding: "7px 16px", fontSize: 12.5, fontWeight: 600, background: filmTab === tb.id ? "#fff" : "transparent", color: filmTab === tb.id ? "#111" : t.textDim }}>
-                  {tb.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Multi-column gallery, not a horizontal scroll row — same
-                grid pattern Explore's own poster grid uses. */}
-            <div className="grid grid-cols-3 gap-x-3 gap-y-5" style={{ marginTop: 16 }}>
-              {work.length === 0 ? (
-                <div style={{ fontSize: 12.5, color: t.textDim, padding: "18px 0", gridColumn: "1 / -1" }}>No titles yet.</div>
-              ) : work.map((w) => {
-                const card = (
-                  <div className="relative rounded-xl overflow-hidden" style={{ aspectRatio: "2 / 3", boxShadow: "0 6px 16px rgba(0,0,0,0.45)" }}>
-                    <PosterArt posterPath={w.posterPath} alt={w.title} />
-                    <MediaStatusBadge status={w.type === "tv" ? showStatusMap[w.id] : movieStatusMap[w.id]} />
-                  </div>
-                );
-                // TV credits go to Show Detail, movie credits to Movie
-                // Detail (movies-as-content-type plan) — both are real
-                // routes now, so every credit card is clickable.
-                return (
-                  <button key={`${w.type}-${w.id}`} onClick={() => router.push(w.type === "tv" ? `/show/${w.id}` : `/movie/${w.id}`)} className="text-left active:scale-95 transition">
-                    {card}
-                    <div className="mt-1.5" style={{ fontSize: 11.5, fontWeight: 500, color: "#fff", lineHeight: 1.3 }}>{w.title}</div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          </section>
         </div>
+      </div>
     </div>
+  );
+}
+
+export default function PersonDetailClient({ person }) {
+  const isDesktop = useIsDesktopPerson();
+  const { user } = useAuth();
+  const readableLanguages = useReadableLanguages();
+  const [filmTab, setFilmTab] = useState(person.defaultFilmTab === "movie" ? "movie" : "tv");
+  const { showStatusMap, movieStatusMap } = usePersonCreditsStatus(user, person.credits);
+  const infoRows = useMemo(() => buildInfoRows(person), [person]);
+  const displayName = useMemo(
+    () => resolvePersonName(person, readableLanguages),
+    [person, readableLanguages]
+  );
+
+  const work = useMemo(
+    () => person.credits
+      .filter((c) => c.type === filmTab)
+      .map((c) => ({ ...c, title: resolveTitle(c, readableLanguages) })),
+    [person.credits, filmTab, readableLanguages]
+  );
+
+  if (isDesktop === null) {
+    return <div className="min-h-dvh" style={{ background: "#08090a" }} />;
+  }
+
+  if (isDesktop) {
+    return (
+      <PersonDesktop
+        person={person}
+        filmTab={filmTab}
+        setFilmTab={setFilmTab}
+        work={work}
+        showStatusMap={showStatusMap}
+        movieStatusMap={movieStatusMap}
+        infoRows={infoRows}
+        displayName={displayName}
+      />
+    );
+  }
+
+  return (
+    <PersonMobile
+      person={person}
+      filmTab={filmTab}
+      setFilmTab={setFilmTab}
+      work={work}
+      showStatusMap={showStatusMap}
+      movieStatusMap={movieStatusMap}
+      infoRows={infoRows}
+      displayName={displayName}
+    />
   );
 }

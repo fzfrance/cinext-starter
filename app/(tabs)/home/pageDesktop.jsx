@@ -417,7 +417,7 @@ function InProgressCompactCard({ item, onLongPress, onMarkWatched }) {
       onClick={() => { if (longPress.consumeClick()) return; router.push(`/show/${item.id}`); }}
       className="relative flex-shrink-0 rounded-[16px] overflow-hidden active:scale-[0.98] transition cursor-pointer"
       style={{
-        width: 220,
+        width: 253,
         // Taller than InProgressGalleryCard's own artwork-only ratio — no
         // separate footer block here (title/episode sit directly on the
         // image itself, gradient-scrimmed, below), so the card needs the
@@ -628,21 +628,24 @@ function HomeDesktopProgressCard({ item, onLongPress, onMarkWatched }) {
 
 function featuredUpcomingArtPath(item) {
   // Next-ep / release art only — never borrow a different episode's still.
-  // Season dumps keep the show poster. Otherwise: this item's still (when
-  // TMDB has one for the next ep), then poster, then backdrop — whatever
-  // the title itself provided.
+  // Season dumps keep the show poster when no still exists yet. A real
+  // episode still always wins (including dump-released seasons mid-watch).
   if (item.mediaType === "movie") {
     return item.backdropPath || item.posterPath || null;
   }
+  if (item.stillPath) return item.stillPath;
   if (item.isSeasonDrop) return item.show.posterPath || item.show.backdropPath || null;
-  return item.stillPath || item.show.posterPath || item.show.backdropPath || null;
+  return item.show.backdropPath || item.show.posterPath || null;
 }
 
-// Continue Watching / In Progress landscape — next unwatched ep still when
-// available; season dumps stay on poster.
+// Continue Watching / In Progress landscape — always prefer the next-ep
+// still when TMDB has one. Season-drop only affects the no-still fallback
+// (upcoming dumps shouldn't invent a still); never hide a real still behind
+// the official poster.
 function nextEpisodeDisplayArt({ stillPath, posterPath, backdropPath, isSeasonDrop }) {
+  if (stillPath) return stillPath;
   if (isSeasonDrop) return posterPath || backdropPath || null;
-  return stillPath || posterPath || backdropPath || null;
+  return backdropPath || posterPath || null;
 }
 
 function HomeDesktopUpcomingFeatured({ item, onLongPress }) {
@@ -2222,7 +2225,7 @@ export default function Page() {
           )}
 
           {/* ---------- In Progress ---------- */}
-          {inProgressRowList.length > 0 && (
+          {(inProgressRowList.length > 0) && (
             // paddingTop reduced another 15% (18→15), together with the
             // wrapper's own paddingBottom reduction above — moving this
             // whole section (and everything below it) up more decisively
@@ -2232,7 +2235,8 @@ export default function Page() {
                 title={tr("inProgress")}
                 right={<InProgressViewToggle mode={inProgressViewMode} onChange={setInProgressViewMode} />}
               />
-              {/* Horizontal rails for both modes — no full-page See All. */}
+              {/* Horizontal rails for both modes — no full-page See All.
+                  Always exclude the hero show (inProgressRowList). */}
               {inProgressViewMode === "gallery" ? (
                 <div className="mt-3 pl-6 flex items-start gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
                   {inProgressRowList.map((item) => (

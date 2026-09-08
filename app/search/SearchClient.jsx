@@ -8,6 +8,8 @@ import Icon from "@/components/ui/Icon";
 import PosterArt from "@/components/ui/PosterArt";
 import YearSlider from "@/components/YearSlider";
 import StatusMenu, { statusMenuOptions, movieStatusMenuOptions } from "@/components/StatusMenu";
+import MediaFavoriteBadge from "@/components/ui/MediaFavoriteBadge";
+import MediaStatusBadge from "@/components/ui/MediaStatusBadge";
 import ExploreClient from "@/app/(tabs)/explore/ExploreClient";
 import { useFavorites } from "@/lib/favorites-context";
 import { useMovieFavorites } from "@/lib/movie-favorites-context";
@@ -19,44 +21,17 @@ import { useDesktopSearch } from "@/lib/desktop-search-context";
 import { tmdbImage } from "@/lib/tmdb";
 import { pickTopSearchResult, sortSearchRailMedia } from "@/lib/searchRank";
 import SearchBrowseDesktop, { fetchDiscoverResultCount } from "@/app/search/SearchBrowseDesktop";
+import {
+  SEARCH_PLATFORMS,
+  SEARCH_FILTER_LANGUAGES,
+  genresForContentType,
+} from "@/lib/discoverFilters";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
 
 const MIN_YEAR = 1990;
 const MAX_YEAR = new Date().getFullYear();
-
-const SEARCH_PLATFORMS = [
-  { id: 8, name: "Netflix", mono: "N", color: "#d9382f" },
-  { id: 1899, name: "Max", mono: "M", color: "#8060ff" },
-  { id: 337, name: "Disney+", mono: "D+", color: "#2a7ae4" },
-  { id: 350, name: "Apple TV+", mono: "TV", color: "#c8c8cf" },
-  { id: 9, name: "Prime Video", mono: "P", color: "#33c7ee" },
-  { id: 15, name: "Hulu", mono: "H", color: "#3ddc84" },
-  { id: 531, name: "Paramount+", mono: "P+", color: "#4a7fd9" },
-  { id: 386, name: "Peacock", mono: "PC", color: "#cd6fd6" },
-  { id: 283, name: "Crunchyroll", mono: "CR", color: "#f47521" },
-];
-
-const SEARCH_LANGUAGES = [
-  { code: "en", name: "English" },
-  { code: "ko", name: "Korean" },
-  { code: "ja", name: "Japanese" },
-  { code: "zh", name: "Chinese" },
-  { code: "th", name: "Thai" },
-  { code: "es", name: "Spanish" },
-  { code: "fr", name: "French" },
-  { code: "de", name: "German" },
-  { code: "it", name: "Italian" },
-  { code: "pt", name: "Portuguese" },
-  { code: "hi", name: "Hindi" },
-  { code: "ar", name: "Arabic" },
-  { code: "ru", name: "Russian" },
-  { code: "tr", name: "Turkish" },
-  { code: "sv", name: "Swedish" },
-  { code: "nl", name: "Dutch" },
-  { code: "pl", name: "Polish" },
-];
 
 const DEFAULT_DISCOVERY_FILTERS = {
   contentType: "all", // all | movie | tv
@@ -66,58 +41,8 @@ const DEFAULT_DISCOVERY_FILTERS = {
   languages: [],
 };
 
-// Genre options for the Filter popover — same TMDB id spaces the browse
-// sidebar uses (movie vs TV namespaces diverge).
-const FILTER_MOVIE_GENRES = [
-  { id: "m-action", name: "Action", movieId: "28|12" },
-  { id: "m-animation", name: "Animation", movieId: "16" },
-  { id: "m-comedy", name: "Comedy", movieId: "35" },
-  { id: "m-crime", name: "Crime", movieId: "80" },
-  { id: "m-documentary", name: "Documentary", movieId: "99" },
-  { id: "m-drama", name: "Drama", movieId: "18" },
-  { id: "m-family", name: "Family", movieId: "10751" },
-  { id: "m-fantasy", name: "Fantasy", movieId: "14" },
-  { id: "m-horror", name: "Horror", movieId: "27" },
-  { id: "m-mystery", name: "Mystery", movieId: "9648|53" },
-  { id: "m-romance", name: "Romance", movieId: "10749" },
-  { id: "m-scifi", name: "Sci-Fi", movieId: "878" },
-  { id: "m-war", name: "War", movieId: "10752" },
-];
-
-const FILTER_TV_GENRES = [
-  { id: "t-action", name: "Action", tvId: "10759" },
-  { id: "t-animation", name: "Animation", tvId: "16" },
-  { id: "t-comedy", name: "Comedy", tvId: "35" },
-  { id: "t-crime", name: "Crime", tvId: "80" },
-  { id: "t-documentary", name: "Documentary", tvId: "99" },
-  { id: "t-drama", name: "Drama", tvId: "18" },
-  { id: "t-family", name: "Family", tvId: "10751" },
-  { id: "t-kids", name: "Kids", tvId: "10762" },
-  { id: "t-mystery", name: "Mystery", tvId: "9648" },
-  { id: "t-reality", name: "Reality", tvId: "10764" },
-  { id: "t-scifi", name: "Sci-Fi", tvId: "10765" },
-  { id: "t-war", name: "War", tvId: "10768" },
-];
-
-const FILTER_ALL_GENRES = [
-  { id: "a-action", name: "Action", movieId: "28|12", tvId: "10759" },
-  { id: "a-animation", name: "Animation", movieId: "16", tvId: "16" },
-  { id: "a-comedy", name: "Comedy", movieId: "35", tvId: "35" },
-  { id: "a-crime", name: "Crime", movieId: "80", tvId: "80" },
-  { id: "a-documentary", name: "Documentary", movieId: "99", tvId: "99" },
-  { id: "a-drama", name: "Drama", movieId: "18", tvId: "18" },
-  { id: "a-family", name: "Family", movieId: "10751", tvId: "10751" },
-  { id: "a-horror", name: "Horror", movieId: "27", tvId: "9648" },
-  { id: "a-mystery", name: "Mystery", movieId: "9648|53", tvId: "9648" },
-  { id: "a-romance", name: "Romance", movieId: "10749", tvId: "18" },
-  { id: "a-scifi", name: "Sci-Fi", movieId: "878|14", tvId: "10765" },
-  { id: "a-war", name: "War", movieId: "10752", tvId: "10768" },
-];
-
 function filterGenresForContentType(contentType) {
-  if (contentType === "tv") return FILTER_TV_GENRES;
-  if (contentType === "movie") return FILTER_MOVIE_GENRES;
-  return FILTER_ALL_GENRES;
+  return genresForContentType(contentType);
 }
 
 function parseGenreIdParts(...raw) {
@@ -319,7 +244,7 @@ function countActiveDiscoveryFilters(filters) {
 }
 
 function DiscoveryFilterFields({ filters, onChange, providerLogos, languageQuery, setLanguageQuery, layout = "popover" }) {
-  const filteredLanguages = SEARCH_LANGUAGES.filter((l) =>
+  const filteredLanguages = SEARCH_FILTER_LANGUAGES.filter((l) =>
     l.name.toLowerCase().includes(languageQuery.trim().toLowerCase())
   );
   const selectedGenreIds = filters.genreIds ?? [];
@@ -760,7 +685,7 @@ function DesktopTopResult({ item, status, onSelectStatus, onNavigate }) {
   );
 }
 
-function DesktopPosterRail({ title, items, onNavigate }) {
+function DesktopPosterRail({ title, items, onNavigate, statusMap = {} }) {
   const scrollerRef = useRef(null);
   const [canScrollNext, setCanScrollNext] = useState(false);
 
@@ -790,22 +715,28 @@ function DesktopPosterRail({ title, items, onNavigate }) {
       <div className="search-desktop-section-label">{title}</div>
       <div className="search-desktop-rail-frame">
         <div ref={scrollerRef} className="search-desktop-rail-track">
-          {items.map((item) => (
-            <Link
-              key={mediaKey(item)}
-              href={hrefForMedia(item)}
-              onClick={onNavigate}
-              className="search-desktop-poster-card"
-            >
-              <div className="search-desktop-poster-art">
-                <PosterArt posterPath={item.posterPath} alt={item.title} sizes="180px" />
-              </div>
-              <div className="search-desktop-poster-title">{item.title}</div>
-              <div className="search-desktop-poster-meta">
-                {item.date} • {typeLabel(item)}
-              </div>
-            </Link>
-          ))}
+          {items.map((item) => {
+            const status = statusMap[mediaKey(item)];
+            return (
+              <Link
+                key={mediaKey(item)}
+                href={hrefForMedia(item)}
+                onClick={onNavigate}
+                className="search-desktop-poster-card"
+              >
+                <div className="search-desktop-poster-art">
+                  <PosterArt posterPath={item.posterPath} alt={item.title} sizes="180px" />
+                  {status
+                    ? <MediaStatusBadge status={status} />
+                    : <MediaFavoriteBadge item={item} source="Search:desktopRail" />}
+                </div>
+                <div className="search-desktop-poster-title">{item.title}</div>
+                <div className="search-desktop-poster-meta">
+                  {item.date} • {typeLabel(item)}
+                </div>
+              </Link>
+            );
+          })}
         </div>
         {canScrollNext ? (
           <button
@@ -1254,10 +1185,20 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
                         />
                       ) : null}
                       {showMovies ? (
-                        <DesktopPosterRail title="Movies" items={movies} onNavigate={rememberSearchPosition} />
+                        <DesktopPosterRail
+                          title="Movies"
+                          items={movies}
+                          onNavigate={rememberSearchPosition}
+                          statusMap={resolvedStatusMap}
+                        />
                       ) : null}
                       {showShows ? (
-                        <DesktopPosterRail title="Shows" items={shows} onNavigate={rememberSearchPosition} />
+                        <DesktopPosterRail
+                          title="Shows"
+                          items={shows}
+                          onNavigate={rememberSearchPosition}
+                          statusMap={resolvedStatusMap}
+                        />
                       ) : null}
                       {showPeople ? (
                         <DesktopPeopleRail items={people} onNavigate={rememberSearchPosition} />

@@ -6,11 +6,16 @@ import { useRouter } from "next/navigation";
 import Icon from "@/components/ui/Icon";
 import PosterArt from "@/components/ui/PosterArt";
 import YearSlider from "@/components/YearSlider";
+import MediaFavoriteBadge from "@/components/ui/MediaFavoriteBadge";
+import MediaStatusBadge from "@/components/ui/MediaStatusBadge";
+import MediaTypeLabel from "@/components/ui/MediaTypeLabel";
 import {
   genresForContentType,
-} from "@/app/search/SearchBrowseDesktop";
+  SEARCH_FILTER_LANGUAGES,
+} from "@/lib/discoverFilters";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { hrefForMedia, mediaKey } from "@/lib/media";
+import { useLibraryStatus } from "@/lib/useLibraryStatus";
 import { tmdbImage } from "@/lib/tmdb";
 
 const MIN_YEAR = 1990;
@@ -18,17 +23,7 @@ const MAX_YEAR = new Date().getFullYear();
 /** Prefetch this many pages on first paint / Apply so the grid fills from TMDB faster. */
 const INITIAL_PAGE_BATCH = 2;
 
-const LANGUAGES = [
-  { code: "en", name: "English" },
-  { code: "ko", name: "Korean" },
-  { code: "ja", name: "Japanese" },
-  { code: "zh", name: "Chinese" },
-  { code: "th", name: "Thai" },
-  { code: "es", name: "Spanish" },
-  { code: "fr", name: "French" },
-  { code: "de", name: "German" },
-  { code: "hi", name: "Hindi" },
-];
+const LANGUAGES = SEARCH_FILTER_LANGUAGES;
 
 const DEFAULT_FILTERS = {
   contentType: "all",
@@ -303,6 +298,7 @@ function ProviderFilterMenu({
 export default function ProviderClient({ provider }) {
   const router = useRouter();
   const readableLanguages = useReadableLanguages();
+  const { resolvedStatusMap } = useLibraryStatus("ProviderPage");
   const [appliedFilters, setAppliedFilters] = useState(DEFAULT_FILTERS);
   const [draftFilters, setDraftFilters] = useState(DEFAULT_FILTERS);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -502,19 +498,39 @@ export default function ProviderClient({ provider }) {
       ) : (
         <>
           <div className="provider-page-grid">
-            {items.map((item) => (
-              <Link key={mediaKey(item)} href={hrefForMedia(item)} className="provider-page-card">
-                <div className="provider-page-poster">
-                  <PosterArt posterPath={item.posterPath} alt={item.title} tmdbSize="w342" sizes="16vw" />
-                  <div className="provider-page-poster-meta">
-                    <div className="provider-page-poster-title">{item.title}</div>
-                    <div className="provider-page-poster-sub">
-                      {[item.year, item.rating ? `★ ${item.rating}` : null].filter(Boolean).join(" · ")}
+            {items.map((item) => {
+              const status = resolvedStatusMap[mediaKey(item)];
+              const href = hrefForMedia(item);
+              return (
+                <Link
+                  key={mediaKey(item)}
+                  href={href}
+                  className="provider-page-card"
+                  onClick={(event) => {
+                    // Force client navigation — nested badge buttons inside <a>
+                    // can otherwise leave clicks no-opping in some browsers.
+                    if (event.defaultPrevented) return;
+                    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    event.preventDefault();
+                    router.push(href);
+                  }}
+                >
+                  <div className="provider-page-poster">
+                    <PosterArt posterPath={item.posterPath} alt={item.title} tmdbSize="w342" sizes="16vw" />
+                    <MediaTypeLabel mediaType={item.mediaType} />
+                    {status
+                      ? <MediaStatusBadge status={status} />
+                      : <MediaFavoriteBadge item={item} source="ProviderPage:badge" />}
+                    <div className="provider-page-poster-meta">
+                      <div className="provider-page-poster-title">{item.title}</div>
+                      <div className="provider-page-poster-sub">
+                        {[item.year, item.rating ? `★ ${item.rating}` : null].filter(Boolean).join(" · ")}
+                      </div>
                     </div>
                   </div>
-                </div>
-              </Link>
-            ))}
+                </Link>
+              );
+            })}
           </div>
           {loadingMore ? <div className="provider-page-loading-more">Loading more…</div> : null}
         </>

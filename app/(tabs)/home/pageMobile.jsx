@@ -1545,14 +1545,14 @@ export default function Page() {
           )}
 
           {/* ---------- In Progress ---------- */}
-          {inProgressRowList.length > 0 && (
+          {(inProgressRowList.length > 0) && (
             // paddingTop reduced another 15% (18→15), together with the
             // wrapper's own paddingBottom reduction above — moving this
             // whole section (and everything below it) up more decisively
             // this time.
             <div style={{ position: "relative", zIndex: 3, paddingTop: 15, background: "transparent" }}>
               <SectionHeader title="In Progress" right={<InProgressViewToggle mode={inProgressViewMode} onChange={setInProgressViewMode} />} />
-              {/* Both views omit the hero show. */}
+              {/* Always exclude the hero show from both gallery + poster rails. */}
               {inProgressViewMode === "gallery" ? (
                 <div className="mt-3 pl-6 flex items-start gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
                   {inProgressRowList.map((item) => (
