@@ -2,17 +2,22 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import EpisodeDetail from "@/components/EpisodeDetail";
-import EpisodeRatingFlow from "@/components/EpisodeRatingFlow";
-import FloatingNav from "@/components/ui/FloatingNav";
+import EpisodeDetailDesktop from "@/components/EpisodeDetail";
+import EpisodeDetailMobile from "@/components/mobile-original/EpisodeDetail";
+import ResponsivePage from "@/components/ui/ResponsivePage";
+import EpisodeRatingFlowDesktop from "@/components/EpisodeRatingFlow";
+import EpisodeRatingFlowMobile from "@/components/mobile-original/EpisodeRatingFlow";
+
 import { useAuth } from "@/lib/auth-context";
 import { getEpisodeWatches, syncEpisodeWatchCount, rateLatestWatch, getLatestWatchDate } from "@/lib/episodeWatches";
 import { getEpisodeSkips, setEpisodeSkipped } from "@/lib/episodeSkips";
 import { reconcileShowStatusAfterWatchChange } from "@/lib/userShows";
 import { formatWatchDateLabel } from "@/lib/watchDate";
-import { themes, tintColorForShow } from "@/lib/theme";
+import { themes } from "@/lib/theme";
 
 const t = themes.dark;
+const EpisodeDetail = (props) => <ResponsivePage mobile={EpisodeDetailMobile} desktop={EpisodeDetailDesktop} pageProps={props} />;
+const EpisodeRatingFlow = (props) => <ResponsivePage mobile={EpisodeRatingFlowMobile} desktop={EpisodeRatingFlowDesktop} pageProps={props} />;
 
 // The only real entry point today is Home's Continue Watching hero, which
 // always queues the earliest unwatched *aired* episode in season/episode
@@ -154,12 +159,6 @@ export default function EpisodeDetailClient({ showId, showTitle, seasonNumber, e
           onMarkWatchedOnce={() => setWatchCount(1)}
         />
       </div>
-
-      {/* This route sits outside the (tabs) group (no shared layout nav —
-          see lib/nav-tint-context.jsx's comment), so it renders its own
-          FloatingNav directly rather than going through context. Tinted by
-          the show, not the episode still, matching Show Detail's own nav. */}
-      <FloatingNav tintColor={tintColorForShow(showId)} />
 
       {/* Same rating sheet Show Detail uses for a freshly-watched episode.
           onSave only persists — the actual "return to Home" navigation

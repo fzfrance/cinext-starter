@@ -1,5 +1,6 @@
 "use client";
 
+import { useNavVisibility } from "@/lib/nav-visibility-context";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
@@ -23,6 +24,7 @@ import { useAppLanguage } from "@/lib/languages";
  */
 export default function DesktopGlobalNav() {
   const pathname = usePathname();
+  const [navHidden] = useNavVisibility();
   const searchParams = useSearchParams();
   const router = useRouter();
   const { user } = useAuth();
@@ -120,7 +122,7 @@ export default function DesktopGlobalNav() {
     };
   }, [menuOpen]);
 
-  if (pathname?.startsWith("/login") || pathname?.startsWith("/signup")) {
+  if (navHidden || /^\/show\/[^/]+\/episode\//.test(pathname ?? "") || pathname?.startsWith("/login") || pathname?.startsWith("/signup")) {
     return null;
   }
 

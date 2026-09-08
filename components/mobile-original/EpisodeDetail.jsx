@@ -207,7 +207,7 @@ export default function EpisodeDetail({
           </div>
         )}
 
-        <button onClick={ep.daysUntil != null ? undefined : handleBottomButtonClick} disabled={ep.daysUntil != null} className="w-full active:scale-95 transition" style={{ marginTop: 28, padding: "13px", borderRadius: 999, background: ep.daysUntil != null ? "rgba(255,255,255,0.06)" : ep.watched ? t.cardFill : "#fff", color: ep.daysUntil != null ? t.textDim : ep.watched ? "#fff" : "#111", border: (ep.watched || ep.daysUntil != null) ? `1px solid ${t.glassBorder}` : "none", fontSize: 14.5, fontWeight: 600 }}>
+        <button onClick={ep.daysUntil != null ? undefined : handleBottomButtonClick} disabled={ep.daysUntil != null} className="w-full active:scale-95 transition" style={{ marginTop: 28, padding: "13px", borderRadius: 999, background: ep.daysUntil != null ? "rgba(255,255,255,0.06)" : ep.watched ? t.cardFill : accent, color: ep.daysUntil != null ? t.textDim : ep.watched ? "#fff" : "#111", border: (ep.watched || ep.daysUntil != null) ? `1px solid ${t.glassBorder}` : "none", fontSize: 14.5, fontWeight: 600 }}>
           {ep.daysUntil === Infinity ? "Release date TBA" : ep.daysUntil != null ? `Airs in ${ep.daysUntil} day${ep.daysUntil === 1 ? "" : "s"}` : ep.watched ? "Mark as Unwatched" : "Mark as Watched"}
         </button>
       </div>

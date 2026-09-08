@@ -362,11 +362,11 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
   // as long as any of these are open, same pattern
   // components/library/CaseOverlay.jsx already uses for its own overlay.
   useEffect(() => {
-    const hidden = collectionSheetOpen || newCollectionOpen || !!openVideo
+    const hidden = !!activeEpisode || !!ratingEpisode || collectionSheetOpen || newCollectionOpen || !!openVideo
       || watchMenuFor != null || skipMenuFor != null || skipSeasonMenuFor != null || watchNextMenuAnchor != null;
     setNavHidden(hidden);
     return () => setNavHidden(false);
-  }, [collectionSheetOpen, newCollectionOpen, openVideo, watchMenuFor, skipMenuFor, skipSeasonMenuFor, watchNextMenuAnchor, setNavHidden]);
+  }, [activeEpisode, ratingEpisode, collectionSheetOpen, newCollectionOpen, openVideo, watchMenuFor, skipMenuFor, skipSeasonMenuFor, watchNextMenuAnchor, setNavHidden]);
 
   // Season ratings (0-10, mood/character/review — reference/
   // season_rating_prototype.jsx), keyed by season number:
@@ -1187,7 +1187,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
           {/* status */}
           <div className="flex items-center justify-center gap-2.5" style={{ marginTop: 17 }}>
             {!inLibrary ? (
-              <button onClick={addToLibrary} className="flex items-center gap-2 rounded-full active:scale-95 transition" style={{ padding: "10px 20px", background: "#fff", color: "#111" }}>
+              <button onClick={addToLibrary} className="flex items-center gap-2 rounded-full active:scale-95 transition" style={{ padding: "10px 20px", background: accent, color: "#111" }}>
                 <Icon name="plus" size={14} color="#111" />
                 <span style={{ fontSize: 13.5, fontWeight: 600 }}>Add to Library</span>
               </button>
@@ -1216,7 +1216,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                       history) — falls back to a neutral "Choose Status"
                       label/icon instead of statusMenuOptions.find(...)
                       quietly returning undefined for both. */}
-                  <button onClick={() => setStatusOpen((v) => !v)} className="flex items-center gap-2 rounded-full active:scale-95 transition" style={{ padding: "10px 18px", background: "#fff", color: "#111" }}>
+                  <button onClick={() => setStatusOpen((v) => !v)} className="flex items-center gap-2 rounded-full active:scale-95 transition" style={{ padding: "10px 18px", background: accent, color: "#111" }}>
                     <Icon name={resolvedStatus === "watchlist" ? "bookmarkFilled" : statusMenuOptions.find((s) => s.id === resolvedStatus)?.icon ?? "plus"} size={15} color="#111" />
                     <span style={{ fontSize: 13.5, fontWeight: 600 }}>{statusMenuOptions.find((s) => s.id === resolvedStatus)?.label ?? "Choose Status"}</span>
                   </button>

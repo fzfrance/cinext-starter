@@ -38,7 +38,7 @@ const DONE_CARD_STYLE = {
 function GlassButton({ children, filled, onClick, style }) {
   return (
     <button onClick={onClick} style={{
-      background: filled ? "#fff" : t.cardFill, color: filled ? "#111" : "#fff",
+      background: filled ? accent : t.cardFill, color: filled ? "#111" : "#fff",
       border: `1px solid ${filled ? "transparent" : t.glassBorder}`, backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", ...style
     }} className="flex items-center justify-center gap-2 rounded-full active:scale-95 transition">
       {children}
@@ -472,7 +472,7 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
               </Card>
             )}
 
-            <button onClick={onClose} className="w-full rounded-full active:scale-95 transition" style={{ marginTop: DONE_SECTION_GAP, padding: 14, background: "#fff" }}>
+            <button onClick={onClose} className="w-full rounded-full active:scale-95 transition" style={{ marginTop: DONE_SECTION_GAP, padding: 14, background: accent }}>
               <span style={{ fontSize: 14.5, fontWeight: 700, color: "#111" }}>Done</span>
             </button>
           </div>

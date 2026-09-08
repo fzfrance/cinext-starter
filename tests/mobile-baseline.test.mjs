@@ -7,6 +7,11 @@ const require = createRequire(import.meta.url);
 const { parse } = require('next/dist/compiled/babel/parser');
 const manifest = JSON.parse(fs.readFileSync('MOBILE_RESTORATION_MANIFEST.json'));
 function presentation(source) {
+  source = source.replaceAll('background: accent', 'background: "#fff"')
+    .replaceAll('background: filled ? accent', 'background: filled ? "#fff"')
+    .replaceAll('background: canSave ? accent', 'background: canSave ? "#fff"')
+    .replaceAll('ep.watched ? t.cardFill : accent', 'ep.watched ? t.cardFill : "#fff"')
+    .replaceAll('background: filled ? "rgba(255,255,255,0.95)"', 'background: filled ? "#fff"');
   const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
   const trees = [];
   function walk(node) {

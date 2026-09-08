@@ -264,10 +264,7 @@ export default function Page() {
   // unmount too, so navigating away mid-bulk-select never leaves the nav
   // permanently hidden.
   const [, setNavHidden] = useNavVisibility();
-  useEffect(() => {
-    setNavHidden(!!bulkMode);
-    return () => setNavHidden(false);
-  }, [bulkMode, setNavHidden]);
+
   const [bulkSelectedIds, setBulkSelectedIds] = useState(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkDateSheetOpen, setBulkDateSheetOpen] = useState(false);
@@ -301,6 +298,10 @@ export default function Page() {
   // the same flow, no need for a parallel direct-open path.
   const [ratingMovieEntry, setRatingMovieEntry] = useState(null);
   const [ratingMovieCast, setRatingMovieCast] = useState([]);
+  useEffect(() => {
+    setNavHidden(!!bulkMode || !!ratingEntry || !!ratingMovieEntry || bulkDateSheetOpen);
+    return () => setNavHidden(false);
+  }, [bulkMode, ratingEntry, ratingMovieEntry, bulkDateSheetOpen, setNavHidden]);
   useEffect(() => {
     if (!ratingMovieEntry?.movieId) { setRatingMovieCast([]); return; }
     let cancelled = false;

@@ -46,3 +46,11 @@ A numeric route string is not by itself proof of a PostgREST mismatch: numeric s
 ## Next live checks before release
 
 At 390px, 768px touch and desktop widths, compare Home, Highlights (TV+movie, movie-only, year-only, empty), Library (all view modes and collections), and Show Detail against the evening design. With a disposable test show, exercise Completed → Remove, episode mark → Remove, a failed deletion, reload/re-add, and navigation back to Home/Highlights. Re-add must show zero watched/skipped episodes and no saved season ratings. Use a test account for destructive checks.
+
+## Follow-up: amber CTAs and Highlights episode navigation
+
+The evening Git baseline itself contained white primary CTAs. The user's explicit correction now takes precedence: restored mobile Add to List, filled Home actions, episode/season/movie rating Save/Done, and Mark Watched actions use the existing amber accent. Reference tests permit this narrow color correction.
+
+The standalone `/show/[id]/episode/[season]/[ep]` route had been missed by the original four-route restoration. It now selects the original mobile EpisodeDetail (with the TV shortcut in the top-right header) and rating flow while retaining the desktop components. Its own floating navigation has been removed. Highlights and Show Detail hide navigation when their episode/rating overlays open, and desktop navigation honors that visibility state and stays off standalone episode routes.
+
+Gotham: the user reports Remove from Show Detail cleared only first/last seasons. No authenticated account diagnosis has completed. Automatic review rejected an attempted service-role read because it lacked a user filter; no query ran. A profile handle/user ID has been requested to permit a narrowly scoped read. A regression test exercises all five seasons with 1,500 synthetic watch events and another account/title, and confirms the actual delete helper rejects partial season deletion. This does not establish what happened in the live account.
