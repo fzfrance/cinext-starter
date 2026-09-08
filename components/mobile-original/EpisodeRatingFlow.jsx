@@ -379,8 +379,18 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
               </Card>
             )}
 
-            <div className="px-6 mt-6 flex flex-col gap-2.5">
-              <GlassButton filled={canSave} onClick={save} style={{ padding: "14px", opacity: canSave ? 1 : 0.4 }}>
+            <div className="px-6 mt-6 flex flex-col items-center gap-2.5">
+              <GlassButton
+                filled={canSave}
+                onClick={save}
+                style={{
+                  alignSelf: "center",
+                  padding: "10px 22px",
+                  background: canSave ? "#fff" : "rgba(255,255,255,0.15)",
+                  color: canSave ? "#111" : "rgba(255,255,255,0.4)",
+                  opacity: canSave ? 1 : 0.4,
+                }}
+              >
                 <span style={{ fontSize: 15, fontWeight: 600 }}>Save Rating</span>
               </GlassButton>
               <button onClick={onClose} style={{ fontSize: 13, color: t.textDim, textAlign: "center", padding: "6px" }}>Not now</button>

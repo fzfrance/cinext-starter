@@ -380,7 +380,7 @@ export default function MovieRatingScreen({ movieTitle, movie, manual, cast, bac
           )}
 
           {editing && (
-            <button onClick={save} disabled={!canSave || saving} className="w-full mt-5 rounded-full active:scale-95 transition" style={{ padding: 14, background: canSave ? accent : "rgba(255,255,255,0.15)", color: canSave ? "#111" : "rgba(255,255,255,0.4)", fontSize: 14.5, fontWeight: 700, opacity: saving ? 0.7 : 1 }}>
+            <button onClick={save} disabled={!canSave || saving} className="mt-5 rounded-full active:scale-95 transition" style={{ display: "block", width: "fit-content", marginLeft: "auto", marginRight: "auto", padding: "10px 22px", background: canSave ? "#fff" : "rgba(255,255,255,0.15)", color: canSave ? "#111" : "rgba(255,255,255,0.4)", fontSize: 14.5, fontWeight: 700, opacity: saving ? 0.7 : 1 }}>
               {saving ? "Saving…" : "Save Rating"}
             </button>
           )}
