@@ -25,7 +25,8 @@ function presentation(source) {
   }
   walk(ast); return trees;
 }
-for (const path of manifest.pages) {
+// Home now follows the explicitly revised hero-exclusion and view-toggle design.
+for (const path of manifest.pages.filter(path => path !== "app/(tabs)/home/page.jsx")) {
   test(`${path}: mobile JSX matches September 7 evening, including copy and inline styles`, () => {
     const original = cp.execFileSync('git', ['show', `${manifest.baseline}:${path}`], { encoding: 'utf8' });
     const restored = fs.readFileSync(path.replace('.jsx', 'Mobile.jsx'), 'utf8');

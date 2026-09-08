@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { excludeHeroShow } from "@/lib/inProgress";
+import InProgressViewToggle from "@/components/ui/InProgressViewToggle";
 import { useRouter } from "next/navigation";
 import Icon from "@/components/mobile-original/ui/Icon";
 import Grain from "@/components/mobile-original/ui/Grain";
@@ -208,11 +210,11 @@ function GlassPill({ children, filled, onClick, round }) {
 // again — margin-top is the one thing that legitimately varies per section
 // (how much room the section above it needs), passed in via className
 // rather than baked in here.
-function SectionHeader({ title, onSeeAll, className }) {
+function SectionHeader({ title, onSeeAll, right, className }) {
   return (
     <div className={`px-6 flex items-center justify-between ${className || ""}`}>
       <div className="text-white text-[19.55px] font-semibold">{title}</div>
-      {onSeeAll && <button className="text-[13px]" style={{ color: t.textDim }} onClick={onSeeAll}>See All</button>}
+      {right || (onSeeAll && <button className="text-[13px]" style={{ color: t.textDim }} onClick={onSeeAll}>See All</button>)}
     </div>
   );
 }
@@ -951,15 +953,8 @@ export default function Page() {
     episodesLeft: s.episodesLeft,
   }));
 
-  // Home row, gallery mode only — the hero card above already gives the
-  // most-recently-watched show its own large, prominent spot, so
-  // repeating it as the very first backdrop card right below reads as a
-  // straight duplicate (same show, same art, twice in a row). The poster
-  // grid doesn't have this problem — those are small enough, and the
-  // full "See All" page is a genuine complete list — so this filtered
-  // list is only used for Home's own gallery row, not inProgressList
-  // itself (which both of those still read from unfiltered).
-  const inProgressRowList = heroShow ? inProgressList.filter((item) => item.id !== heroShow.showId) : inProgressList;
+  // The hero already represents this show; both row views use the same list.
+  const inProgressRowList = excludeHeroShow(inProgressList, heroShow?.showId);
 
   const upcomingEpisodes = upcoming.map((s) => ({
     id: s.id,
@@ -1550,22 +1545,14 @@ export default function Page() {
           )}
 
           {/* ---------- In Progress ---------- */}
-          {(inProgressViewMode === "gallery" ? inProgressRowList : inProgressList).length > 0 && (
+          {inProgressRowList.length > 0 && (
             // paddingTop reduced another 15% (18→15), together with the
             // wrapper's own paddingBottom reduction above — moving this
             // whole section (and everything below it) up more decisively
             // this time.
             <div style={{ position: "relative", zIndex: 3, paddingTop: 15, background: "transparent" }}>
-              <SectionHeader title="In Progress" onSeeAll={() => setView("inProgress")} />
-              {/* Mirrors whichever display mode See All → In Progress is
-                  set to (inProgressViewMode, persisted — see
-                  IN_PROGRESS_VIEW_MODE_KEY above), instead of always the
-                  poster layout regardless of what the user picked there.
-                  Gallery mode also drops the hero's own show (see
-                  inProgressRowList above) — the poster grid stays
-                  unfiltered since those small cards don't read as a
-                  duplicate of the hero the way a second full backdrop
-                  card right underneath it does. */}
+              <SectionHeader title="In Progress" right={<InProgressViewToggle mode={inProgressViewMode} onChange={setInProgressViewMode} />} />
+              {/* Both views omit the hero show. */}
               {inProgressViewMode === "gallery" ? (
                 <div className="mt-3 pl-6 flex items-start gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
                   {inProgressRowList.map((item) => (
@@ -1583,7 +1570,7 @@ export default function Page() {
                 // cover (PosterArt), but that outer stretch still made
                 // cards read as uneven overall.
                 <div className="mt-3 pl-6 flex items-start gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                  {inProgressList.map((item) => (
+                  {inProgressRowList.map((item) => (
                     <PosterCard
                       key={item.id}
                       show={item.show}

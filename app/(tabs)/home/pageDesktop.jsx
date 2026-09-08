@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { excludeHeroShow } from "@/lib/inProgress";
 import { useRouter } from "next/navigation";
 import Icon from "@/components/ui/Icon";
 import Grain from "@/components/ui/Grain";
@@ -1464,15 +1465,8 @@ export default function Page() {
     episodesLeft: s.episodesLeft,
   }));
 
-  // Home row, gallery mode only — the hero card above already gives the
-  // most-recently-watched show its own large, prominent spot, so
-  // repeating it as the very first backdrop card right below reads as a
-  // straight duplicate (same show, same art, twice in a row). The poster
-  // grid doesn't have this problem — those are small enough, and the
-  // full "See All" page is a genuine complete list — so this filtered
-  // list is only used for Home's own gallery row, not inProgressList
-  // itself (which both of those still read from unfiltered).
-  const inProgressRowList = heroShow ? inProgressList.filter((item) => item.id !== heroShow.showId) : inProgressList;
+  // The hero already represents this show; both row views use the same list.
+  const inProgressRowList = excludeHeroShow(inProgressList, heroShow?.showId);
 
   const upcomingEpisodes = upcoming.map((s) => ({
     key: `tv-${s.id}`,
@@ -2228,7 +2222,7 @@ export default function Page() {
           )}
 
           {/* ---------- In Progress ---------- */}
-          {(inProgressViewMode === "gallery" ? inProgressRowList : inProgressList).length > 0 && (
+          {inProgressRowList.length > 0 && (
             // paddingTop reduced another 15% (18→15), together with the
             // wrapper's own paddingBottom reduction above — moving this
             // whole section (and everything below it) up more decisively
@@ -2248,7 +2242,7 @@ export default function Page() {
                 </div>
               ) : (
                 <div className="mt-3 pl-6 flex items-start gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                  {inProgressList.map((item) => (
+                  {inProgressRowList.map((item) => (
                     <PosterCard
                       key={item.id}
                       show={item.show}
@@ -2292,7 +2286,7 @@ export default function Page() {
           goToHeroEpisode={goToHeroEpisode}
           goToHeroShow={goToHeroShow}
           inProgressItems={inProgressRowList}
-          inProgressPosterItems={inProgressList}
+          inProgressPosterItems={inProgressRowList}
           inProgressViewMode={inProgressViewMode}
           onInProgressViewModeChange={setInProgressViewMode}
           handleLongPress={handleLongPress}
