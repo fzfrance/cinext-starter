@@ -1,5 +1,7 @@
 "use client";
 
+import { useWatchRefresh } from "@/lib/useWatchRefresh";
+import { applyWatchSnapshot, applySkipSnapshot } from "@/lib/watchSnapshot";
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -158,6 +160,7 @@ const moreMenuItems = [
 export default function ShowDetailClient({ showId, show, initialSeasons, cast, videos, similar, watchProviders }) {
   const router = useRouter();
   const { user } = useAuth();
+  const watchRefresh = useWatchRefresh(user?.id);
   const { isFavorite, toggleFavorite } = useFavorites();
   const { getCustomBackdrop, getCustomPoster, getCustomLogo, setCustomImage } = useShowCustomizations();
   const readableLanguages = useReadableLanguages();
@@ -421,7 +424,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
       .finally(() => { if (!cancelled) setSeasonRatingsLoaded(true); });
     getProfile(user.id).then((p) => { if (!cancelled) setUsername(p?.handle || p?.displayName || "you"); }).catch(console.error);
     return () => { cancelled = true; };
-  }, [user, showId]);
+  }, [user, showId, watchRefresh]);
 
   const saveSeasonRatingFor = async (seasonNumber, payload) => {
     await saveSeasonRating(user.id, showId, seasonNumber, payload);
@@ -527,17 +530,10 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     let cancelled = false;
     getEpisodeWatches(user.id, showId).then((byEpisode) => {
       if (cancelled || gen !== watchSeedGenRef.current || suppressEpisodeWritesRef.current) return;
-      setSeasons((ss) => ss.map((s) => ({
-        ...s,
-        episodes: s.episodes.map((e) => {
-          const hit = byEpisode[`${s.id}-${e.n}`];
-          if (!hit) return e;
-          return { ...e, watched: true, watchCount: hit.watchCount, myRating: hit.rating != null ? hit.rating : e.myRating };
-        }),
-      })));
+      setSeasons((ss) => applyWatchSnapshot(ss, byEpisode));
     }).catch(console.error);
     return () => { cancelled = true; };
-  }, [user, showId]);
+  }, [user, showId, watchRefresh]);
 
   // Same seed pattern as the watches effect above, one table over —
   // episode_skips is a plain toggle (no count/rating), so this just flips
@@ -552,26 +548,23 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     let cancelled = false;
     getEpisodeSkips(user.id, showId).then((skippedKeys) => {
       if (cancelled || gen !== skipSeedGenRef.current || suppressEpisodeWritesRef.current) return;
-      setSeasons((ss) => ss.map((s) => ({
-        ...s,
-        episodes: s.episodes.map((e) => (skippedKeys.has(`${s.id}-${e.n}`) ? { ...e, skipped: true } : e)),
-      })));
+      setSeasons((ss) => applySkipSnapshot(ss, skippedKeys));
     }).catch(console.error);
     return () => { cancelled = true; };
-  }, [user, showId]);
+  }, [user, showId, watchRefresh]);
 
   // Library status (Watchlist/Watching/.../Remove) + favorite — user_shows.
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     getUserShow(user.id, showId).then((row) => {
-      if (cancelled || !row) return;
-      setInLibrary(true);
-      setStatus(row.status);
-      setStatusExplicit(row.statusExplicit ?? true);
+      if (cancelled) return;
+      setInLibrary(!!row);
+      setStatus(row?.status ?? null);
+      setStatusExplicit(row?.statusExplicit ?? false);
     }).catch(console.error);
     return () => { cancelled = true; };
-  }, [user, showId]);
+  }, [user, showId, watchRefresh]);
 
   // Keeps the *stored* status in sync with actual watch state, not just
   // what's displayed (the pill/StatusMenu already always render
@@ -953,14 +946,12 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
           await showWatchWriteChainRef.current.catch(() => {});
           await removeUserShow(user.id, showId, "ShowDetailClient:selectStatus:remove");
       setInLibrary(false);
-      setFavorite(false);
       setStatus(null);
       setStatusExplicit(false);
       setSeasons((ss) => ss.map((s) => ({
         ...s,
         episodes: s.episodes.map((e) => ({ ...e, watched: false, watchCount: 0, skipped: false, myRating: null })),
       })));
-      setWatchedShowIds((prev) => { const next = new Set(prev); next.delete(showId); return next; });
           setSeasonRatings({});
         })
         .catch((err) => {

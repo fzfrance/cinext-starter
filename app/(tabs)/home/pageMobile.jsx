@@ -195,7 +195,7 @@ function Ring({ pct, size = 28, accent = "#E8A24C" }) {
 function GlassPill({ children, filled, onClick, round }) {
   return (
     <button onClick={onClick} style={{
-      background: filled ? accent : t.cardFill, color: filled ? "#111" : "#fff",
+      background: filled ? "rgba(255,255,255,0.95)" : t.cardFill, color: filled ? "#111" : "#fff",
       border: `1px solid ${filled ? "transparent" : t.glassBorder}`, backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
     }} className={`flex items-center justify-center gap-2 active:scale-95 transition ${round ? "w-11 h-11 rounded-full" : "px-5 py-2.5 rounded-full text-[14px] font-medium"}`}>
       {children}

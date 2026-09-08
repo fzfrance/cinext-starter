@@ -1,5 +1,7 @@
 "use client";
 
+import { useWatchRefresh } from "@/lib/useWatchRefresh";
+import { applyWatchSnapshot, applySkipSnapshot } from "@/lib/watchSnapshot";
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -157,6 +159,7 @@ const moreMenuItems = [
 export default function ShowDetailClient({ showId, show, initialSeasons, cast, videos, similar, watchProviders }) {
   const router = useRouter();
   const { user } = useAuth();
+  const watchRefresh = useWatchRefresh(user?.id);
   const { isFavorite, toggleFavorite } = useFavorites();
   const { getCustomBackdrop, getCustomPoster, getCustomLogo, setCustomImage } = useShowCustomizations();
   const readableLanguages = useReadableLanguages();
@@ -396,7 +399,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
       .finally(() => { if (!cancelled && hydrationGeneration === hydrationGenerationRef.current && !removingRef.current) setSeasonRatingsLoaded(true); });
     getProfile(user.id).then((p) => { if (!cancelled && hydrationGeneration === hydrationGenerationRef.current && !removingRef.current) setUsername(p?.handle || p?.displayName || "you"); }).catch(console.error);
     return () => { cancelled = true; };
-  }, [user, showId]);
+  }, [user, showId, watchRefresh]);
 
   const saveSeasonRatingFor = async (seasonNumber, payload) => {
     await saveSeasonRating(user.id, showId, seasonNumber, payload);
@@ -502,17 +505,10 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     const hydrationGeneration = hydrationGenerationRef.current;
     getEpisodeWatches(user.id, showId).then((byEpisode) => {
       if (hydrationGeneration !== hydrationGenerationRef.current || removingRef.current || cancelled) return;
-      setSeasons((ss) => ss.map((s) => ({
-        ...s,
-        episodes: s.episodes.map((e) => {
-          const hit = byEpisode[`${s.id}-${e.n}`];
-          if (!hit) return e;
-          return { ...e, watched: true, watchCount: hit.watchCount, myRating: hit.rating != null ? hit.rating : e.myRating };
-        }),
-      })));
+      setSeasons((ss) => applyWatchSnapshot(ss, byEpisode));
     }).catch(console.error);
     return () => { cancelled = true; };
-  }, [user, showId]);
+  }, [user, showId, watchRefresh]);
 
   // Same seed pattern as the watches effect above, one table over —
   // episode_skips is a plain toggle (no count/rating), so this just flips
@@ -527,13 +523,10 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     const hydrationGeneration = hydrationGenerationRef.current;
     getEpisodeSkips(user.id, showId).then((skippedKeys) => {
       if (hydrationGeneration !== hydrationGenerationRef.current || removingRef.current || cancelled) return;
-      setSeasons((ss) => ss.map((s) => ({
-        ...s,
-        episodes: s.episodes.map((e) => (skippedKeys.has(`${s.id}-${e.n}`) ? { ...e, skipped: true } : e)),
-      })));
+      setSeasons((ss) => applySkipSnapshot(ss, skippedKeys));
     }).catch(console.error);
     return () => { cancelled = true; };
-  }, [user, showId]);
+  }, [user, showId, watchRefresh]);
 
   // Library status (Watchlist/Watching/.../Remove) + favorite — user_shows.
   useEffect(() => {
@@ -541,13 +534,13 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
     let cancelled = false;
     const hydrationGeneration = hydrationGenerationRef.current;
     getUserShow(user.id, showId).then((row) => {
-      if (hydrationGeneration !== hydrationGenerationRef.current || removingRef.current || cancelled || !row) return;
-      setInLibrary(true);
-      setStatus(row.status);
-      setStatusExplicit(row.statusExplicit ?? true);
+      if (hydrationGeneration !== hydrationGenerationRef.current || removingRef.current || cancelled) return;
+      setInLibrary(!!row);
+      setStatus(row?.status ?? null);
+      setStatusExplicit(row?.statusExplicit ?? false);
     }).catch(console.error);
     return () => { cancelled = true; };
-  }, [user, showId]);
+  }, [user, showId, watchRefresh]);
 
   // Keeps the *stored* status in sync with actual watch state, not just
   // what's displayed (the pill/StatusMenu already always render
@@ -881,13 +874,11 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
           setStatus(null);
           setSeasonRatings({});
           setInLibrary(false);
-          setFavorite(false);
           setStatusExplicit(true);
           setSeasons((ss) => ss.map((s) => ({
             ...s,
             episodes: s.episodes.map((e) => ({ ...e, watched: false, watchCount: 0, skipped: false, myRating: null })),
           })));
-          setWatchedShowIds((prev) => { const next = new Set(prev); next.delete(showId); return next; });
         })
         .catch((err) => {
           console.error(err);
@@ -1187,7 +1178,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
           {/* status */}
           <div className="flex items-center justify-center gap-2.5" style={{ marginTop: 17 }}>
             {!inLibrary ? (
-              <button onClick={addToLibrary} className="flex items-center gap-2 rounded-full active:scale-95 transition" style={{ padding: "10px 20px", background: accent, color: "#111" }}>
+              <button onClick={addToLibrary} className="flex items-center gap-2 rounded-full active:scale-95 transition" style={{ padding: "10px 20px", background: "#fff", color: "#111" }}>
                 <Icon name="plus" size={14} color="#111" />
                 <span style={{ fontSize: 13.5, fontWeight: 600 }}>Add to Library</span>
               </button>
@@ -1216,7 +1207,7 @@ export default function ShowDetailClient({ showId, show, initialSeasons, cast, v
                       history) — falls back to a neutral "Choose Status"
                       label/icon instead of statusMenuOptions.find(...)
                       quietly returning undefined for both. */}
-                  <button onClick={() => setStatusOpen((v) => !v)} className="flex items-center gap-2 rounded-full active:scale-95 transition" style={{ padding: "10px 18px", background: accent, color: "#111" }}>
+                  <button onClick={() => setStatusOpen((v) => !v)} className="flex items-center gap-2 rounded-full active:scale-95 transition" style={{ padding: "10px 18px", background: "#fff", color: "#111" }}>
                     <Icon name={resolvedStatus === "watchlist" ? "bookmarkFilled" : statusMenuOptions.find((s) => s.id === resolvedStatus)?.icon ?? "plus"} size={15} color="#111" />
                     <span style={{ fontSize: 13.5, fontWeight: 600 }}>{statusMenuOptions.find((s) => s.id === resolvedStatus)?.label ?? "Choose Status"}</span>
                   </button>
