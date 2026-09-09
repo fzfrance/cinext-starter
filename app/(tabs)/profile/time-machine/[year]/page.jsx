@@ -21,7 +21,7 @@ const accent = DEFAULT_ACCENT;
 // A historical year can contain enough distinct titles to make one large
 // batch URL slow or reject. Resolve in small independent chunks so one bad
 // TMDB response cannot turn the entire year's list into an empty state.
-async function fetchBatchResults(path, ids) {
+async function fetchBatchResults(path, ids, onChunk) {
   if (ids.length === 0) return [];
   const chunks = [];
   for (let i = 0; i < ids.length; i += 20) chunks.push(ids.slice(i, i + 20));
@@ -33,7 +33,9 @@ async function fetchBatchResults(path, ids) {
       const response = await fetch(`${path}?ids=${chunk.join(",")}`, { cache: "no-store" });
       if (!response.ok) { responses.push([]); continue; }
       const payload = await response.json();
-      responses.push(Array.isArray(payload?.results) ? payload.results : []);
+      const results = Array.isArray(payload?.results) ? payload.results : [];
+      responses.push(results);
+      onChunk?.(results);
     } catch (err) {
       console.error(`Failed to load Time Machine media batch (${path}):`, err);
       responses.push([]);
@@ -183,30 +185,41 @@ export default function Page() {
       const showIds = [...lastShowDate.keys()];
       const movieIds = [...lastMovieDate.keys()];
 
-      const [showResults, movieResults] = await Promise.all([
-        fetchBatchResults("/api/shows/batch", showIds),
-        fetchBatchResults("/api/movies/batch", movieIds),
-      ]);
-      if (cancelled) return;
-
-      const showById = new Map(showResults.map((show) => [String(show.id), show]));
-      const movieById = new Map(movieResults.map((movie) => [String(movie.id), movie]));
+      // Publish every watch record immediately. Metadata hydration can take
+      // several sequential requests for a 150–300 title year; holding the
+      // whole grid behind that work made mobile look as if only a small
+      // subset existed. Each completed batch replaces its placeholders in
+      // place while every title remains scrollable from the start.
+      const showById = new Map();
+      const movieById = new Map();
       // Keep the watch record visible even when TMDB temporarily has no
       // metadata for an ID. The detail route remains usable, and the
       // placeholder makes the missing enrichment recoverable rather than
       // presenting a misleading empty year.
-      const merged = [
-        ...showIds.map((id) => ({
-          ...(showById.get(String(id)) ?? { id: Number(id), title: "Watched TV show", posterPath: null }),
-          mediaType: "tv", watchedAt: lastShowDate.get(id) ?? lastShowDate.get(Number(id)),
-        })),
-        ...movieIds.map((id) => ({
-          ...(movieById.get(String(id)) ?? { id: Number(id), title: "Watched movie", posterPath: null }),
-          mediaType: "movie", watchedAt: lastMovieDate.get(id) ?? lastMovieDate.get(Number(id)),
-        })),
-      ].sort((a, b) => (b.watchedAt ?? "").localeCompare(a.watchedAt ?? ""));
-
-      setItems(merged);
+      const publishItems = () => {
+        if (cancelled) return;
+        setItems([
+          ...showIds.map((id) => ({
+            ...(showById.get(String(id)) ?? { id: Number(id), title: "Watched TV show", posterPath: null }),
+            mediaType: "tv", watchedAt: lastShowDate.get(id) ?? lastShowDate.get(Number(id)),
+          })),
+          ...movieIds.map((id) => ({
+            ...(movieById.get(String(id)) ?? { id: Number(id), title: "Watched movie", posterPath: null }),
+            mediaType: "movie", watchedAt: lastMovieDate.get(id) ?? lastMovieDate.get(Number(id)),
+          })),
+        ].sort((a, b) => (b.watchedAt ?? "").localeCompare(a.watchedAt ?? "")));
+      };
+      publishItems();
+      await Promise.all([
+        fetchBatchResults("/api/shows/batch", showIds, (results) => {
+          for (const show of results) showById.set(String(show.id), show);
+          publishItems();
+        }),
+        fetchBatchResults("/api/movies/batch", movieIds, (results) => {
+          for (const movie of results) movieById.set(String(movie.id), movie);
+          publishItems();
+        }),
+      ]);
     })().catch((err) => { console.error(err); if (!cancelled) setItems([]); });
     return () => { cancelled = true; };
   }, [user, year]);

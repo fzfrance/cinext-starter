@@ -24,7 +24,7 @@ const TYPE_FILTERS = [
   { id: "movie", label: "Movies" },
 ];
 
-async function fetchBatchResults(path, ids) {
+async function fetchBatchResults(path, ids, onChunk) {
   if (ids.length === 0) return [];
   const chunks = [];
   for (let i = 0; i < ids.length; i += 20) chunks.push(ids.slice(i, i + 20));
@@ -37,7 +37,9 @@ async function fetchBatchResults(path, ids) {
         continue;
       }
       const payload = await response.json();
-      responses.push(Array.isArray(payload?.results) ? payload.results : []);
+      const results = Array.isArray(payload?.results) ? payload.results : [];
+      responses.push(results);
+      onChunk?.(results);
     } catch (err) {
       console.error(`Failed to load Time Machine media batch (${path}):`, err);
       responses.push([]);
@@ -196,36 +198,46 @@ export default function TimeMachineYearModal({ open, year, onClose, onNavigate }
 
       const showIds = [...lastShowDate.keys()];
       const movieIds = [...lastMovieDate.keys()];
-      const [showResults, movieResults] = await Promise.all([
-        fetchBatchResults("/api/shows/batch", showIds),
-        fetchBatchResults("/api/movies/batch", movieIds),
+      const showById = new Map();
+      const movieById = new Map();
+      const publishItems = () => {
+        if (cancelled) return;
+        setItems([
+          ...showIds.map((id) => ({
+            ...(showById.get(String(id)) ?? {
+              id: Number(id),
+              title: "Watched TV show",
+              posterPath: null,
+            }),
+            mediaType: "tv",
+            watchedAt: lastShowDate.get(id) ?? lastShowDate.get(Number(id)),
+          })),
+          ...movieIds.map((id) => ({
+            ...(movieById.get(String(id)) ?? {
+              id: Number(id),
+              title: "Watched movie",
+              posterPath: null,
+            }),
+            mediaType: "movie",
+            watchedAt: lastMovieDate.get(id) ?? lastMovieDate.get(Number(id)),
+          })),
+        ].sort((a, b) => (b.watchedAt ?? "").localeCompare(a.watchedAt ?? "")));
+      };
+
+      // Keep the complete year visible while its posters/titles hydrate in
+      // small batches. Large imported histories should never look truncated
+      // just because TMDB enrichment is still in flight.
+      publishItems();
+      await Promise.all([
+        fetchBatchResults("/api/shows/batch", showIds, (results) => {
+          for (const show of results) showById.set(String(show.id), show);
+          publishItems();
+        }),
+        fetchBatchResults("/api/movies/batch", movieIds, (results) => {
+          for (const movie of results) movieById.set(String(movie.id), movie);
+          publishItems();
+        }),
       ]);
-      if (cancelled) return;
-
-      const showById = new Map(showResults.map((show) => [String(show.id), show]));
-      const movieById = new Map(movieResults.map((movie) => [String(movie.id), movie]));
-      const merged = [
-        ...showIds.map((id) => ({
-          ...(showById.get(String(id)) ?? {
-            id: Number(id),
-            title: "Watched TV show",
-            posterPath: null,
-          }),
-          mediaType: "tv",
-          watchedAt: lastShowDate.get(id) ?? lastShowDate.get(Number(id)),
-        })),
-        ...movieIds.map((id) => ({
-          ...(movieById.get(String(id)) ?? {
-            id: Number(id),
-            title: "Watched movie",
-            posterPath: null,
-          }),
-          mediaType: "movie",
-          watchedAt: lastMovieDate.get(id) ?? lastMovieDate.get(Number(id)),
-        })),
-      ].sort((a, b) => (b.watchedAt ?? "").localeCompare(a.watchedAt ?? ""));
-
-      setItems(merged);
     })().catch((err) => {
       console.error(err);
       if (!cancelled) setItems([]);
