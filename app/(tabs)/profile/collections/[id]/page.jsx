@@ -228,8 +228,9 @@ export default function Page({ params }) {
     const trimmed = showQuery.trim();
     let cancelled = false;
     const handle = setTimeout(() => {
+      const langs = encodeURIComponent((readableLanguages ?? []).join(","));
       const url = trimmed
-        ? `/api/search/shows?q=${encodeURIComponent(trimmed)}`
+        ? `/api/search/shows?q=${encodeURIComponent(trimmed)}&langs=${langs}`
         : `/api/shows/discover-library?list=popular&contentType=tv`;
       fetch(url)
         .then((res) => res.json())
@@ -247,12 +248,13 @@ export default function Page({ params }) {
             posterPath: show.poster_path ?? show.posterPath ?? null,
             base: show.base,
             glow: show.glow,
+            searchTitles: show.searchTitles ?? [],
           })));
         })
         .catch((err) => { if (!cancelled) { console.error("Search failed:", err); setCatalog([]); } });
     }, trimmed ? 350 : 0);
     return () => { cancelled = true; clearTimeout(handle); };
-  }, [showQuery, addShowOpen]);
+  }, [showQuery, addShowOpen, readableLanguages]);
 
   const commitAddShows = () => {
     if (!user || !detail.id) { router.push("/login"); return; }

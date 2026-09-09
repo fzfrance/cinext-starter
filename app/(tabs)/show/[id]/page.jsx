@@ -1,5 +1,5 @@
 import ShowDetailClient from "./ShowDetailClient";
-import { getShowDetails, getSeasonDetails, getShowRecommendations, getWatchProviders, getLocalizedShowVideos } from "@/lib/tmdb";
+import { getShowDetails, getSeasonDetails, getShowRecommendations, getWatchProviders, getLocalizedShowVideos, pickPlayableVideos } from "@/lib/tmdb";
 import { CAST_GRADIENTS, initialsOf } from "@/lib/theme";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -156,14 +156,28 @@ async function getShowData(showId) {
       // (e.g. a "Self" appearance) — an empty-looking dash read as a
       // broken/missing entry rather than a deliberate fallback.
       const role = roleNames.length > 0 ? roleNames.join(" / ") : (c.character || c.name);
-      return { id: c.id, name: c.name, role, profilePath: c.profile_path, isCast: true };
+      return {
+        id: c.id,
+        name: c.name,
+        originalName: c.original_name ?? null,
+        role,
+        profilePath: c.profile_path,
+        isCast: true,
+      };
     });
   const crewEntries = aggCrew
     .filter((c) => !castEntries.some((existing) => existing.id === c.id))
     .map((c) => {
       const jobNames = [...new Set((c.jobs ?? []).map((j) => j.job).filter(Boolean))];
       const role = jobNames.length > 0 ? jobNames.join(" / ") : (c.job || c.department || "Crew");
-      return { id: c.id, name: c.name, role, profilePath: c.profile_path, isCast: false };
+      return {
+        id: c.id,
+        name: c.name,
+        originalName: c.original_name ?? null,
+        role,
+        profilePath: c.profile_path,
+        isCast: false,
+      };
     });
 
   // Tapping a cast/crew row navigates to /person/[id], which fetches its
@@ -197,23 +211,14 @@ async function getShowData(showId) {
     || contentRatings.find((r) => r.rating)?.rating
     || null;
 
-  // Every playable YouTube video TMDB has for this show — not just one
-  // trailer (plenty of shows have several, or none at all under "Trailer"
-  // specifically but do have other real promotional content). Trailers
-  // lead (official ones first), followed by teasers/featurettes/behind-
-  // the-scenes/clips/bloopers as "bonus" content — TMDB has no literal
-  // "Interview" type, but Featurette is the closest general bucket and
-  // plenty of real interview videos get tagged that way. Capped at 10
-  // total so an unusually video-heavy show doesn't produce an endless list.
+  // Trailer & More — YouTube Trailers/Teasers only, confirmed still
+  // playable via oEmbed. Clip / Featurette / BTS keys on TMDB are often
+  // already removed or region-locked and become dead tiles.
   let rawVideos = (show.videos?.results ?? []).filter((v) => v.site === "YouTube");
   if (rawVideos.length === 0) {
     rawVideos = (await getLocalizedShowVideos(showId, show.original_language)).filter((v) => v.site === "YouTube");
   }
-  const BONUS_VIDEO_TYPES = ["Teaser", "Featurette", "Behind the Scenes", "Clip", "Bloopers", "Opening Credits"];
-  const trailerVideos = rawVideos.filter((v) => v.type === "Trailer").sort((a, b) => (b.official ? 1 : 0) - (a.official ? 1 : 0));
-  const bonusVideos = rawVideos.filter((v) => BONUS_VIDEO_TYPES.includes(v.type));
-  const otherVideos = rawVideos.filter((v) => v.type !== "Trailer" && !BONUS_VIDEO_TYPES.includes(v.type));
-  const videoList = [...trailerVideos, ...bonusVideos, ...otherVideos].slice(0, 10).map((v) => ({ key: v.key, name: v.name, type: v.type }));
+  const videoList = await pickPlayableVideos(rawVideos, { limit: 8 });
 
   const similar = (recommendations.results ?? []).slice(0, 12).map((s) => ({
     id: s.id,

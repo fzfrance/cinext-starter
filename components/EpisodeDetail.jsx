@@ -5,6 +5,7 @@ import Image from "next/image";
 import Icon from "@/components/ui/Icon";
 import PosterArt from "@/components/ui/PosterArt";
 import { tmdbImage } from "@/lib/tmdb";
+import { personDisplayGivenName, useReadableLanguages } from "@/lib/languages";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 
 
@@ -109,6 +110,7 @@ export default function EpisodeDetail({
   const [watchMenuOpen, setWatchMenuOpen] = useState(false);
   const [atmoRGB, setAtmoRGB] = useState([10, 10, 12]);
   const [isDesktop, setIsDesktop] = useState(false);
+  const readableLanguages = useReadableLanguages();
 
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 900px)");
@@ -159,10 +161,11 @@ export default function EpisodeDetail({
   };
 
   return (
-    <div className="episode-detail-root overflow-y-auto pb-8" style={{ scrollbarWidth: "none", ...(isDesktop ? { background: "#0A0A0C" } : null) }}>
-      {isDesktop ? <div className="episode-detail-atmos" style={{ background: ATMOS_BG }} aria-hidden="true" /> : null}
+    <div className={`episode-detail-root overflow-y-auto pb-8${isDesktop ? " episode-detail-seamless" : ""}`} style={{ scrollbarWidth: "none", ...(isDesktop ? { background: ATMOS_BG } : null) }}>
       <div className="episode-detail-hero relative w-full" style={{ height: 300 }}>
-        <PosterArt posterPath={ep.posterPath} base={ep.base} glow={ep.glow} alt={ep.title} tmdbSize="original" sizes="100vw" />
+        <div className="episode-detail-cover absolute inset-0">
+          <PosterArt posterPath={ep.posterPath} base={ep.base} glow={ep.glow} alt={ep.title} tmdbSize="original" sizes="100vw" />
+        </div>
         <div className="episode-detail-hero-fade absolute inset-0" style={{ background: HERO_VEIL }} />
         <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6" style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}>
           <GlassButton onClick={onClose} className="ep-detail-back" style={{ width: 38, height: 38 }}><Icon name="back" size={16} color={t.text} /></GlassButton>
@@ -263,31 +266,31 @@ export default function EpisodeDetail({
           </div>
         </div>
 
-        <div className="flex items-center flex-wrap gap-x-2 gap-y-1" style={{ marginTop: 10, fontSize: 12, color: t.textDim }}>
+        <div className="episode-detail-meta flex items-center flex-wrap gap-x-2 gap-y-1" style={{ marginTop: 10, fontSize: 12, color: t.textDim }}>
           <span>{ep.date}</span><span>·</span><span>{ep.runtime}m</span>
           {ep.watched && ep.myRating && (<><span>·</span><span className="flex items-center gap-1"><Icon name="star" size={10} color={accent} />{ep.myRating.toFixed(1)}/5</span></>)}
           {ep.watched && watchedDateLabel && (<><span>·</span><span className="flex items-center gap-1"><Icon name="calendar" size={10} color={t.textDim} />Watched: {watchedDateLabel}</span></>)}
         </div>
 
-        <div style={{ fontSize: 13.5, lineHeight: 1.6, color: "rgba(255,255,255,0.78)", marginTop: 16 }}>
+        <div className="episode-detail-synopsis" style={{ fontSize: 13.5, lineHeight: 1.6, color: "rgba(255,255,255,0.78)", marginTop: 16 }}>
           {ep.synopsis || "No synopsis available for this episode yet."}
         </div>
 
         {cast.length > 0 && (
-          <div style={{ marginTop: 44 }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: "#fff", marginBottom: 10 }}>Cast &amp; Crew</div>
+          <div className="episode-detail-cast" style={{ marginTop: 44 }}>
+            <div className="episode-detail-cast-label" style={{ fontSize: 15, fontWeight: 600, color: "#fff", marginBottom: 10 }}>Cast &amp; Crew</div>
             <div className="episode-detail-cast-row flex gap-4 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
               {cast.map((c) => (
-                <button key={c.id} onClick={() => onCastClick?.(c.id)} className="flex-shrink-0 flex flex-col items-center gap-1.5 active:scale-95 transition" style={{ width: 68 }}>
-                  <div className="relative overflow-hidden flex items-center justify-center" style={{ width: 56, height: 56, borderRadius: "50%", background: c.grad }}>
+                <button key={c.id} onClick={() => onCastClick?.(c.id)} className="episode-detail-cast-person flex-shrink-0 flex flex-col items-center gap-1.5 active:scale-95 transition" style={{ width: 68 }}>
+                  <div className="episode-detail-cast-avatar relative overflow-hidden flex items-center justify-center" style={{ width: 56, height: 56, borderRadius: "50%", background: c.grad }}>
                     {c.profilePath ? (
                       <Image src={tmdbImage(c.profilePath, "w92")} alt="" fill sizes="56px" style={{ objectFit: "cover" }} />
                     ) : (
                       <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{c.initials}</span>
                     )}
                   </div>
-                  <span style={{ fontSize: 11, fontWeight: 500, color: "#fff", textAlign: "center" }}>{c.name.split(" ")[0]}</span>
-                  <span style={{ fontSize: 10, color: t.textDim, textAlign: "center" }}>{c.role}</span>
+                  <span className="episode-detail-cast-name" style={{ fontSize: 11, fontWeight: 500, color: "#fff", textAlign: "center" }}>{personDisplayGivenName(c, readableLanguages)}</span>
+                  <span className="episode-detail-cast-role" style={{ fontSize: 10, color: t.textDim, textAlign: "center" }}>{c.role}</span>
                 </button>
               ))}
             </div>

@@ -220,7 +220,6 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
   }, [subject?.posterPath]);
   const mixRGB = (amt) => atmoRGB.map((c) => Math.round(c * amt + 12 * (1 - amt))).join(",");
   const ATMOS_BG = `linear-gradient(180deg, #0A0A0C 0%, rgba(${atmoRGB.map((c) => Math.round(c * 0.22)).join(",")},0.9) 20%, rgba(${atmoRGB.map((c) => Math.round(c * 0.42)).join(",")},0.95) 55%, #0A0A0C 100%)`;
-  const ATMOS_RIGHT = `linear-gradient(165deg, rgba(255,255,255,0.03) 0%, transparent 28%), linear-gradient(180deg, rgba(${mixRGB(0.22)},0.92) 0%, rgba(${mixRGB(0.12)},0.96) 48%, rgba(6,7,9,0.98) 100%)`;
   const HERO_VEIL = `linear-gradient(0deg, rgba(${mixRGB(0.18)},0.92) 0%, rgba(${mixRGB(0.08)},0.35) 55%, transparent 100%)`;
 
   // Same centered card from every entry point on desktop (Home, Show
@@ -360,8 +359,8 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
       <div className="ep-rating-overlay fixed inset-0 z-50" onClick={onClose}>
         <div className={`ep-rating-panel ep-rating-panel-desktop${stage === "rate" ? "" : " is-saved-confirm"}`} onClick={(event) => event.stopPropagation()}>
           {stage === "rate" ? (
-            <div className="ep-rating-desktop">
-              <aside className="ep-rating-desktop-context" style={{ background: ATMOS_BG }}>
+            <div className="ep-rating-desktop ep-rating-seamless" style={{ background: ATMOS_BG }}>
+              <aside className="ep-rating-desktop-context">
                 <div className="ep-rating-desktop-art">
                   <PosterArt posterPath={subject.posterPath} base={subject.base} glow={subject.glow} alt={subject.title} flat tmdbSize="w780" />
                   <div className="ep-rating-desktop-art-fade" style={{ background: HERO_VEIL }} />
@@ -380,7 +379,7 @@ export default function EpisodeRatingFlow({ subject, cast = [], onClose, onSave,
                 </div>
               </aside>
 
-              <div className="ep-rating-desktop-flow" style={{ background: ATMOS_RIGHT }}>
+              <div className="ep-rating-desktop-flow">
                 <section className="ep-rating-desktop-section">
                   <div className="ep-rating-desktop-section-title">{tr("howWasEpisode")}</div>
                   <div className="ep-rating-desktop-stars">

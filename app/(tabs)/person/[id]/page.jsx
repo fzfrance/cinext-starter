@@ -197,8 +197,10 @@ async function getPersonData(personId) {
     })
     .slice(0, 4);
 
-  // Localized display names from /person translations — used client-side with
-  // Readable Languages (e.g. show 전여빈 when Korean is readable).
+  // Localized display names from /person translations — kept for potential
+  // future use, but resolvePersonName intentionally ignores these so a
+  // Western name is never auto-swapped to Chinese/etc. just because that
+  // language is readable. Native-script display uses original_name only.
   const namesByLang = {};
   for (const entry of person.translations?.translations ?? []) {
     const iso = entry?.iso_639_1;
@@ -210,6 +212,7 @@ async function getPersonData(personId) {
   return {
     id: person.id,
     name: person.name ?? "",
+    originalName: person.original_name ?? null,
     namesByLang,
     profilePath,
     heroPath: hero.path,

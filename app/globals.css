@@ -340,13 +340,18 @@ body {
   .auth-feature-backdrop {
     display: block;
     z-index: -4;
-    opacity: 0.82;
+    opacity: 0.78;
   }
 
   .auth-poster-grid { display: none; }
   .auth-poster-overlay {
     z-index: -3 !important;
-    background: linear-gradient(90deg, rgba(0,0,0,0.50) 0%, rgba(0,0,0,0.30) 32%, rgba(0,0,0,0.18) 50%, rgba(0,0,0,0.28) 68%, rgba(0,0,0,0.42) 100%), linear-gradient(0deg, rgba(0,0,0,0.62), transparent 55%) !important;
+    /* Subtle overall dark wash so marketing copy stays readable on light
+       backdrop areas — keep intensity low so the art still reads through. */
+    background:
+      linear-gradient(0deg, rgba(0, 0, 0, 0.28), rgba(0, 0, 0, 0.28)),
+      linear-gradient(90deg, rgba(0,0,0,0.42) 0%, rgba(0,0,0,0.26) 34%, rgba(0,0,0,0.18) 52%, rgba(0,0,0,0.24) 70%, rgba(0,0,0,0.36) 100%),
+      linear-gradient(0deg, rgba(0,0,0,0.58), transparent 56%) !important;
   }
 
   .auth-page > .auth-web-nav {
@@ -1581,8 +1586,8 @@ html.vt-back::view-transition-new(root) {
   }
   .home-desktop-upcoming-featured {
     display: grid;
-    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-    min-height: 320px;
+    grid-template-columns: 200px minmax(0, 1fr);
+    min-height: 300px;
     overflow: hidden;
     border-radius: 22px;
     background: rgba(255,255,255,0.035);
@@ -1595,7 +1600,7 @@ html.vt-back::view-transition-new(root) {
   }
   .home-desktop-upcoming-featured-art {
     position: relative;
-    min-width: 0;
+    width: 200px;
     min-height: 100%;
     overflow: hidden;
     background: #111;
@@ -1616,7 +1621,7 @@ html.vt-back::view-transition-new(root) {
     position: absolute;
     inset: 0;
     pointer-events: none;
-    background: linear-gradient(90deg, transparent 48%, rgba(16,17,19,0.55) 78%, rgba(16,17,19,0.96) 100%);
+    background: linear-gradient(90deg, transparent 42%, rgba(16,17,19,0.45) 72%, rgba(16,17,19,0.92) 100%);
   }
   .home-desktop-upcoming-featured-copy {
     display: flex;
@@ -4159,22 +4164,23 @@ html.vt-back::view-transition-new(root) {
     color: rgba(255,255,255,.48);
   }
 
-  /* Episode detail — centered card; no page-behind blur (desktop only) */
+  /* Episode detail — lightly compact (~10–15%) so CTA stays in view
+     without scrolling (desktop only). Mobile keeps the full-screen sheet. */
   .show-ep-detail-overlay {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 88px 28px 40px;
+    padding: 76px 26px 34px;
     background: transparent;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
   .show-ep-detail-panel {
-    width: min(644px, 94vw);
+    width: min(560px, 94vw);
     height: auto;
-    max-height: min(880px, calc(100vh - 128px));
+    max-height: min(780px, calc(100vh - 110px));
     overflow: hidden;
-    border-radius: 28px;
+    border-radius: 26px;
     background: #0A0A0C;
     border: 1px solid rgba(255,255,255,0.12);
     box-shadow:
@@ -4186,10 +4192,11 @@ html.vt-back::view-transition-new(root) {
   }
   .show-ep-detail-panel .episode-detail-root {
     height: auto;
-    max-height: min(880px, calc(100vh - 128px));
-    padding-bottom: 48px;
+    max-height: min(780px, calc(100vh - 110px));
+    padding-bottom: 36px;
     position: relative;
     background: transparent;
+    overflow: hidden;
   }
   .show-ep-detail-panel .episode-detail-atmos {
     position: absolute;
@@ -4205,7 +4212,7 @@ html.vt-back::view-transition-new(root) {
     position: relative;
     z-index: 1;
   }
-  /* Full still — 16:9 frame so object-fit:cover does not crop */
+  /* Keep near-16:9; width trim alone shortens the still ~12% */
   .show-ep-detail-panel .episode-detail-hero {
     height: auto !important;
     aspect-ratio: 16 / 9;
@@ -4222,19 +4229,47 @@ html.vt-back::view-transition-new(root) {
     display: flex !important;
   }
   .show-ep-detail-panel .episode-detail-body {
-    margin-top: 18px !important;
-    padding-left: 28px !important;
-    padding-right: 28px !important;
+    margin-top: 14px !important;
+    padding-left: 24px !important;
+    padding-right: 24px !important;
+  }
+  .show-ep-detail-panel .episode-detail-meta {
+    margin-top: 8px !important;
+  }
+  .show-ep-detail-panel .episode-detail-synopsis {
+    margin-top: 12px !important;
+    font-size: 13px !important;
+    line-height: 1.5 !important;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    overflow: hidden;
+  }
+  .show-ep-detail-panel .episode-detail-cast {
+    margin-top: 28px !important;
+  }
+  .show-ep-detail-panel .episode-detail-cast-label {
+    font-size: 14px !important;
+    margin-bottom: 9px !important;
   }
   .show-ep-detail-panel .episode-detail-cast-row {
-    gap: 19px !important;
+    gap: 16px !important;
+  }
+  .show-ep-detail-panel .episode-detail-cast-person {
+    width: 62px !important;
+  }
+  .show-ep-detail-panel .episode-detail-cast-avatar {
+    width: 50px !important;
+    height: 50px !important;
   }
   .show-ep-detail-panel .episode-detail-cta {
     width: auto !important;
     display: block;
     margin-left: auto;
     margin-right: auto;
-    padding: 11px 26px !important;
+    /* ~15% higher than the prior 28px top gap */
+    margin-top: 10px !important;
+    padding: 10px 24px !important;
   }
 }
 
@@ -4896,6 +4931,28 @@ html.vt-back::view-transition-new(root) {
   height: 40%;
   background: linear-gradient(0deg, rgba(8,9,11,0.85) 0%, transparent 100%);
   pointer-events: none;
+}
+.ep-rating-seamless .ep-rating-desktop-context,
+.ep-rating-seamless .ep-rating-desktop-flow {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.ep-rating-seamless .ep-rating-desktop-art {
+  -webkit-mask-image: linear-gradient(to bottom, #000 35%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 35%, transparent 100%);
+}
+.ep-rating-seamless .ep-rating-desktop-art > :first-child {
+  -webkit-mask-image: linear-gradient(to right, #000 65%, transparent 100%);
+  mask-image: linear-gradient(to right, #000 65%, transparent 100%);
+}
+.ep-rating-seamless .ep-rating-desktop-art-fade { display: none; }
+@media (min-width: 900px) {
+  .episode-detail-seamless .episode-detail-cover {
+    -webkit-mask-image: linear-gradient(to bottom, #000 30%, rgba(0,0,0,.8) 55%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 30%, rgba(0,0,0,.8) 55%, transparent 100%);
+  }
+  .episode-detail-seamless .episode-detail-hero-fade { display: none; }
 }
 .ep-rating-desktop-meta {
   padding: 16px 24px 24px;
@@ -9202,6 +9259,9 @@ html.vt-back::view-transition-new(root) {
 @media (min-width: 900px) {
   .person-desktop {
     --base-dark: #0c0d10;
+    --portrait-top: 28px;
+    --portrait-height: clamp(374px, calc(68vh - 88px), 607px);
+    --portrait-width: calc(var(--portrait-height) * var(--portrait-ratio, 0.666667));
     position: relative;
     isolation: isolate;
     min-height: 100dvh;
@@ -9215,7 +9275,9 @@ html.vt-back::view-transition-new(root) {
     inset: 0;
     z-index: 0;
     pointer-events: none;
-    background: var(--base-dark);
+    background:
+      radial-gradient(ellipse at 70% 18%, rgba(var(--person-rgb), .22), transparent 75%),
+      linear-gradient(145deg, var(--base-dark), rgba(var(--person-rgb), .12) 65%, var(--base-dark));
   }
   .person-desktop-hero-wrapper {
     position: absolute;
@@ -9227,6 +9289,8 @@ html.vt-back::view-transition-new(root) {
     z-index: 1;
     overflow: hidden;
     pointer-events: none;
+    -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
   }
   .person-desktop-hero-art {
     position: absolute;
@@ -9293,27 +9357,45 @@ html.vt-back::view-transition-new(root) {
   .person-desktop-hero-photo.is-portrait {
     inset: auto;
     left: 50%;
-    top: 5%;
-    width: clamp(260px, 32vw, 420px);
-    aspect-ratio: 4 / 5;
+    top: var(--portrait-top);
+    width: var(--portrait-width);
+    aspect-ratio: var(--portrait-ratio, 0.666667);
     height: auto;
-    max-height: 72%;
     transform: translateX(-50%);
-    /* Aggressive dissolve — no hard rectangular border */
-    -webkit-mask-image: radial-gradient(
-      ellipse 75% 65% at 50% 45%,
-      #000 20%,
-      transparent 85%
-    );
-    mask-image: radial-gradient(
-      ellipse 75% 65% at 50% 45%,
-      #000 20%,
-      transparent 85%
-    );
+    /* Fully transparent at both boundaries; keep the face opaque. */
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 16%, #000 84%, transparent);
+    mask-image: linear-gradient(to right, transparent, #000 16%, #000 84%, transparent);
   }
   .person-desktop-hero-photo.is-portrait .person-desktop-hero-photo-img {
-    object-fit: cover;
-    object-position: center 10%;
+    object-fit: fill;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 24px, #000 72%, transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent, #000 24px, #000 72%, transparent 100%);
+  }
+  .person-desktop-hero-extensions {
+    position: absolute;
+    /* Overscan above the hero so blur never exposes a dark top strip. */
+    inset: -32px 0 auto;
+    height: calc(var(--portrait-height) + var(--portrait-top) + 32px);
+    z-index: 0;
+    -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+  }
+  .person-desktop-hero-extension {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    width: calc(50% + 32px);
+    overflow: hidden;
+    filter: blur(22px);
+  }
+  .person-desktop-hero-extension.is-left { left: -24px; }
+  .person-desktop-hero-extension.is-right { right: -24px; }
+  .person-desktop.is-portrait-hero .person-desktop-hero-vignette {
+    z-index: 3;
+    background: linear-gradient(to right, rgba(12,13,16,.86), rgba(12,13,16,.58) 28%, transparent 46%, transparent 64%, rgba(12,13,16,.42));
+  }
+  .person-desktop.is-portrait-hero .person-desktop-hero-scrim {
+    background: linear-gradient(to bottom, transparent 24%, rgba(12,13,16,.14) 42%, rgba(12,13,16,.72) 72%, var(--base-dark) 100%);
   }
 
   .person-desktop-hero-scrim {
@@ -9437,11 +9519,11 @@ html.vt-back::view-transition-new(root) {
     position: relative;
     border-radius: 28px;
     padding: 22px 22px 26px;
-    background: rgba(12, 14, 18, 0.18);
+    background: rgba(12, 14, 18, 0.08);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(14px) saturate(1.05);
-    -webkit-backdrop-filter: blur(14px) saturate(1.05);
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(5px) saturate(1.05);
+    -webkit-backdrop-filter: blur(5px) saturate(1.05);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.1);
   }
   .person-desktop-works-head {
     display: flex;
@@ -9535,9 +9617,6 @@ html.vt-back::view-transition-new(root) {
   @media (max-width: 1180px) {
     .person-desktop-works-grid {
       grid-template-columns: repeat(4, minmax(0, 1fr));
-    }
-    .person-desktop-hero-photo.is-portrait {
-      width: clamp(240px, 34vw, 360px);
     }
   }
   @media (max-width: 1020px) {

@@ -4,19 +4,11 @@ import {
   getMovieDetails,
   getLocalizedShowVideos,
   getLocalizedMovieVideos,
+  pickPlayableTrailerKey,
 } from "@/lib/tmdb";
 
-function pickTrailerKey(videos) {
-  const youtube = (videos ?? []).filter((v) => v?.site === "YouTube" && v?.key);
-  if (youtube.length === 0) return null;
-  const trailers = youtube
-    .filter((v) => v.type === "Trailer")
-    .sort((a, b) => (b.official ? 1 : 0) - (a.official ? 1 : 0));
-  const teaser = youtube.find((v) => v.type === "Teaser");
-  return (trailers[0] || teaser || youtube[0])?.key ?? null;
-}
-
 // GET ?mediaType=tv|movie&id= — YouTube key for Explore desktop hero autoplay.
+// Only returns a key that still resolves on YouTube (Trailer/Teaser).
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const mediaType = searchParams.get("mediaType");
@@ -35,7 +27,7 @@ export async function GET(request) {
       if (videos.length === 0) {
         videos = await getLocalizedShowVideos(id, show?.original_language);
       }
-      return NextResponse.json({ key: pickTrailerKey(videos) });
+      return NextResponse.json({ key: await pickPlayableTrailerKey(videos) });
     }
 
     const movie = await getMovieDetails(id);
@@ -43,7 +35,7 @@ export async function GET(request) {
     if (videos.length === 0) {
       videos = await getLocalizedMovieVideos(id, movie?.original_language);
     }
-    return NextResponse.json({ key: pickTrailerKey(videos) });
+    return NextResponse.json({ key: await pickPlayableTrailerKey(videos) });
   } catch {
     return NextResponse.json({ key: null });
   }

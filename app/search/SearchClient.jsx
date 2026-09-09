@@ -14,7 +14,7 @@ import ExploreClient from "@/app/(tabs)/explore/ExploreClient";
 import { useFavorites } from "@/lib/favorites-context";
 import { useMovieFavorites } from "@/lib/movie-favorites-context";
 import { useLibraryStatus } from "@/lib/useLibraryStatus";
-import { resolveTitle, useReadableLanguages } from "@/lib/languages";
+import { resolveTitle, resolvePersonName, useReadableLanguages } from "@/lib/languages";
 import { hrefForMedia, badgeForMedia, mediaKey } from "@/lib/media";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 import { useDesktopSearch } from "@/lib/desktop-search-context";
@@ -215,16 +215,18 @@ function SearchResultRow({ item, status, menuOpen, onToggleMenu, onSelectStatus,
 }
 
 function SearchPersonRow({ item, onNavigate }) {
+  const readableLanguages = useReadableLanguages();
+  const displayName = resolvePersonName(item, readableLanguages);
   return (
     <Link href={`/person/${item.id}`} onClick={onNavigate} className="flex items-center gap-3 rounded-2xl" style={{ padding: 12, background: t.cardFill, border: `1px solid ${t.cardBorder}` }}>
       <div className="relative flex-shrink-0 rounded-full overflow-hidden" style={{ width: 56, height: 56, background: t.cardFill }}>
-        <PosterArt posterPath={item.profilePath} alt={item.name} />
+        <PosterArt posterPath={item.profilePath} alt={displayName} />
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <span style={{ fontSize: 11, fontWeight: 700, color: accent, letterSpacing: "0.04em" }}>CAST</span>
         </div>
-        <div className="text-white font-bold mt-1" style={{ fontSize: 15, lineHeight: 1.25 }}>{item.name}</div>
+        <div className="text-white font-bold mt-1" style={{ fontSize: 15, lineHeight: 1.25 }}>{displayName}</div>
         {item.knownFor && (
           <div className="text-[12px] mt-1" style={{ color: t.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.knownFor}</div>
         )}
@@ -760,6 +762,7 @@ function DesktopPosterRail({ title, items, onNavigate, statusMap = {} }) {
 function DesktopPeopleRail({ items, onNavigate }) {
   const scrollerRef = useRef(null);
   const [canScrollNext, setCanScrollNext] = useState(false);
+  const readableLanguages = useReadableLanguages();
 
   const updateScrollState = useCallback(() => {
     const el = scrollerRef.current;
@@ -788,7 +791,8 @@ function DesktopPeopleRail({ items, onNavigate }) {
       <div className="search-desktop-rail-frame">
         <div ref={scrollerRef} className="search-desktop-rail-track is-people">
           {items.map((item) => {
-            const initial = (item.name || "?").trim().charAt(0).toUpperCase();
+            const displayName = resolvePersonName(item, readableLanguages);
+            const initial = (displayName || "?").trim().charAt(0).toUpperCase();
             return (
               <Link
                 key={`person-${item.id}`}
@@ -798,12 +802,12 @@ function DesktopPeopleRail({ items, onNavigate }) {
               >
                 <div className="search-desktop-person-art">
                   {item.profilePath ? (
-                    <PosterArt posterPath={item.profilePath} alt={item.name} tmdbSize="w185" sizes="120px" />
+                    <PosterArt posterPath={item.profilePath} alt={displayName} tmdbSize="w185" sizes="120px" />
                   ) : (
                     <span className="search-desktop-person-initial">{initial}</span>
                   )}
                 </div>
-                <div className="search-desktop-person-name">{item.name}</div>
+                <div className="search-desktop-person-name">{displayName}</div>
                 <div className="search-desktop-person-meta">{item.department || "Acting"}</div>
               </Link>
             );
@@ -848,9 +852,11 @@ function mapSearchResults(data) {
         id: item.id,
         mediaType: "person",
         name: item.name,
+        originalName: item.original_name ?? null,
         profilePath: item.profile_path,
         department: item.known_for_department || "Acting",
         knownFor: (item.known_for ?? []).map((k) => k.title ?? k.name).filter(Boolean).slice(0, 3).join(", "),
+        searchTitles: item.searchTitles ?? [],
       };
     }
     const isMovie = item.media_type === "movie";
@@ -920,7 +926,8 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
     setLoading(true);
     let cancelled = false;
     const handle = setTimeout(() => {
-      fetch(`/api/search/multi?q=${encodeURIComponent(trimmed)}`)
+      const langs = encodeURIComponent((readableLanguages ?? []).join(","));
+      fetch(`/api/search/multi?q=${encodeURIComponent(trimmed)}&langs=${langs}`)
         .then((res) => res.json())
         .then((data) => {
           if (cancelled) return;
@@ -930,7 +937,7 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
         .finally(() => { if (!cancelled) setLoading(false); });
     }, 350);
     return () => { cancelled = true; clearTimeout(handle); };
-  }, [query]);
+  }, [query, readableLanguages]);
 
   useEffect(() => {
     const restored = restoredSessionRef.current;

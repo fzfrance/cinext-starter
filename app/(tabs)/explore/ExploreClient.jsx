@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -23,18 +23,15 @@ import { tmdbImage } from "@/lib/tmdb";
 import { collectRecommendSignals } from "@/lib/recommend/collectSignals";
 import { loadImpressions, recordImpressions, recordHeroImpression } from "@/lib/recommend/impressions";
 import { interleaveExploreRows } from "@/lib/recommend/assemble";
+import {
+  loadRecommendSlate,
+  saveRecommendSlate,
+  recommendationSlateBucket,
+  seededShuffle,
+} from "@/lib/recommend/slateCache";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
-
-function shuffled(array) {
-  const copy = [...array];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
 
 // ---------- Placeholder data ----------
 
@@ -361,15 +358,20 @@ function loadYouTubeIframeApi() {
 const EXPLORE_HERO_STILL_MS = 5000;
 const EXPLORE_HERO_YT_CHROME_S = 1.15;
 
-function ExploreDesktopHeroTrailer({ item }) {
+function ExploreDesktopHeroTrailer({ item, onEnded }) {
   const hostRef = useRef(null);
   const playerRef = useRef(null);
   const stillStartedAtRef = useRef(0);
+  const onEndedRef = useRef(onEnded);
   const [trailerKey, setTrailerKey] = useState(null);
   const [visible, setVisible] = useState(false);
   const [muted, setMuted] = useState(true);
   const [desktopReady, setDesktopReady] = useState(false);
   const [heroRoot, setHeroRoot] = useState(null);
+
+  useEffect(() => {
+    onEndedRef.current = onEnded;
+  }, [onEnded]);
 
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 900px)");
@@ -389,25 +391,36 @@ function ExploreDesktopHeroTrailer({ item }) {
     }
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setTrailerKey(null);
-      return undefined;
+      const timer = window.setTimeout(() => onEndedRef.current?.(), EXPLORE_HERO_STILL_MS + 2500);
+      return () => window.clearTimeout(timer);
     }
     // Still countdown starts with the hero; trailer loads/plays under it immediately.
     stillStartedAtRef.current = Date.now();
     let cancelled = false;
+    let fallbackTimer = null;
     const controller = new AbortController();
     fetch(`/api/media/trailer?mediaType=${encodeURIComponent(item.mediaType)}&id=${item.id}`, {
       signal: controller.signal,
     })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (!cancelled) setTrailerKey(data?.key || null);
+        if (cancelled) return;
+        const key = data?.key || null;
+        setTrailerKey(key);
+        // No playable trailer — dwell on the still, then rotate.
+        if (!key) {
+          fallbackTimer = window.setTimeout(() => onEndedRef.current?.(), EXPLORE_HERO_STILL_MS + 2500);
+        }
       })
       .catch(() => {
-        if (!cancelled) setTrailerKey(null);
+        if (cancelled) return;
+        setTrailerKey(null);
+        fallbackTimer = window.setTimeout(() => onEndedRef.current?.(), EXPLORE_HERO_STILL_MS + 2500);
       });
     return () => {
       cancelled = true;
       controller.abort();
+      window.clearTimeout(fallbackTimer);
     };
   }, [desktopReady, item?.id, item?.mediaType]);
 
@@ -487,8 +500,7 @@ function ExploreDesktopHeroTrailer({ item }) {
           modestbranding: 1,
           playsinline: 1,
           rel: 0,
-          loop: 1,
-          playlist: trailerKey,
+          // No loop — when the trailer ends we advance to the next hero.
           cc_load_policy: 0,
           enablejsapi: 1,
           origin: window.location.origin,
@@ -506,13 +518,15 @@ function ExploreDesktopHeroTrailer({ item }) {
             if (event.data === YT.PlayerState.PLAYING) {
               armRevealPolling(event.target);
             } else if (event.data === YT.PlayerState.ENDED) {
-              try { event.target.playVideo(); } catch { /* ignore */ }
+              setVisible(false);
+              onEndedRef.current?.();
             }
           },
           onError: () => {
             if (cancelled) return;
             setVisible(false);
             setTrailerKey(null);
+            onEndedRef.current?.();
           },
         },
       });
@@ -586,7 +600,19 @@ function ExploreDesktopHeroTrailer({ item }) {
 
 function ExploreDesktopLayout({ heroSlides, trendingShows, trendingMovies, genreRails = [], providers, resolvedStatusMap, recommended, recommendedLoading, onToggleWatchlist, readableLanguages = [], personalSections = [] }) {
   const router = useRouter();
-  const hero = heroSlides[0];
+  const [heroIndex, setHeroIndex] = useState(0);
+  const slideCount = heroSlides.length;
+  const hero = slideCount > 0 ? heroSlides[heroIndex % slideCount] : null;
+  const advanceHero = useCallback(() => {
+    setHeroIndex((i) => (slideCount > 0 ? (i + 1) % slideCount : 0));
+  }, [slideCount]);
+
+  // Reset when the slate of hero titles changes (new recommend cache / filters).
+  const heroSlateKey = heroSlides.map((s) => mediaKey(s)).join("|");
+  useEffect(() => {
+    setHeroIndex(0);
+  }, [heroSlateKey]);
+
   const showItems = trendingShows.slice(0, 10);
   const movieItems = trendingMovies.slice(0, 10);
   const heroKey = hero ? mediaKey(hero) : null;
@@ -601,10 +627,10 @@ function ExploreDesktopLayout({ heroSlides, trendingShows, trendingMovies, genre
   return (
     <div className="explore-desktop-layout">
       {hero && (
-        <section className="explore-desktop-hero">
+        <section className="explore-desktop-hero" key={heroKey}>
           <div className="explore-desktop-hero-art">
             <PosterArt posterPath={hero.posterPath} alt="" tmdbSize="w1280" sizes="100vw" />
-            <ExploreDesktopHeroTrailer item={hero} />
+            <ExploreDesktopHeroTrailer item={hero} onEnded={advanceHero} />
           </div>
           <div className="explore-desktop-hero-scrim" aria-hidden="true" />
           <Link href={hrefForMedia(hero)} className="explore-desktop-hero-hit" aria-label={hero.title} />
@@ -924,7 +950,8 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
   const [recommendedReady, setRecommendedReady] = useState(false);
   // Prefer engine hero (taste + backdrop + freshness) when ready; otherwise
   // keep the server editorial hero so first paint isn't empty.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- `shuffled` is a pure module-level helper, stable across renders
+  // Mix order is seeded by the 2-day slate bucket — stable across refreshes.
+  const slateSeed = recommendationSlateBucket();
   const combinedHeroSlides = useMemo(() => {
     const fromEngine = (recommendedHero.length > 0 ? recommendedHero : [])
       .filter((item) => item.backdropPath || item.posterPath)
@@ -941,7 +968,7 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
       return [...fromEngine, ...fillers].slice(0, 5);
     }
 
-    const recommendedForHero = shuffled([...recommendedShows, ...recommendedMovies])
+    const recommendedForHero = seededShuffle([...recommendedShows, ...recommendedMovies], slateSeed)
       .filter((item) => item.backdropPath || item.posterPath)
       .slice(0, 5)
       .map((item) => ({
@@ -957,14 +984,14 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
     }
 
     return [...heroSlidesRaw, ...recommendedForHero].slice(0, 5);
-  }, [heroSlidesRaw, recommendedShows, recommendedMovies, recommendedHero]);
+  }, [heroSlidesRaw, recommendedShows, recommendedMovies, recommendedHero, slateSeed]);
   const heroSlides = combinedHeroSlides.map((item) => ({ ...item, title: resolveTitle(item, readableLanguages) }));
-  // Engine already diversifies For You — prefer its mixed list; fall back to tv+movie merge.
+  // Engine already diversifies For You — prefer its mixed list; fall back to
+  // a slate-seeded merge (not Math.random) so refresh keeps the same order.
   const combinedRecommended = useMemo(() => {
     if (recommendedItems.length > 0) return recommendedItems;
-    return shuffled([...recommendedShows, ...recommendedMovies]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- shuffled helper is stable
-  }, [recommendedItems, recommendedShows, recommendedMovies]);
+    return seededShuffle([...recommendedShows, ...recommendedMovies], slateSeed);
+  }, [recommendedItems, recommendedShows, recommendedMovies, slateSeed]);
   const recommendedAllResolved = combinedRecommended.map((item) => ({ ...item, title: resolveTitle(item, readableLanguages) }));
   const personalSectionsResolved = useMemo(
     () => personalSections.map((section) => ({
@@ -1050,7 +1077,8 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
 
   // Rule-based recommendation engine — taste profile from watch/rate/
   // favorite/drop signals, scored candidates, diversified For You + hero
-  // + personalized Explore sections. Impressions live in localStorage.
+  // + personalized Explore sections. Results are cached for a 2-day slate
+  // so refresh does not reshuffle; impressions only record on a new slate.
   const authSettled = !authLoading || Boolean(user);
   useEffect(() => {
     if (!authSettled) {
@@ -1072,8 +1100,42 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
       if (!cancelled) setRecommendedReady(true);
     }, 20000);
 
+    const applyPayload = (data, { record = false } = {}) => {
+      const withYear = (item) => ({
+        ...item,
+        mode: item.mode || "recommended",
+        year: item.date ? String(item.date).slice(0, 4) : (item.year ?? ""),
+      });
+      const fyItems = (data.forYou?.items ?? []).map(withYear);
+      const tvItems = (data.forYou?.tvItems ?? []).map(withYear);
+      const movieItems = (data.forYou?.movieItems ?? []).map(withYear);
+      setRecommendedItems(fyItems);
+      setRecommendedShows(tvItems);
+      setRecommendedMovies(movieItems);
+      setRecommendedHero((data.hero ?? []).map(withYear));
+      setPersonalSections(
+        (data.sections ?? []).filter((section) => section?.kind !== "because" && section?.kind !== "likeGenre")
+      );
+
+      if (!record) return;
+      const impressionRows = [
+        ...fyItems.slice(0, 24).map((item) => ({ key: mediaKey(item), surface: "foryou" })),
+        ...(data.sections ?? []).flatMap((section) =>
+          (section.items ?? []).slice(0, 8).map((item) => ({ key: mediaKey(item), surface: section.kind || "section" }))
+        ),
+      ];
+      recordImpressions(user.id, impressionRows);
+      if (data.hero?.[0]) recordHeroImpression(user.id, data.hero[0]);
+    };
+
     (async () => {
       try {
+        const cached = loadRecommendSlate(user.id);
+        if (cached?.payload) {
+          applyPayload(cached.payload, { record: false });
+          return;
+        }
+
         const titles = await collectRecommendSignals(user.id);
         if (cancelled) return;
         if (titles.length === 0) {
@@ -1094,28 +1156,8 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
         const data = await res.json();
         if (cancelled) return;
 
-        const withYear = (item) => ({
-          ...item,
-          mode: item.mode || "recommended",
-          year: item.date ? String(item.date).slice(0, 4) : (item.year ?? ""),
-        });
-        const fyItems = (data.forYou?.items ?? []).map(withYear);
-        const tvItems = (data.forYou?.tvItems ?? []).map(withYear);
-        const movieItems = (data.forYou?.movieItems ?? []).map(withYear);
-        setRecommendedItems(fyItems);
-        setRecommendedShows(tvItems);
-        setRecommendedMovies(movieItems);
-        setRecommendedHero((data.hero ?? []).map(withYear));
-        setPersonalSections(data.sections ?? []);
-
-        const impressionRows = [
-          ...fyItems.slice(0, 24).map((item) => ({ key: mediaKey(item), surface: "foryou" })),
-          ...(data.sections ?? []).flatMap((section) =>
-            (section.items ?? []).slice(0, 8).map((item) => ({ key: mediaKey(item), surface: section.kind || "section" }))
-          ),
-        ];
-        recordImpressions(user.id, impressionRows);
-        if (data.hero?.[0]) recordHeroImpression(user.id, data.hero[0]);
+        saveRecommendSlate(user.id, data);
+        applyPayload(data, { record: true });
       } catch (err) {
         console.error(err);
         if (!cancelled) {

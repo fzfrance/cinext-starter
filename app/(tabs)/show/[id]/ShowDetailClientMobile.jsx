@@ -29,7 +29,7 @@ import { getSeasonRatings, saveSeasonRating, deleteSeasonRating, getAutoSeasonSc
 import { getProfile } from "@/lib/profile";
 import { tmdbImage } from "@/lib/tmdb";
 import { resolveShowStatus } from "@/lib/statusResolver";
-import { resolveTitle, useReadableLanguages } from "@/lib/languages";
+import { resolveTitle, resolvePersonName, useReadableLanguages } from "@/lib/languages";
 import { themes, DEFAULT_ACCENT, tintColorForShow } from "@/lib/theme";
 import { useNavTint } from "@/lib/nav-tint-context";
 import { useNavVisibility } from "@/lib/nav-visibility-context";
@@ -125,9 +125,12 @@ function ProviderGroup({ label, items }) {
 // this (cast first), not one filtered list, so the "Crew" label only
 // shows up when there's actually crew data.
 function CastGallery({ people, onSelect }) {
+  const readableLanguages = useReadableLanguages();
   return (
     <div className="grid mt-4" style={{ gridTemplateColumns: "repeat(3, 1fr)", rowGap: 20, columnGap: 8 }}>
-      {people.map((c) => (
+      {people.map((c) => {
+        const displayName = resolvePersonName(c, readableLanguages);
+        return (
         <button key={c.id} onClick={() => onSelect(c.id)} className="flex flex-col items-center text-center active:scale-95 transition">
           <div className="relative flex-shrink-0 rounded-full overflow-hidden flex items-center justify-center" style={{ width: 84, height: 84, background: c.grad }}>
             {c.profilePath ? (
@@ -136,10 +139,11 @@ function CastGallery({ people, onSelect }) {
               <span style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{c.initials}</span>
             )}
           </div>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", marginTop: 8, lineHeight: 1.25 }}>{c.name}</div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", marginTop: 8, lineHeight: 1.25 }}>{displayName}</div>
           <div style={{ fontSize: 11, color: t.textDim, marginTop: 2, lineHeight: 1.25 }}>{c.role}</div>
         </button>
-      ))}
+        );
+      })}
     </div>
   );
 }

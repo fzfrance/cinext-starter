@@ -1,5 +1,5 @@
 import MovieDetailClient from "./MovieDetailClient";
-import { getMovieDetails, getMovieRecommendations, getMovieWatchProviders, getLocalizedMovieVideos } from "@/lib/tmdb";
+import { getMovieDetails, getMovieRecommendations, getMovieWatchProviders, getLocalizedMovieVideos, pickPlayableVideos } from "@/lib/tmdb";
 import { CAST_GRADIENTS, initialsOf } from "@/lib/theme";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -92,7 +92,14 @@ async function getMovieData(movieId) {
   const castEntries = [...rawCast]
     .sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
     .filter((c) => (seenCastIds.has(c.id) ? false : (seenCastIds.add(c.id), true)))
-    .map((c) => ({ id: c.id, name: c.name, role: c.character || c.name, profilePath: c.profile_path, isCast: true }));
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      originalName: c.original_name ?? null,
+      role: c.character || c.name,
+      profilePath: c.profile_path,
+      isCast: true,
+    }));
   // Unlike a TV show's aggregate_credits (one entry per person, jobs
   // already merged into a `jobs` array), a movie's plain credits.crew has
   // one entry PER (person, job) pair — the same person id repeats once
@@ -105,11 +112,18 @@ async function getMovieData(movieId) {
   for (const c of rawCrew) {
     if (castEntries.some((existing) => existing.id === c.id)) continue;
     const jobs = crewById.get(c.id)?.jobs ?? [];
-    crewById.set(c.id, { id: c.id, name: c.name, profilePath: c.profile_path, jobs: [...jobs, c.job].filter(Boolean) });
+    crewById.set(c.id, {
+      id: c.id,
+      name: c.name,
+      originalName: c.original_name ?? null,
+      profilePath: c.profile_path,
+      jobs: [...jobs, c.job].filter(Boolean),
+    });
   }
   const crewEntries = [...crewById.values()].map((c) => ({
     id: c.id,
     name: c.name,
+    originalName: c.originalName,
     role: [...new Set(c.jobs)].join(" / ") || "Crew",
     profilePath: c.profilePath,
     isCast: false,
@@ -134,16 +148,12 @@ async function getMovieData(movieId) {
   const contentRating = pickMovieCertification(movie.release_dates);
   const runtimeLabel = formatRuntime(movie.runtime);
 
-  // Same trailer/bonus-video shaping as Show Detail's page.jsx, verbatim.
+  // Same Trailer/Teaser playable filter as Show Detail's page.jsx.
   let rawVideos = (movie.videos?.results ?? []).filter((v) => v.site === "YouTube");
   if (rawVideos.length === 0) {
     rawVideos = (await getLocalizedMovieVideos(movieId, movie.original_language)).filter((v) => v.site === "YouTube");
   }
-  const BONUS_VIDEO_TYPES = ["Teaser", "Featurette", "Behind the Scenes", "Clip", "Bloopers", "Opening Credits"];
-  const trailerVideos = rawVideos.filter((v) => v.type === "Trailer").sort((a, b) => (b.official ? 1 : 0) - (a.official ? 1 : 0));
-  const bonusVideos = rawVideos.filter((v) => BONUS_VIDEO_TYPES.includes(v.type));
-  const otherVideos = rawVideos.filter((v) => v.type !== "Trailer" && !BONUS_VIDEO_TYPES.includes(v.type));
-  const videoList = [...trailerVideos, ...bonusVideos, ...otherVideos].slice(0, 10).map((v) => ({ key: v.key, name: v.name, type: v.type }));
+  const videoList = await pickPlayableVideos(rawVideos, { limit: 8 });
 
   const similar = (recommendations.results ?? []).slice(0, 12).map((s) => ({
     id: s.id,

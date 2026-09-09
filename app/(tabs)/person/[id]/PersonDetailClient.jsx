@@ -15,6 +15,7 @@ import { resolveShowStatus } from "@/lib/statusResolver";
 import { tmdbImage } from "@/lib/tmdb";
 import { resolveTitle, resolvePersonName, useReadableLanguages } from "@/lib/languages";
 import { themes, CAST_GRADIENTS } from "@/lib/theme";
+import { extractBackdropRgbFromImage } from "@/lib/ambientPalette";
 
 const t = themes.dark;
 
@@ -262,10 +263,12 @@ function PersonMobile({ person, filmTab, setFilmTab, work, showStatusMap, movieS
 
 function PersonDesktop({ person, filmTab, setFilmTab, work, showStatusMap, movieStatusMap, infoRows, displayName }) {
   const router = useRouter();
+  const [portraitRatio, setPortraitRatio] = useState(2 / 3);
+  const [backdropRgb, setBackdropRgb] = useState("35, 38, 45");
   const grad = CAST_GRADIENTS[person.id % CAST_GRADIENTS.length];
   const heroKind = person.heroKind || (person.heroPath ? "portrait" : "none");
   const heroSrc = person.heroPath
-    ? tmdbImage(person.heroPath, heroKind === "landscape" ? "w1280" : "original")
+    ? `/api/people/portrait-image?path=${encodeURIComponent(person.heroPath)}`
     : null;
   const ambientSrc = person.profilePath
     ? tmdbImage(person.profilePath, "original")
@@ -279,6 +282,7 @@ function PersonDesktop({ person, filmTab, setFilmTab, work, showStatusMap, movie
   return (
     <div
       className={`person-desktop${heroKind === "landscape" ? " is-landscape-hero" : heroKind === "portrait" ? " is-portrait-hero" : ""}`}
+      style={{ "--portrait-ratio": portraitRatio, "--person-rgb": backdropRgb, "--base-dark": `color-mix(in srgb, rgb(${backdropRgb}) 16%, #0c0d10)` }}
     >
       <div className="person-desktop-wash" aria-hidden="true" />
 
@@ -286,8 +290,17 @@ function PersonDesktop({ person, filmTab, setFilmTab, work, showStatusMap, movie
         <div className="person-desktop-hero-art">
           {heroSrc ? (
             <>
-              {/* Layer 1: blur-stretch ambient — real backdrop color/lighting */}
-              <div className="person-desktop-hero-ambient" aria-hidden="true">
+              {/* Extend the upper corners, where the backdrop is least likely
+                  to contain hair or clothing that would become horizontal bands. */}
+              {heroKind === "portrait" ? (
+                <div className="person-desktop-hero-extensions" aria-hidden="true">
+                  {["left", "right"].map((side) => (
+                    <svg key={side} className={`person-desktop-hero-extension is-${side}`} viewBox={side === "left" ? "0 0 6 12" : "94 0 6 12"} preserveAspectRatio="none">
+                      <image href={heroSrc} width="100" height="100" preserveAspectRatio="none" />
+                    </svg>
+                  ))}
+                </div>
+              ) : <div className="person-desktop-hero-ambient" aria-hidden="true">
                 <Image
                   src={ambientSrc || heroSrc}
                   alt=""
@@ -296,7 +309,7 @@ function PersonDesktop({ person, filmTab, setFilmTab, work, showStatusMap, movie
                   sizes="100vw"
                   className="person-desktop-hero-ambient-img"
                 />
-              </div>
+              </div>}
               {/* Dark vignette → #0c0d10 at page edges */}
               <div className="person-desktop-hero-vignette" aria-hidden="true" />
               {/* Layer 2: crisp portrait with aggressive edge dissolve */}
@@ -306,8 +319,16 @@ function PersonDesktop({ person, filmTab, setFilmTab, work, showStatusMap, movie
                   alt={displayName}
                   fill
                   priority
-                  sizes={heroKind === "portrait" ? "36vw" : "100vw"}
+                  sizes={heroKind === "portrait" ? "(max-width: 1000px) 440px, (max-width: 1545px) 44vw, 680px" : "100vw"}
                   className="person-desktop-hero-photo-img"
+                  onLoad={(event) => {
+                    const { naturalWidth, naturalHeight } = event.currentTarget;
+                    if (heroKind === "portrait" && naturalHeight) setPortraitRatio(naturalWidth / naturalHeight);
+                    // Sample the same-origin displayed image, preserving its
+                    // neutral or cool background without a forced warm palette.
+                    try { setBackdropRgb(extractBackdropRgbFromImage(event.currentTarget)); }
+                    catch { setBackdropRgb("35, 38, 45"); }
+                  }}
                 />
               </div>
             </>

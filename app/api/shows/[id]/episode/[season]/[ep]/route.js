@@ -23,6 +23,7 @@ export async function GET(_request, { params }) {
   const cast = (episode.credits?.cast ?? []).slice(0, 12).map((c, i) => ({
     id: c.id,
     name: c.name,
+    originalName: c.original_name ?? null,
     role: c.character || "—",
     profilePath: c.profile_path,
     initials: initialsOf(c.name),
