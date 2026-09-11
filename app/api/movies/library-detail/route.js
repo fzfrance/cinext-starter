@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getMovieDetails } from "@/lib/tmdb";
 
+export const maxDuration = 60;
+
+const DETAIL_CONCURRENCY = 20;
+
 // Mirrors app/api/shows/library-detail/route.js, one media type over —
 // meaningfully simpler: no needsProgress/episode-resolution branch at all
 // (a movie has no episodes, so its library status is always exactly what
@@ -35,17 +39,33 @@ async function resolveMovie(id) {
   };
 }
 
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  async function worker() {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 export async function POST(request) {
   const { ids } = await request.json();
   if (!Array.isArray(ids) || ids.length === 0) return NextResponse.json({ results: [] });
 
-  const results = await Promise.all(
-    ids.map((id) =>
-      resolveMovie(id).catch((err) => {
+  const uniqueIds = [...new Set(ids.map(Number).filter(Number.isFinite))];
+  // A full imported library can contain well over 1,000 movies. Keep TMDB
+  // lookups bounded so one Library load does not fan out into thousands of
+  // simultaneous requests and lose most results to rate limiting.
+  const results = await mapWithConcurrency(uniqueIds, DETAIL_CONCURRENCY, (id) =>
+    resolveMovie(id).catch((err) => {
         console.error(`Failed to resolve library detail for movie ${id}:`, err);
         return null;
       })
-    )
   );
 
   return NextResponse.json({ results: results.filter(Boolean) });
