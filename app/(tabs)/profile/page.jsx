@@ -304,14 +304,14 @@ export default function Page() {
     return () => { cancelled = true; };
   }, [user, pageRefreshToken]);
 
-  // "My Ratings" preview — the first 10 of getMyRatingsForUser's full,
-  // most-recent-activity-first list (see lib/myRatings.js, shared with
-  // the full "My Ratings" page this section's ">" links to).
+  // "My Ratings" preview — ask the shared assembler for only the first 10
+  // before TMDB enrichment. Resolving the user's entire rating history and
+  // slicing afterward made this small row depend on one oversized request.
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    getMyRatingsForUser(user.id)
-      .then((entries) => { if (!cancelled) setMyRatings(entries.slice(0, 10)); })
+    getMyRatingsForUser(user.id, { limit: 10 })
+      .then((entries) => { if (!cancelled) setMyRatings(entries); })
       .catch(console.error);
     return () => { cancelled = true; };
   }, [user, pageRefreshToken]);
