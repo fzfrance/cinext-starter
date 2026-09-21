@@ -15,6 +15,7 @@ import MovieCaseOverlay from "@/components/mobile-original/library/MovieCaseOver
 import { useAuth } from "@/lib/auth-context";
 import { getUserShows } from "@/lib/userShows";
 import { getUserMovies } from "@/lib/userMovies";
+import { fetchMovieLibraryDetails, fetchMovieLibraryLogos } from "@/lib/movieLibraryBatches";
 import { getShowWatchSummary } from "@/lib/episodeWatches";
 import { resolveShowStatus } from "@/lib/statusResolver";
 import { getCollections, createCollection as createCollectionRow } from "@/lib/collections";
@@ -25,7 +26,7 @@ import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
 const librarySessionCache = new Map();
-const LIBRARY_SNAPSHOT_PREFIX = "cinext:librarySnapshot:v1:";
+const LIBRARY_SNAPSHOT_PREFIX = "cinext:librarySnapshot:v3:";
 
 
 // Library — Shows/Movies/Collections, wired to the signed-in user's real
@@ -77,6 +78,7 @@ export default function LibraryClient() {
   // the two use entirely different overlay/data-layer components
   // downstream.
   const [movies, setMovies] = useState(() => initialLibrary?.movies ?? []);
+  const [movieLibraryById, setMovieLibraryById] = useState(() => initialLibrary?.movieLibraryById ?? {});
   const [moviesLoaded, setMoviesLoaded] = useState(() => Boolean(initialLibrary?.moviesLoaded));
 
   const [openShow, setOpenShow] = useState(null);
@@ -136,6 +138,7 @@ export default function LibraryClient() {
       setCollectionsRaw(cached.collectionsRaw ?? []);
       setCollectionsLoaded(Boolean(cached.collectionsLoaded));
       setMovies(cached.movies ?? []);
+      setMovieLibraryById(cached.movieLibraryById ?? {});
       setLoaded(Boolean(cached.loaded));
       setMoviesLoaded(Boolean(cached.moviesLoaded));
       return;
@@ -150,6 +153,7 @@ export default function LibraryClient() {
       setCollectionsRaw(snapshot.collectionsRaw ?? []);
       setCollectionsLoaded(Boolean(snapshot.collectionsLoaded));
       setMovies(snapshot.movies ?? []);
+      setMovieLibraryById(snapshot.movieLibraryById ?? {});
       setLoaded(Boolean(snapshot.loaded));
       setMoviesLoaded(Boolean(snapshot.moviesLoaded));
       librarySessionCache.set(sessionCacheKey, snapshot);
@@ -159,15 +163,15 @@ export default function LibraryClient() {
   }, [sessionCacheKey]);
 
   useEffect(() => {
-    if (!sessionCacheKey || (!loaded && !moviesLoaded)) return;
-    const snapshot = { shows, collectionsRaw, collectionsLoaded, loaded, movies, moviesLoaded };
+    if (!sessionCacheKey || !loaded || !moviesLoaded) return;
+    const snapshot = { shows, collectionsRaw, collectionsLoaded, loaded, movies, movieLibraryById, moviesLoaded };
     librarySessionCache.set(sessionCacheKey, snapshot);
     try {
       localStorage.setItem(`${LIBRARY_SNAPSHOT_PREFIX}${sessionCacheKey}`, JSON.stringify(snapshot));
     } catch (err) {
       console.error("Failed to save Library snapshot:", err);
     }
-  }, [sessionCacheKey, shows, collectionsRaw, collectionsLoaded, loaded, movies, moviesLoaded]);
+  }, [sessionCacheKey, shows, collectionsRaw, collectionsLoaded, loaded, movies, movieLibraryById, moviesLoaded]);
 
   // DVD Case / Poster display mode — deliberately independent of `tab`
   // (Shows/Movies/Collections): switching tabs must never reset this, and
@@ -373,101 +377,113 @@ export default function LibraryClient() {
   // Movies tab — mirrors the shows effect above, meaningfully simpler:
   // no episode-progress/resolveShowStatus branch at all (a movie's status
   // is always exactly what the user picked, see lib/userMovies.js), so
-  // one batch fetch (/api/movies/library-detail) is the whole thing.
+  // detail fetches are split into small retryable batches. Imported
+  // libraries can exceed 1,000 movies; one giant request was rate-limited
+  // down to only a couple of successful results in the installed PWA.
   // Depends on collectionsRaw (not a separate getCollections call) since
   // that same fetch already carries movieIds alongside showIds.
   const movieLoadKeyRef = useRef(null);
   useEffect(() => {
     if (!user || !collectionsLoaded) return;
-    const collectionMovieIds = collectionsRaw.flatMap((c) => c.movieIds ?? []);
+    const collectionMovieIds = collectionsRaw.flatMap((c) => c.movieIds ?? []).map(Number).filter(Boolean);
     const loadKey = `${user.id}|${[...new Set(collectionMovieIds)].sort((a, b) => a - b).join(",")}`;
+    // Same Strict Mode guard as shows / desktop — only skip after a finished
+    // load. Setting the ref before the fetch cancelled the first pass and
+    // permanently skipped the remount retry, leaving movie collections empty.
     if (movieLoadKeyRef.current === loadKey) return;
-    movieLoadKeyRef.current = loadKey;
     let cancelled = false;
     (async () => {
-      const byMovie = await getUserMovies(user.id);
-      const trackedIds = Object.keys(byMovie).map(Number);
-      const allIds = [...new Set([...trackedIds, ...collectionMovieIds])];
+      try {
+        const byMovie = await getUserMovies(user.id);
+        const trackedIds = Object.keys(byMovie).map(Number);
+        setMovieLibraryById(byMovie);
+        const allIds = [...new Set([...trackedIds, ...collectionMovieIds])].sort((a, b) => {
+          const aWatchlist = byMovie[a]?.status === "watchlist" ? 1 : 0;
+          const bWatchlist = byMovie[b]?.status === "watchlist" ? 1 : 0;
+          return bWatchlist - aWatchlist || (byMovie[b]?.addedAt ?? 0) - (byMovie[a]?.addedAt ?? 0);
+        });
 
-      if (allIds.length === 0) {
-        if (!cancelled) { setMovies([]); setMoviesLoaded(true); }
-        return;
-      }
+        if (allIds.length === 0) {
+          if (!cancelled) {
+            setMovies([]);
+            setMoviesLoaded(true);
+            movieLoadKeyRef.current = loadKey;
+          }
+          return;
+        }
 
-      const res = await fetch("/api/movies/library-detail", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: allIds }),
-      });
-      const { results } = await res.json();
-      if (cancelled) return;
-      const byId = Object.fromEntries(results.map((r) => [r.id, r]));
-
-      const merged = allIds.map((id) => {
-        const detail = byId[id];
-        if (!detail) return null;
-        const tracked = byMovie[id];
-        const { base, glow } = fallbackPalette(id);
-        return {
-          id,
-          title: detail.title,
-          englishTitle: detail.title,
-          originalTitle: detail.originalTitle,
-          originalLanguage: detail.originalLanguage,
-          year: detail.year,
-          meta: detail.meta,
-          posterPath: detail.posterPath,
-          backdropPath: detail.backdropPath,
-          genres: detail.genres ?? [],
-          logoPath: null, // filled in by the separate logo-fetch effect below
-          tmdbRating: detail.tmdbRating,
-          tagline: detail.tagline,
-          base, glow,
-          status: tracked?.status ?? null,
-          favorite: tracked?.favorite ?? false,
-          addedAt: tracked?.addedAt ?? 0,
+        setMoviesLoaded(false);
+        const mergeDetails = (details) => {
+          if (cancelled || details.length === 0) return;
+          setMovies((prev) => {
+            const byId = new Map(prev.map((movie) => [Number(movie.id), movie]));
+            for (const detail of details) {
+              const id = Number(detail.id);
+              const tracked = byMovie[id] ?? byMovie[String(id)];
+              const { base, glow } = fallbackPalette(id);
+              const previous = byId.get(id);
+              byId.set(id, {
+                id,
+                title: detail.title,
+                englishTitle: detail.title,
+                originalTitle: detail.originalTitle,
+                originalLanguage: detail.originalLanguage,
+                year: detail.year,
+                meta: detail.meta,
+                posterPath: detail.posterPath,
+                backdropPath: detail.backdropPath,
+                genres: detail.genres ?? [],
+                logoPath: previous?.logoPath ?? null,
+                tmdbRating: detail.tmdbRating,
+                tagline: detail.tagline,
+                base,
+                glow,
+                status: tracked?.status ?? null,
+                favorite: tracked?.favorite ?? false,
+                addedAt: tracked?.addedAt ?? 0,
+              });
+            }
+            return allIds.map((id) => byId.get(Number(id))).filter(Boolean);
+          });
         };
-      }).filter(Boolean);
 
-      // Preserve any logoPath the logo-fetch effect below already resolved
-      // — see the shows effect's identical comment above for why (this
-      // effect re-running after that one succeeded used to permanently
-      // blank every spine's logo back to null instead of leaving it alone).
-      setMovies((prev) => {
-        const prevLogoById = Object.fromEntries(prev.filter((s) => s.logoPath != null).map((s) => [s.id, s.logoPath]));
-        return merged.map((s) => (s.id in prevLogoById ? { ...s, logoPath: prevLogoById[s.id] } : s));
-      });
-      setMoviesLoaded(true);
-    })().catch((err) => {
-      console.error(err);
-      if (movieLoadKeyRef.current === loadKey) movieLoadKeyRef.current = null;
-      if (!cancelled) setMoviesLoaded(true);
-    });
+        const { failedItems } = await fetchMovieLibraryDetails(allIds, mergeDetails);
+        if (cancelled) return;
+        setMoviesLoaded(true);
+        if (failedItems.length === 0) movieLoadKeyRef.current = loadKey;
+        else movieLoadKeyRef.current = null;
+      } catch (err) {
+        console.error(err);
+        if (movieLoadKeyRef.current === loadKey) movieLoadKeyRef.current = null;
+        if (!cancelled) setMoviesLoaded(true);
+      }
+    })();
     return () => { cancelled = true; };
   }, [user, collectionsLoaded, collectionsRaw]);
 
-  const movieLogoIdsRef = useRef("");
+  const movieLogoIdsRef = useRef({ languageKey: "", ids: new Set() });
   useEffect(() => {
-    if (movies.length === 0) return;
-    const ids = movies.map((s) => s.id);
-    const key = `${ids.join(",")}|${readableLanguages.join(",")}`;
-    if (movieLogoIdsRef.current === key) return;
-    movieLogoIdsRef.current = key;
+    if (!moviesLoaded || movies.length === 0) return;
+    const languageKey = readableLanguages.join(",");
+    if (movieLogoIdsRef.current.languageKey !== languageKey) {
+      movieLogoIdsRef.current = { languageKey, ids: new Set() };
+    }
+    const ids = movies.map((s) => Number(s.id)).filter((id) => !movieLogoIdsRef.current.ids.has(id));
+    if (ids.length === 0) return;
+    ids.forEach((id) => movieLogoIdsRef.current.ids.add(id));
     let cancelled = false;
-    fetch("/api/movies/logos", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids, readableLanguages }),
-    })
-      .then((res) => res.json())
-      .then(({ results }) => {
+    fetchMovieLibraryLogos(ids, readableLanguages, (results) => {
         if (cancelled) return;
-        const logoById = Object.fromEntries((results ?? []).map((r) => [r.id, r.logoPath]));
-        setMovies((prev) => prev.map((s) => (s.id in logoById ? { ...s, logoPath: logoById[s.id] } : s)));
+        const logoById = Object.fromEntries((results ?? []).map((r) => [Number(r.id), r.logoPath]));
+        setMovies((prev) => prev.map((s) => {
+          const id = Number(s.id);
+          return id in logoById ? { ...s, logoPath: logoById[id] } : s;
+        }));
       })
+      .then(({ failedItems }) => failedItems.forEach((id) => movieLogoIdsRef.current.ids.delete(Number(id))))
       .catch(console.error);
     return () => { cancelled = true; };
-  }, [movies, readableLanguages]);
+  }, [movies, moviesLoaded, readableLanguages]);
 
   const handleOpen = (show, rect, mediaType = "tv") => { setOpenShow(show); setOpenOrigin(rect); setOpenMediaType(mediaType); };
   const handleClose = () => { setOpenShow(null); setOpenOrigin(null); };
@@ -481,9 +497,23 @@ export default function LibraryClient() {
   // Movie equivalents of the three handlers above, operating on `movies`
   // instead of `shows` — MovieCaseOverlay's own onStatusChange/
   // onFavoriteChange/onRemoved wire to these.
-  const handleMovieStatusChange = (movieId, status) => setMovies((prev) => prev.map((s) => (s.id === movieId ? { ...s, status } : s)));
-  const handleMovieFavoriteChange = (movieId, favorite) => setMovies((prev) => prev.map((s) => (s.id === movieId ? { ...s, favorite } : s)));
-  const handleMovieRemoved = (movieId) => { setMovies((prev) => prev.filter((s) => s.id !== movieId)); handleClose(); };
+  const handleMovieStatusChange = (movieId, status) => {
+    setMovies((prev) => prev.map((s) => (s.id === movieId ? { ...s, status } : s)));
+    setMovieLibraryById((prev) => ({ ...prev, [movieId]: { ...(prev[movieId] ?? {}), status } }));
+  };
+  const handleMovieFavoriteChange = (movieId, favorite) => {
+    setMovies((prev) => prev.map((s) => (s.id === movieId ? { ...s, favorite } : s)));
+    setMovieLibraryById((prev) => ({ ...prev, [movieId]: { ...(prev[movieId] ?? {}), favorite } }));
+  };
+  const handleMovieRemoved = (movieId) => {
+    setMovies((prev) => prev.filter((s) => s.id !== movieId));
+    setMovieLibraryById((prev) => {
+      const next = { ...prev };
+      delete next[movieId];
+      return next;
+    });
+    handleClose();
+  };
 
   const createCollection = () => {
     if (!user) { router.push("/login"); return; }
@@ -594,7 +624,12 @@ export default function LibraryClient() {
   // that simplification would just not match either pill — still counted
   // in `all`/still shelved by genre, just not reachable via either filter
   // pill specifically.
-  const movieStatusCounts = {
+  const rawMovieRows = Object.values(movieLibraryById);
+  const movieStatusCounts = rawMovieRows.length > 0 ? {
+    all: rawMovieRows.length,
+    watchlist: rawMovieRows.filter((s) => s.status === "watchlist").length,
+    completed: rawMovieRows.filter((s) => s.status === "completed").length,
+  } : {
     all: trackedMovies.length,
     watchlist: trackedMovies.filter((s) => s.status === "watchlist").length,
     completed: trackedMovies.filter((s) => s.status === "completed").length,
