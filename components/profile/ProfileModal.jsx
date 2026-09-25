@@ -66,13 +66,29 @@ export default function ProfileModal({
     if (open) openedAtRef.current = Date.now();
   }, [open]);
 
-  // Close when navigating into a linked section — ignore the brief
-  // /profile → /home hop used to park a page behind the card.
+  // Close when the destination route commits. Defer one frame so a
+  // route-level loading shell (or the new page) can paint under the
+  // overlay before we lift it — otherwise show→show via Profile flashes
+  // the previous detail for a beat.
   useEffect(() => {
-    if (open && pathnameRef.current !== pathname && Date.now() - openedAtRef.current > 500) {
-      onClose?.();
+    if (!open) {
+      pathnameRef.current = pathname;
+      return undefined;
     }
+    if (pathnameRef.current === pathname) return undefined;
     pathnameRef.current = pathname;
+    if (Date.now() - openedAtRef.current <= 500) return undefined;
+
+    let raf2 = 0;
+    const raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(() => {
+        onClose?.();
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(raf1);
+      if (raf2) window.cancelAnimationFrame(raf2);
+    };
   }, [pathname, open, onClose]);
 
   useEffect(() => {

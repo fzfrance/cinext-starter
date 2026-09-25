@@ -20,18 +20,18 @@ import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { hrefForMedia, mediaKey } from "@/lib/media";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 import { tmdbImage } from "@/lib/tmdb";
-import { collectRecommendSignals } from "@/lib/recommend/collectSignals";
-import { loadImpressions, recordImpressions, recordHeroImpression } from "@/lib/recommend/impressions";
-import { interleaveExploreRows } from "@/lib/recommend/assemble";
-import {
-  loadRecommendSlate,
-  saveRecommendSlate,
-  recommendationSlateBucket,
-  seededShuffle,
-} from "@/lib/recommend/slateCache";
 
 const t = themes.dark;
 const accent = DEFAULT_ACCENT;
+
+function shuffled(array) {
+  const copy = [...array];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
 
 // ---------- Placeholder data ----------
 
@@ -598,7 +598,7 @@ function ExploreDesktopHeroTrailer({ item, onEnded }) {
   );
 }
 
-function ExploreDesktopLayout({ heroSlides, trendingShows, trendingMovies, genreRails = [], providers, resolvedStatusMap, recommended, recommendedLoading, onToggleWatchlist, readableLanguages = [], personalSections = [] }) {
+function ExploreDesktopLayout({ heroSlides, trendingShows, trendingMovies, genreRails = [], providers, resolvedStatusMap, recommended, recommendedLoading, onToggleWatchlist, readableLanguages = [] }) {
   const router = useRouter();
   const [heroIndex, setHeroIndex] = useState(0);
   const slideCount = heroSlides.length;
@@ -607,11 +607,16 @@ function ExploreDesktopLayout({ heroSlides, trendingShows, trendingMovies, genre
     setHeroIndex((i) => (slideCount > 0 ? (i + 1) % slideCount : 0));
   }, [slideCount]);
 
-  // Reset when the slate of hero titles changes (new recommend cache / filters).
+  // Fresh start on every page load / when the hero slate changes — pick a
+  // random slide so refresh doesn't always reopen on the same title.
   const heroSlateKey = heroSlides.map((s) => mediaKey(s)).join("|");
   useEffect(() => {
-    setHeroIndex(0);
-  }, [heroSlateKey]);
+    if (slideCount <= 0) {
+      setHeroIndex(0);
+      return;
+    }
+    setHeroIndex(Math.floor(Math.random() * slideCount));
+  }, [heroSlateKey, slideCount]);
 
   const showItems = trendingShows.slice(0, 10);
   const movieItems = trendingMovies.slice(0, 10);
@@ -620,10 +625,6 @@ function ExploreDesktopLayout({ heroSlides, trendingShows, trendingMovies, genre
   const heroSaved = Boolean(heroStatus);
   const heroWatchlisted = heroStatus === "watchlist";
   const resolveItemTitle = (item) => ({ ...item, title: resolveTitle(item, readableLanguages) });
-  const exploreTail = useMemo(
-    () => interleaveExploreRows(genreRails, personalSections),
-    [genreRails, personalSections]
-  );
   return (
     <div className="explore-desktop-layout">
       {hero && (
@@ -693,29 +694,14 @@ function ExploreDesktopLayout({ heroSlides, trendingShows, trendingMovies, genre
         )}
       </section>
 
-      {exploreTail.map((row) => {
-        if (row.type === "personal") {
-          const section = row.section;
-          return (
-            <DesktopShelf
-              key={section.id}
-              title={section.title}
-              items={(section.items ?? []).map(resolveItemTitle)}
-              resolvedStatusMap={resolvedStatusMap}
-              showRank={false}
-              showMediaLabel
-            />
-          );
-        }
-        return (
-          <DesktopGenreShelf
-            key={row.rail.name}
-            rail={row.rail}
-            resolvedStatusMap={resolvedStatusMap}
-            resolveItemTitle={resolveItemTitle}
-          />
-        );
-      })}
+      {genreRails.map((rail) => (
+        <DesktopGenreShelf
+          key={rail.name}
+          rail={rail}
+          resolvedStatusMap={resolvedStatusMap}
+          resolveItemTitle={resolveItemTitle}
+        />
+      ))}
     </div>
   );
 }
@@ -944,62 +930,31 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
   // for how these get populated, and combinedHeroSlides for the mix.
   const [recommendedShows, setRecommendedShows] = useState([]);
   const [recommendedMovies, setRecommendedMovies] = useState([]);
-  const [recommendedItems, setRecommendedItems] = useState([]);
-  const [recommendedHero, setRecommendedHero] = useState([]);
-  const [personalSections, setPersonalSections] = useState([]);
   const [recommendedReady, setRecommendedReady] = useState(false);
-  // Prefer engine hero (taste + backdrop + freshness) when ready; otherwise
-  // keep the server editorial hero so first paint isn't empty.
-  // Mix order is seeded by the 2-day slate bucket — stable across refreshes.
-  const slateSeed = recommendationSlateBucket();
+  // Keep the server-provided hero order fixed for this mount. Personalized
+  // recommendations arrive after first paint; reshuffling the entire array
+  // at that moment used to replace the poster already on screen and looked
+  // like an accidental auto-advance. Recommendations are shuffled only
+  // within their own appended group, so index 0 never changes underneath
+  // the user.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `shuffled` is a pure module-level helper, stable across renders
   const combinedHeroSlides = useMemo(() => {
-    const fromEngine = (recommendedHero.length > 0 ? recommendedHero : [])
-      .filter((item) => item.backdropPath || item.posterPath)
-      .slice(0, 5)
-      .map((item) => ({
-        ...item,
-        mode: "recommended",
-        posterPath: item.backdropPath || item.posterPath,
-      }));
-
-    if (fromEngine.length >= 2) {
-      const seen = new Set(fromEngine.map((item) => mediaKey(item)));
-      const fillers = heroSlidesRaw.filter((item) => !seen.has(mediaKey(item))).slice(0, Math.max(0, 5 - fromEngine.length));
-      return [...fromEngine, ...fillers].slice(0, 5);
-    }
-
-    const recommendedForHero = seededShuffle([...recommendedShows, ...recommendedMovies], slateSeed)
-      .filter((item) => item.backdropPath || item.posterPath)
-      .slice(0, 5)
-      .map((item) => ({
-        ...item,
-        mode: "recommended",
-        posterPath: item.backdropPath || item.posterPath,
-      }));
-
-    if (recommendedForHero.length >= 2) {
-      const seen = new Set(recommendedForHero.map((item) => mediaKey(item)));
-      const fillers = heroSlidesRaw.filter((item) => !seen.has(mediaKey(item))).slice(0, Math.max(0, 5 - recommendedForHero.length));
-      return [...recommendedForHero, ...fillers].slice(0, 5);
-    }
-
-    return [...heroSlidesRaw, ...recommendedForHero].slice(0, 5);
-  }, [heroSlidesRaw, recommendedShows, recommendedMovies, recommendedHero, slateSeed]);
+    // The hero renders a full-bleed landscape background — swap in each
+    // recommended item's backdropPath as its effective posterPath for
+    // this hero-only copy. The row/grid version below keeps the real
+    // portrait poster untouched.
+    const recommendedForHero = [...recommendedShows, ...recommendedMovies].slice(0, 5).map((item) => ({ ...item, posterPath: item.backdropPath }));
+    return [...heroSlidesRaw, ...shuffled(recommendedForHero)];
+  }, [heroSlidesRaw, recommendedShows, recommendedMovies]);
   const heroSlides = combinedHeroSlides.map((item) => ({ ...item, title: resolveTitle(item, readableLanguages) }));
-  // Engine already diversifies For You — prefer its mixed list; fall back to
-  // a slate-seeded merge (not Math.random) so refresh keeps the same order.
-  const combinedRecommended = useMemo(() => {
-    if (recommendedItems.length > 0) return recommendedItems;
-    return seededShuffle([...recommendedShows, ...recommendedMovies], slateSeed);
-  }, [recommendedItems, recommendedShows, recommendedMovies, slateSeed]);
+  // "For You" — mixed shows+movies in one row (per explicit request,
+  // reverting the earlier split into separate Shows For You/Movies For
+  // You rows). Shuffled once per (recommendedShows, recommendedMovies)
+  // identity change, same reasoning/pattern as combinedHeroSlides above —
+  // not reshuffled on every unrelated re-render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- shuffled is a pure module-level helper, stable across renders
+  const combinedRecommended = useMemo(() => shuffled([...recommendedShows, ...recommendedMovies]), [recommendedShows, recommendedMovies]);
   const recommendedAllResolved = combinedRecommended.map((item) => ({ ...item, title: resolveTitle(item, readableLanguages) }));
-  const personalSectionsResolved = useMemo(
-    () => personalSections.map((section) => ({
-      ...section,
-      items: (section.items ?? []).map((item) => ({ ...item, title: resolveTitle(item, readableLanguages) })),
-    })),
-    [personalSections, readableLanguages]
-  );
   const [activeGenre, setActiveGenre] = useState("All");
   const [sectionView, setSectionView] = useState(null); // { title, subtitle, items }
   const [toastVisible, setToastVisible] = useState(false);
@@ -1075,10 +1030,18 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
     return () => { cancelled = true; };
   }, [user]);
 
-  // Rule-based recommendation engine — taste profile from watch/rate/
-  // favorite/drop signals, scored candidates, diversified For You + hero
-  // + personalized Explore sections. Results are cached for a 2-day slate
-  // so refresh does not reshuffle; impressions only record on a new slate.
+  // "For You" + hero picks — real per-user picks, not a placeholder.
+  // Fetched as two separate arrays (recommendedShows/recommendedMovies)
+  // since the route still returns tvItems/movieItems independently, but
+  // rendered as one mixed row below (combinedRecommended) — only the row
+  // presentation reverted, not the underlying data shape. Runs once per
+  // signed-in user (own fetch rather
+  // than reusing the effect above's, so this isn't coupled to that
+  // effect's exact timing/shape): seeds the recommended-for-you route
+  // with a few of the user's own library items — shows AND movies,
+  // preferring Watching/Completed across both (the strongest recent-taste
+  // signal) — and excludes anything already in either library, plus
+  // whatever's currently trending, from the results.
   const authSettled = !authLoading || Boolean(user);
   useEffect(() => {
     if (!authSettled) {
@@ -1088,9 +1051,6 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
     if (!user) {
       setRecommendedShows([]);
       setRecommendedMovies([]);
-      setRecommendedItems([]);
-      setRecommendedHero([]);
-      setPersonalSections([]);
       setRecommendedReady(true);
       return;
     }
@@ -1098,82 +1058,70 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
     let cancelled = false;
     const safety = setTimeout(() => {
       if (!cancelled) setRecommendedReady(true);
-    }, 20000);
-
-    const applyPayload = (data, { record = false } = {}) => {
-      const withYear = (item) => ({
-        ...item,
-        mode: item.mode || "recommended",
-        year: item.date ? String(item.date).slice(0, 4) : (item.year ?? ""),
-      });
-      const fyItems = (data.forYou?.items ?? []).map(withYear);
-      const tvItems = (data.forYou?.tvItems ?? []).map(withYear);
-      const movieItems = (data.forYou?.movieItems ?? []).map(withYear);
-      setRecommendedItems(fyItems);
-      setRecommendedShows(tvItems);
-      setRecommendedMovies(movieItems);
-      setRecommendedHero((data.hero ?? []).map(withYear));
-      setPersonalSections(
-        (data.sections ?? []).filter((section) => section?.kind !== "because" && section?.kind !== "likeGenre")
-      );
-
-      if (!record) return;
-      const impressionRows = [
-        ...fyItems.slice(0, 24).map((item) => ({ key: mediaKey(item), surface: "foryou" })),
-        ...(data.sections ?? []).flatMap((section) =>
-          (section.items ?? []).slice(0, 8).map((item) => ({ key: mediaKey(item), surface: section.kind || "section" }))
-        ),
-      ];
-      recordImpressions(user.id, impressionRows);
-      if (data.hero?.[0]) recordHeroImpression(user.id, data.hero[0]);
-    };
-
-    (async () => {
-      try {
-        const cached = loadRecommendSlate(user.id);
-        if (cached?.payload) {
-          applyPayload(cached.payload, { record: false });
-          return;
-        }
-
-        const titles = await collectRecommendSignals(user.id);
-        if (cancelled) return;
-        if (titles.length === 0) {
-          setRecommendedShows([]);
-          setRecommendedMovies([]);
-          setRecommendedItems([]);
-          setRecommendedHero([]);
-          setPersonalSections([]);
-          return;
-        }
-        const impressions = loadImpressions(user.id);
-        const res = await fetch("/api/recommend", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ titles, impressions }),
-        });
-        if (!res.ok) throw new Error(`recommend failed (${res.status})`);
-        const data = await res.json();
-        if (cancelled) return;
-
-        saveRecommendSlate(user.id, data);
-        applyPayload(data, { record: true });
-      } catch (err) {
-        console.error(err);
-        if (!cancelled) {
-          setRecommendedShows([]);
-          setRecommendedMovies([]);
-          setRecommendedItems([]);
-          setRecommendedHero([]);
-          setPersonalSections([]);
-        }
-      } finally {
-        clearTimeout(safety);
-        if (!cancelled) setRecommendedReady(true);
+    }, 10000);
+    // Same reasoning as the status-map effect above — getUserMovies fails
+    // independently so shows-side recommendations still populate even
+    // when user_movies doesn't exist yet. getUserShows is caught the same
+    // way so a library read failure cannot leave For You spinning forever.
+    Promise.all([
+      getUserShows(user.id).catch((err) => { console.error(err); return {}; }),
+      getUserMovies(user.id).catch((err) => { console.error(err); return {}; }),
+    ]).then(([byShow, byMovie]) => {
+      if (cancelled) return;
+      const showEntries = Object.entries(byShow ?? {}).map(([id, s]) => ({ id: Number(id), mediaType: "tv", ...s }));
+      const movieEntries = Object.entries(byMovie ?? {}).map(([id, s]) => ({ id: Number(id), mediaType: "movie", ...s }));
+      const entries = [...showEntries, ...movieEntries];
+      if (entries.length === 0) {
+        setRecommendedShows([]);
+        setRecommendedMovies([]);
+        return;
       }
-    })();
+      const preferred = entries.filter((s) => s.status === "watching" || s.status === "completed");
+      const seedPool = preferred.length > 0 ? preferred : entries;
+      const seedIds = seedPool
+        .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+        .slice(0, 3)
+        .map((s) => ({ id: s.id, mediaType: s.mediaType }));
+      // Also excludes whatever's currently shown in either Trending row —
+      // the route itself no longer sources from trending at all (see its
+      // own comment), but this is a second guard against the same item
+      // reaching both sections by coincidence.
+      const excludeIds = [
+        ...entries.map((s) => ({ id: s.id, mediaType: s.mediaType })),
+        ...trendingAll.map((s) => ({ id: s.id, mediaType: s.mediaType })),
+      ];
 
+      return fetch("/api/shows/recommended-for-you", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seedIds, excludeIds }),
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error(`recommended-for-you failed (${res.status})`);
+          return res.json();
+        })
+        .then((data) => {
+          if (cancelled) return;
+          const withYear = (item) => ({
+            ...item,
+            mode: "recommended",
+            year: item.date ? String(item.date).slice(0, 4) : (item.year ?? ""),
+          });
+          setRecommendedShows((data.tvItems ?? []).map(withYear));
+          setRecommendedMovies((data.movieItems ?? []).map(withYear));
+        });
+    }).catch((err) => {
+      console.error(err);
+      if (!cancelled) {
+        setRecommendedShows([]);
+        setRecommendedMovies([]);
+      }
+    }).finally(() => {
+      clearTimeout(safety);
+      if (!cancelled) setRecommendedReady(true);
+    });
     return () => { cancelled = true; clearTimeout(safety); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- trendingAll is a derived useMemo over trendingShows/trendingMovies (themselves derived from stable props), not something this effect should re-run on identity changes of
   }, [user, authSettled]);
 
   // Watchlist is definitionally zero watched episodes (lib/statusResolver.js)
@@ -1272,7 +1220,7 @@ export default function ExploreClient({ trendingShows: trendingShowsRaw, trendin
 
   return (
     <>
-      <ExploreDesktopLayout heroSlides={visibleHeroSlides} trendingShows={trendingShows} trendingMovies={trendingMovies} genreRails={genreRails} providers={providers} resolvedStatusMap={resolvedStatusMap} recommended={recommendedAllResolved} recommendedLoading={!recommendedReady && (authLoading || Boolean(user))} onToggleWatchlist={toggleWatchlist} readableLanguages={readableLanguages} personalSections={personalSectionsResolved} />
+      <ExploreDesktopLayout heroSlides={visibleHeroSlides} trendingShows={trendingShows} trendingMovies={trendingMovies} genreRails={genreRails} providers={providers} resolvedStatusMap={resolvedStatusMap} recommended={recommendedAllResolved} recommendedLoading={!recommendedReady && (authLoading || Boolean(user))} onToggleWatchlist={toggleWatchlist} readableLanguages={readableLanguages} />
       <div className="explore-mobile-layout">
       {/* ---------- Hero (stays mixed-type) ---------- */}
       <ExploreHero heroSlides={visibleHeroSlides} watchlist={watchlist} libraryKeys={libraryKeys} onToggleWatchlist={toggleWatchlist} onOpenSlide={(slide) => router.push(hrefForMedia(slide))} />

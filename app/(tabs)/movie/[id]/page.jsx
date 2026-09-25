@@ -1,5 +1,6 @@
 import MovieDetailClient from "./MovieDetailClient";
 import { getMovieDetails, getMovieRecommendations, getMovieWatchProviders, getLocalizedMovieVideos, pickPlayableVideos } from "@/lib/tmdb";
+import { withProviderWatchLinks } from "@/lib/watchProviderLinks";
 import { CAST_GRADIENTS, initialsOf } from "@/lib/theme";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -72,12 +73,18 @@ async function getMovieData(movieId) {
   // comment on why a missing TH entry is the normal case, not an error.
   const providersTH = watchProvidersRaw.results?.TH ?? null;
   const mapProvider = (p) => ({ id: p.provider_id, name: p.provider_name, logoPath: p.logo_path });
-  const watchProviders = providersTH ? {
-    link: providersTH.link,
-    flatrate: (providersTH.flatrate ?? []).map(mapProvider),
-    rent: (providersTH.rent ?? []).map(mapProvider),
-    buy: (providersTH.buy ?? []).map(mapProvider),
-  } : null;
+  // Open Netflix/Disney+/… directly (or JustWatch search) — never TMDB /watch.
+  const watchProviders = withProviderWatchLinks(
+    providersTH
+      ? {
+          link: providersTH.link,
+          flatrate: (providersTH.flatrate ?? []).map(mapProvider),
+          rent: (providersTH.rent ?? []).map(mapProvider),
+          buy: (providersTH.buy ?? []).map(mapProvider),
+        }
+      : null,
+    { title: movie.title || movie.original_title || "" }
+  );
 
   // A movie has one flat cast/crew list (movie.credits, no aggregate_credits
   // equivalent needed — see lib/tmdb.js's getMovieDetails comment). Same

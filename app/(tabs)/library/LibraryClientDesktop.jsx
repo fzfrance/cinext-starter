@@ -371,8 +371,11 @@ export default function LibraryClient() {
       .then((res) => res.json())
       .then(({ results }) => {
         if (cancelled) return;
-        const logoById = Object.fromEntries((results ?? []).map((r) => [r.id, r.logoPath]));
-        setShows((prev) => prev.map((s) => (s.id in logoById ? { ...s, logoPath: logoById[s.id] } : s)));
+        const logoById = Object.fromEntries((results ?? []).map((r) => [Number(r.id), r.logoPath]));
+        setShows((prev) => prev.map((s) => {
+          const id = Number(s.id);
+          return id in logoById ? { ...s, logoPath: logoById[id] } : s;
+        }));
       })
       .catch(console.error);
     return () => { cancelled = true; };
@@ -387,9 +390,12 @@ export default function LibraryClient() {
   const movieLoadKeyRef = useRef(null);
   useEffect(() => {
     if (!user || !collectionsLoaded) return;
-    const collectionMovieIds = collectionsRaw.flatMap((c) => c.movieIds ?? []);
+    const collectionMovieIds = collectionsRaw.flatMap((c) => c.movieIds ?? []).map(Number).filter(Boolean);
     const loadKey = `${user.id}|${[...new Set(collectionMovieIds)].sort((a, b) => a - b).join(",")}`;
     // Same Strict Mode guard as shows — only skip after a finished load.
+    // Setting the ref before the fetch (mobile used to) cancelled the first
+    // pass and permanently skipped the remount retry, leaving movie
+    // collections without posters.
     if (movieLoadKeyRef.current === loadKey) return;
     let cancelled = false;
     (async () => {
@@ -414,15 +420,15 @@ export default function LibraryClient() {
         });
         const { results } = await res.json();
         if (cancelled) return;
-        const byId = Object.fromEntries(results.map((r) => [r.id, r]));
+        const byId = Object.fromEntries(results.map((r) => [Number(r.id), r]));
 
         const merged = allIds.map((id) => {
-          const detail = byId[id];
+          const detail = byId[Number(id)];
           if (!detail) return null;
-          const tracked = byMovie[id];
+          const tracked = byMovie[id] ?? byMovie[String(id)];
           const { base, glow } = fallbackPalette(id);
           return {
-            id,
+            id: Number(id),
             title: detail.title,
             englishTitle: detail.title,
             originalTitle: detail.originalTitle,
@@ -447,8 +453,8 @@ export default function LibraryClient() {
         // effect re-running after that one succeeded used to permanently
         // blank every spine's logo back to null instead of leaving it alone).
         setMovies((prev) => {
-          const prevLogoById = Object.fromEntries(prev.filter((s) => s.logoPath != null).map((s) => [s.id, s.logoPath]));
-          return merged.map((s) => (s.id in prevLogoById ? { ...s, logoPath: prevLogoById[s.id] } : s));
+          const prevLogoById = Object.fromEntries(prev.filter((s) => s.logoPath != null).map((s) => [Number(s.id), s.logoPath]));
+          return merged.map((s) => (Number(s.id) in prevLogoById ? { ...s, logoPath: prevLogoById[Number(s.id)] } : s));
         });
         setMoviesLoaded(true);
         movieLoadKeyRef.current = loadKey;
@@ -476,8 +482,11 @@ export default function LibraryClient() {
       .then((res) => res.json())
       .then(({ results }) => {
         if (cancelled) return;
-        const logoById = Object.fromEntries((results ?? []).map((r) => [r.id, r.logoPath]));
-        setMovies((prev) => prev.map((s) => (s.id in logoById ? { ...s, logoPath: logoById[s.id] } : s)));
+        const logoById = Object.fromEntries((results ?? []).map((r) => [Number(r.id), r.logoPath]));
+        setMovies((prev) => prev.map((s) => {
+          const id = Number(s.id);
+          return id in logoById ? { ...s, logoPath: logoById[id] } : s;
+        }));
       })
       .catch(console.error);
     return () => { cancelled = true; };
@@ -485,6 +494,16 @@ export default function LibraryClient() {
 
   const handleOpen = (show, rect, mediaType = "tv") => { setOpenShow(show); setOpenOrigin(rect); setOpenMediaType(mediaType); };
   const handleClose = () => { setOpenShow(null); setOpenOrigin(null); };
+
+  // Keep the open case in sync when batch logos resolve after the click.
+  useEffect(() => {
+    if (!openShow) return;
+    const pool = openMediaType === "movie" ? movies : shows;
+    const latest = pool.find((s) => Number(s.id) === Number(openShow.id));
+    if (latest?.logoPath && latest.logoPath !== openShow.logoPath) {
+      setOpenShow((prev) => (prev ? { ...prev, logoPath: latest.logoPath } : prev));
+    }
+  }, [movies, shows, openShow, openMediaType]);
 
   // Optimistic local updates so CaseOverlay's real mutations reflect
   // immediately without a full refetch.
@@ -817,15 +836,17 @@ export default function LibraryClient() {
 
       {tab === "collections" && (
         <div style={{ marginTop: 4 }}>
-          {loaded && collectionsRaw.length === 0 ? (
+          {!(loaded && moviesLoaded) ? (
+            <div style={{ padding: "70px 0", textAlign: "center", color: t.textDim, fontSize: 13.5 }}>Loading your collections…</div>
+          ) : loaded && moviesLoaded && collectionsRaw.length === 0 ? (
             <div style={{ padding: "70px 0", textAlign: "center", color: t.textDim, fontSize: 13.5 }}>No collections yet.</div>
           ) : (
             collectionsRaw.map((c) => {
-              const showsById = Object.fromEntries(localizedShows.map((s) => [s.id, { ...s, mediaType: "tv" }]));
-              const moviesById = Object.fromEntries(localizedMovies.map((m) => [m.id, { ...m, mediaType: "movie" }]));
+              const showsById = Object.fromEntries(localizedShows.map((s) => [Number(s.id), { ...s, mediaType: "tv" }]));
+              const moviesById = Object.fromEntries(localizedMovies.map((m) => [Number(m.id), { ...m, mediaType: "movie" }]));
               const items = [
-                ...c.showIds.map((id) => showsById[id]),
-                ...(c.movieIds ?? []).map((id) => moviesById[id]),
+                ...(c.showIds ?? []).map((id) => showsById[Number(id)]),
+                ...(c.movieIds ?? []).map((id) => moviesById[Number(id)]),
               ].filter(Boolean);
               return (
                 <CollectionRow

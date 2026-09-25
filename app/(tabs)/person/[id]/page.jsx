@@ -102,21 +102,87 @@ function creditRelevanceScore(credit) {
   return voteMass * 1.15 + popMass + landmark + recency + episodeBoost;
 }
 
+// Split aggregate cast strings ("A / B (Performance Artist) / C") into
+// individual role labels — same shape Cast & Crew shows on show detail.
+function splitCharacterRoles(character) {
+  return String(character ?? "")
+    .split(/\s*\/\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((s) => !/^(self|himself|herself)\b/i.test(s));
+}
+
+function buildKnownForRoles(credits) {
+  const seen = new Set();
+  const roles = [];
+  for (const credit of credits) {
+    for (const role of splitCharacterRoles(credit.character)) {
+      const key = role.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      roles.push(role);
+      if (roles.length >= 14) return roles;
+    }
+  }
+  return roles;
+}
+
+function pickBiography(person) {
+  const direct = String(person.biography ?? "").trim();
+  if (direct) return direct;
+  // App Language can return an empty biography while EN (or another
+  // translation) still has text — prefer those over a blank About column.
+  const translations = person.translations?.translations ?? [];
+  const preferred = new Set(["en", "en-US"]);
+  for (const entry of translations) {
+    const iso = entry?.iso_639_1;
+    if (!preferred.has(iso) && entry?.iso_3166_1 !== "US") continue;
+    const bio = String(entry?.data?.biography ?? "").trim();
+    if (bio) return bio;
+  }
+  for (const entry of translations) {
+    const bio = String(entry?.data?.biography ?? "").trim();
+    if (bio) return bio;
+  }
+  return "";
+}
+
 function buildActingCredits(person) {
   const personName = person.name ?? "";
-  const raw = (person.combined_credits?.cast ?? [])
-    .filter((c) => (c.media_type === "movie" || c.media_type === "tv") && c.poster_path)
-    .map((c) => {
-      const isTv = c.media_type === "tv";
-      const dateStr = isTv ? c.first_air_date : c.release_date;
-      const year = yearFromDate(dateStr);
-      return {
-        ...c,
-        _personName: personName,
-        _year: year,
-        _dateStr: dateStr || "",
-      };
+  // Cast first; also fold in Acting-department / performance-artist crew
+  // rows so puppeteers and creature performers aren't blank on Works when
+  // TMDB only filed them under crew for some titles.
+  const castRaw = person.combined_credits?.cast ?? [];
+  const crewRaw = (person.combined_credits?.crew ?? []).filter((c) => {
+    const job = String(c.job ?? "");
+    const dept = String(c.department ?? "");
+    return (
+      dept === "Acting"
+      || /performance|puppeteer|creature|actor|actress/i.test(job)
+    );
+  });
+  const byMedia = new Map();
+  for (const c of [...castRaw, ...crewRaw]) {
+    if (!(c.media_type === "movie" || c.media_type === "tv") || !c.poster_path) continue;
+    const key = `${c.media_type}:${c.id}`;
+    const prev = byMedia.get(key);
+    // Prefer cast rows (they carry character) over crew duplicates.
+    if (prev && prev.character && !c.character) continue;
+    if (prev && (prev.episode_count ?? 0) >= (c.episode_count ?? 0) && prev.character) continue;
+    const isTv = c.media_type === "tv";
+    const dateStr = isTv ? c.first_air_date : c.release_date;
+    const year = yearFromDate(dateStr);
+    byMedia.set(key, {
+      ...c,
+      // Crew uses `job` instead of `character` — surface it the same way
+      // Cast & Crew does for non-acting billed people.
+      character: c.character || c.job || null,
+      _personName: personName,
+      _year: year,
+      _dateStr: dateStr || "",
     });
+  }
+  const raw = [...byMedia.values()];
 
   const acting = raw.filter((c) => !isNonActingAppearance(c));
   const pool = acting.length >= 3 ? acting : raw;
@@ -174,6 +240,7 @@ async function getPersonData(personId) {
   const profilePath = pickBestPersonProfile(person);
   const hero = pickPersonHeroArt(person);
   const credits = buildActingCredits(person);
+  const knownForRoles = buildKnownForRoles(credits);
   const socialLinks = buildPersonSocialLinks(person.external_ids, person.homepage || null);
 
   const movieRelevance = credits.filter((c) => c.type === "movie").slice(0, 8)
@@ -218,7 +285,7 @@ async function getPersonData(personId) {
     heroPath: hero.path,
     heroKind: hero.kind,
     socialLinks,
-    bio: person.biography || "",
+    bio: pickBiography(person),
     born: formatDate(person.birthday),
     died: formatDate(person.deathday),
     age: calculateAge(person.birthday, person.deathday),
@@ -227,6 +294,7 @@ async function getPersonData(personId) {
     department: person.known_for_department || null,
     roleLabel: roleLabel(person.known_for_department),
     alsoKnownAs,
+    knownForRoles,
     defaultFilmTab: movieRelevance >= tvRelevance ? "movie" : "tv",
     credits,
   };

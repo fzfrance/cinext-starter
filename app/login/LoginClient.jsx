@@ -35,7 +35,7 @@ const socialButtonStyle = {
   WebkitBackdropFilter: "blur(20px)",
 };
 
-export default function LoginClient({ posterPaths = [], backdropPath = null }) {
+export default function LoginClient({ posterPaths = [], backdropPath = null, backdropPaths = [] }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -99,7 +99,7 @@ export default function LoginClient({ posterPaths = [], backdropPath = null }) {
 
   return (
     <div className="auth-page min-h-dvh flex flex-col justify-center px-8 relative" style={{ zIndex: 1, paddingTop: 72 }}>
-      <AuthPosterBackground posterPaths={posterPaths} backdropPath={backdropPath} />
+      <AuthPosterBackground posterPaths={posterPaths} backdropPath={backdropPath} backdropPaths={backdropPaths} />
 
       <div className="auth-web-nav" aria-label="Cinext navigation">
         <span className="auth-web-nav-item" aria-hidden="true"><Image src="/cinext-launch-mark.png" alt="Cinext" width={32} height={33} style={{ objectFit: "contain" }} /></span>

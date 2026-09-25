@@ -218,7 +218,9 @@ export default function DesktopGlobalNav() {
         className="desktop-global-nav-mark"
         aria-label="Cinext home"
         onClick={() => {
-          if (lensOpen) closeDesktopSearch();
+          // Same-route (already on Home): pathname won't change, so close now.
+          // Cross-route: LensRouteSync closes after the new page commits.
+          if (lensOpen && pathname?.startsWith("/home")) closeDesktopSearch();
         }}
       >
         <Image src="/cinext-launch-mark.png" alt="Cinext" width={35} height={35} />
@@ -241,7 +243,11 @@ export default function DesktopGlobalNav() {
                   aria-current={active ? "page" : undefined}
                   tabIndex={searchMode ? -1 : undefined}
                   onClick={() => {
-                    if (lensOpen) closeDesktopSearch();
+                    // Don't close the search lens before navigation — that
+                    // flashes the page under Search (Home / prior show).
+                    // LensRouteSync dismisses after pathname commits.
+                    // Same-tab clicks never change pathname, so close those.
+                    if (lensOpen && tab.match(pathname)) closeDesktopSearch();
                   }}
                 >
                   <Icon name={tab.icon} size={15} />

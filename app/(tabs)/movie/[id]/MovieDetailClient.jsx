@@ -23,7 +23,7 @@ import { getCollections, createCollection, addMovieToCollection, removeMovieFrom
 import { hydrateCollectionPreviews } from "@/lib/collectionPreviews";
 import { getProfile } from "@/lib/profile";
 import { tmdbImage } from "@/lib/tmdb";
-import { resolveTitle, resolvePersonName, useReadableLanguages } from "@/lib/languages";
+import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { themes, DEFAULT_ACCENT, tintColorForShow } from "@/lib/theme";
 import { useNavTint } from "@/lib/nav-tint-context";
 import { useNavVisibility } from "@/lib/nav-visibility-context";
@@ -77,25 +77,43 @@ function ProviderGroup({ label, items }) {
     <div className="mb-4 last:mb-0">
       <div style={{ fontSize: 10, color: t.textDim, fontWeight: 700, letterSpacing: "0.08em", marginBottom: 9 }}>{label.toUpperCase()}</div>
       <div className="flex flex-wrap gap-4">
-        {items.map((p) => (
-          <div key={p.id} className="flex flex-col items-center flex-shrink-0" style={{ width: 56 }}>
-            <div className="rounded-xl overflow-hidden flex-shrink-0" style={{ width: 48, height: 48, position: "relative", background: "rgba(255,255,255,0.1)" }}>
-              {p.logoPath && <Image src={tmdbImage(p.logoPath, "w92")} alt="" fill sizes="48px" style={{ objectFit: "cover" }} />}
+        {items.map((p) => {
+          const inner = (
+            <>
+              <div className="rounded-xl overflow-hidden flex-shrink-0" style={{ width: 48, height: 48, position: "relative", background: "rgba(255,255,255,0.1)" }}>
+                {p.logoPath && <Image src={tmdbImage(p.logoPath, "w92")} alt="" fill sizes="48px" style={{ objectFit: "cover" }} />}
+              </div>
+              <span className="text-center" style={{ fontSize: 10.5, color: t.textDim, fontWeight: 500, marginTop: 6, lineHeight: 1.25 }}>{p.name}</span>
+            </>
+          );
+          return p.href ? (
+            <a
+              key={p.id}
+              href={p.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-col items-center flex-shrink-0"
+              style={{ width: 56, textDecoration: "none" }}
+              title={`Open on ${p.name}`}
+            >
+              {inner}
+            </a>
+          ) : (
+            <div key={p.id} className="flex flex-col items-center flex-shrink-0" style={{ width: 56 }}>
+              {inner}
             </div>
-            <span className="text-center" style={{ fontSize: 10.5, color: t.textDim, fontWeight: 500, marginTop: 6, lineHeight: 1.25 }}>{p.name}</span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
 }
 
 function CastGallery({ people, onSelect }) {
-  const readableLanguages = useReadableLanguages();
   return (
     <div className="grid mt-4" style={{ gridTemplateColumns: "repeat(3, 1fr)", rowGap: 20, columnGap: 8 }}>
       {people.map((c) => {
-        const displayName = resolvePersonName(c, readableLanguages);
+        const displayName = c.name;
         return (
         <button key={c.id} onClick={() => onSelect(c.id)} className="flex flex-col items-center text-center active:scale-95 transition">
           <div className="relative flex-shrink-0 rounded-full overflow-hidden flex items-center justify-center" style={{ width: 84, height: 84, background: c.grad }}>
@@ -741,10 +759,10 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
 
           <section className="show-desktop-strip" aria-label="Movie details">
             {primaryProvider ? (
-              watchProviders?.link ? (
+              (primaryProvider.href || watchProviders?.link) ? (
                 <a
                   className="show-desktop-strip-item is-watch"
-                  href={watchProviders.link}
+                  href={primaryProvider.href || watchProviders.link}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -975,7 +993,7 @@ export default function MovieDetailClient({ movieId, movie, cast, videos, simila
                           <span>{c.initials}</span>
                         )}
                       </div>
-                      <div className="show-desktop-cast-name">{resolvePersonName(c, readableLanguages)}</div>
+                      <div className="show-desktop-cast-name">{c.name}</div>
                       <div className="show-desktop-cast-role">{c.role}</div>
                     </button>
                   ))}

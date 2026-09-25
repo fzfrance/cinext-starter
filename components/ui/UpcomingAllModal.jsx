@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Icon from "@/components/ui/Icon";
 import PosterArt from "@/components/ui/PosterArt";
 import { useShowCustomizations } from "@/lib/show-customizations-context";
@@ -157,6 +157,8 @@ function UpcomingModalCard({ item, onLongPress, onNavigate, tr, readableLanguage
  */
 export default function UpcomingAllModal({ open, items, onClose, onLongPress }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const pathnameRef = useRef(pathname);
   const { t: tr, code: appLanguage } = useAppLanguage();
   const dateLocale = toTmdbLanguage(appLanguage);
   const readableLanguages = useReadableLanguages();
@@ -191,6 +193,17 @@ export default function UpcomingAllModal({ open, items, onClose, onLongPress }) 
       document.body.style.overflow = prev;
     };
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open) {
+      pathnameRef.current = pathname;
+      return undefined;
+    }
+    if (pathnameRef.current === pathname) return undefined;
+    pathnameRef.current = pathname;
+    onClose?.();
+    return undefined;
+  }, [pathname, open, onClose]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -321,7 +334,6 @@ export default function UpcomingAllModal({ open, items, onClose, onLongPress }) 
                   readableLanguages={readableLanguages}
                   onLongPress={onLongPress}
                   onNavigate={(href) => {
-                    onClose?.();
                     router.push(href);
                   }}
                 />

@@ -215,7 +215,7 @@ export default function LibraryDesktop({
       const paths = [];
       for (const c of sortedCollections) {
         for (const id of c.showIds) {
-          const show = localizedShows.find((s) => s.id === id && s.posterPath);
+          const show = localizedShows.find((s) => Number(s.id) === Number(id) && s.posterPath);
           if (show?.posterPath) {
             paths.push(show.posterPath);
             break;
@@ -223,7 +223,7 @@ export default function LibraryDesktop({
         }
         if (paths.length >= 5) break;
         for (const id of c.movieIds || []) {
-          const movie = localizedMovies.find((m) => m.id === id && m.posterPath);
+          const movie = localizedMovies.find((m) => Number(m.id) === Number(id) && m.posterPath);
           if (movie?.posterPath) {
             paths.push(movie.posterPath);
             break;
@@ -359,7 +359,7 @@ export default function LibraryDesktop({
   // sampling over hundreds of genre posters (that was the jank source).
   const empty =
     tab === "collections"
-      ? loaded && collectionsRaw.length === 0
+      ? loaded && moviesLoaded && collectionsRaw.length === 0
       : tab === "movies"
         ? moviesLoaded && movieNothingToShow
         : loaded && nothingToShow;
@@ -444,18 +444,26 @@ export default function LibraryDesktop({
           )}
           {tab === "collections" ? (
             <div className="library-desktop-collections">
-              {!loaded ? (
+              {!(loaded && moviesLoaded) ? (
                 <div className="library-desktop-empty">Loading your collections…</div>
               ) : empty ? (
                 <div className="library-desktop-empty">No collections yet. Create one to start grouping titles.</div>
               ) : (
                 sortedCollections.map((c) => {
-                  const showsById = Object.fromEntries(localizedShows.map((s) => [s.id, { ...s, mediaType: "tv" }]));
-                  const moviesById = Object.fromEntries(localizedMovies.map((m) => [m.id, { ...m, mediaType: "movie" }]));
+                  const showsById = Object.fromEntries(
+                    localizedShows.map((s) => [Number(s.id), { ...s, mediaType: "tv" }])
+                  );
+                  const moviesById = Object.fromEntries(
+                    localizedMovies.map((m) => [Number(m.id), { ...m, mediaType: "movie" }])
+                  );
+                  const showIds = (c.showIds ?? []).map(Number).filter(Boolean);
+                  const movieIds = (c.movieIds ?? []).map(Number).filter(Boolean);
                   const items = [
-                    ...c.showIds.map((id) => showsById[id]),
-                    ...(c.movieIds ?? []).map((id) => moviesById[id]),
+                    ...showIds.map((id) => showsById[id]),
+                    ...movieIds.map((id) => moviesById[id]),
                   ].filter(Boolean);
+                  // Wait for shows + movies pools above. Empty bar only when
+                  // there is still nothing to paint after both are ready.
                   if (!items.length) {
                     return (
                       <button

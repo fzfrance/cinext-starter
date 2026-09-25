@@ -627,11 +627,13 @@ function HomeDesktopProgressCard({ item, onLongPress, onMarkWatched }) {
 }
 
 function featuredUpcomingArtPath(item) {
-  // Featured hero always uses the official poster (not backdrop / ep still).
+  // Always the show/movie backdrop for a stable landscape featured card —
+  // never episode stills or a poster-column mode (those made the hero
+  // jump between layouts). Poster is fallback only when TMDB has no backdrop.
   if (item.mediaType === "movie") {
-    return item.posterPath || item.backdropPath || null;
+    return item.backdropPath || item.posterPath || null;
   }
-  return item.show?.posterPath || item.show?.backdropPath || null;
+  return item.show?.backdropPath || item.show?.posterPath || null;
 }
 
 // Continue Watching / In Progress landscape — always prefer the next-ep
@@ -677,13 +679,18 @@ function HomeDesktopUpcomingFeatured({ item, onLongPress }) {
         readableLanguages
       );
   const artPath = featuredUpcomingArtPath(item);
-  const customPoster = isMovie ? null : getCustomPoster(item.id);
+  // Don't paste a portrait custom poster into the landscape backdrop slot —
+  // only use it when we're already on the poster fallback.
+  const usingBackdrop = isMovie
+    ? Boolean(item.backdropPath) && artPath === item.backdropPath
+    : Boolean(item.show?.backdropPath) && artPath === item.show.backdropPath;
+  const customPoster = !isMovie && !usingBackdrop ? getCustomPoster(item.id) : null;
   const href = isMovie ? `/movie/${item.id}` : `/show/${item.id}`;
 
   return (
     <div
       onClick={() => { if (!isMovie && longPress.consumeClick()) return; router.push(href); }}
-      className="home-desktop-upcoming-featured is-poster"
+      className="home-desktop-upcoming-featured"
       {...(isMovie ? {} : longPress.handlers)}
     >
       <div className="home-desktop-upcoming-featured-art">
@@ -693,7 +700,7 @@ function HomeDesktopUpcomingFeatured({ item, onLongPress }) {
           glow={isMovie ? accent : item.show.glow}
           alt={title}
           tmdbSize="w780"
-          sizes="(min-width: 900px) 220px, 100vw"
+          sizes="(min-width: 900px) 420px, 100vw"
         />
         <div className="home-desktop-upcoming-featured-fade" aria-hidden="true" />
       </div>

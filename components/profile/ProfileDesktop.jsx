@@ -227,7 +227,9 @@ export default function ProfileDesktop({
 
   const go = (href, { reopenProfile = false } = {}) => {
     if (reopenProfile) markReopenProfile?.(href);
-    onClose?.();
+    // Keep Profile covering the current page until the destination route
+    // commits — closing first flashes whatever was underneath (e.g. the
+    // previous show detail). ProfileModal closes on pathname change.
     router.push(href);
   };
 
@@ -242,7 +244,6 @@ export default function ProfileDesktop({
       ? `/movie/${rating.movieId}?tab=reviews&edit=1`
       : `/show/${rating.showId}?tab=reviews&reviewSeason=${rating.seasonNumber}&edit=1`;
     markReopenProfile?.(href);
-    onClose?.();
     router.push(href);
   };
 

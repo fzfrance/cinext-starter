@@ -975,7 +975,9 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
   }, [router, clearSearch, asLens, closeDesktopSearch]);
 
   const rememberSearchPosition = useCallback(() => {
-    if (asLens) closeDesktopSearch();
+    // Do not close the lens here — closing early exposes the page under
+    // Search (often Home / the previous show) while /show|/movie RSC loads.
+    // LensRouteSync closes once pathname actually changes.
     const scrollTop = desktopResultsRef.current?.scrollTop ?? resultsScrollRef.current?.scrollTop ?? 0;
     searchSession = {
       query,
@@ -985,7 +987,7 @@ export default function SearchClient({ trendingShows, trendingMovies, heroSlides
       browseMode,
       scrollTop,
     };
-  }, [query, results, filter, discoveryFilters, browseMode, asLens, closeDesktopSearch]);
+  }, [query, results, filter, discoveryFilters, browseMode]);
 
   const updateQuery = (value) => {
     searchSession = null;

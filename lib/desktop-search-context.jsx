@@ -17,7 +17,18 @@ function LensRouteSync() {
   useEffect(() => {
     if (prevPath.current === pathname) return;
     prevPath.current = pathname;
-    if (lensOpen) closeDesktopSearch();
+    if (!lensOpen) return;
+    // Defer so show/movie loading shells can paint under the lens first.
+    let raf2 = 0;
+    const raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(() => {
+        closeDesktopSearch();
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(raf1);
+      if (raf2) window.cancelAnimationFrame(raf2);
+    };
   }, [pathname, lensOpen, closeDesktopSearch]);
 
   return null;

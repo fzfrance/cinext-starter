@@ -111,10 +111,12 @@ function buildInfoRows(person) {
       ? `${person.born} – ${person.died}${person.age != null ? ` (Age ${person.age})` : ""}`
       : person.age != null ? `${person.born} (Age ${person.age})` : person.born
     : null;
+  const aka = (person.alsoKnownAs ?? []).filter(Boolean);
   return [
     ["Born", bornLine],
     ["Birthplace", person.birthplace],
     ["Nationality", person.nationality],
+    ["Also known as", aka.length ? aka.join(", ") : null],
   ].filter(([, v]) => v);
 }
 
@@ -207,6 +209,11 @@ function PersonMobile({ person, filmTab, setFilmTab, work, showStatusMap, movieS
               {person.bio.length > 420 ? `${person.bio.slice(0, 420)}…` : person.bio}
             </div>
           )}
+          {!person.bio && (person.knownForRoles ?? []).length > 0 && (
+            <div className="mt-5" style={{ fontSize: 12.5, lineHeight: 1.55, color: "rgba(255,255,255,0.75)" }}>
+              {(person.knownForRoles ?? []).slice(0, 10).join(" · ")}
+            </div>
+          )}
 
           {infoRows.length > 0 && (
             <div className="mt-5">
@@ -251,6 +258,11 @@ function PersonMobile({ person, filmTab, setFilmTab, work, showStatusMap, movieS
                 <button key={`${w.type}-${w.id}`} onClick={() => router.push(w.type === "tv" ? `/show/${w.id}` : `/movie/${w.id}`)} className="text-left active:scale-95 transition">
                   {card}
                   <div className="mt-1.5" style={{ fontSize: 11.5, fontWeight: 500, color: "#fff", lineHeight: 1.3 }}>{w.title}</div>
+                  {w.character ? (
+                    <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.45)", lineHeight: 1.35, marginTop: 2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                      {w.character}
+                    </div>
+                  ) : null}
                 </button>
               );
             })}
@@ -277,6 +289,9 @@ function PersonDesktop({ person, filmTab, setFilmTab, work, showStatusMap, movie
 
   const bio = person.bio
     ? (person.bio.length > 720 ? `${person.bio.slice(0, 720).trim()}…` : person.bio)
+    : null;
+  const knownForFallback = !bio && (person.knownForRoles ?? []).length
+    ? (person.knownForRoles ?? []).join(" · ")
     : null;
 
   return (
@@ -379,6 +394,12 @@ function PersonDesktop({ person, filmTab, setFilmTab, work, showStatusMap, movie
         <div className="person-desktop-grid">
           <aside className="person-desktop-about">
             {bio ? <p className="person-desktop-bio">{bio}</p> : null}
+            {!bio && knownForFallback ? (
+              <div className="person-desktop-known-for">
+                <p className="person-desktop-known-for-label">Known for</p>
+                <p className="person-desktop-bio">{knownForFallback}</p>
+              </div>
+            ) : null}
             {infoRows.length > 0 ? (
               <dl className="person-desktop-meta">
                 {infoRows.map(([k, v]) => (
@@ -424,6 +445,7 @@ function PersonDesktop({ person, filmTab, setFilmTab, work, showStatusMap, movie
                       <MediaStatusBadge status={w.type === "tv" ? showStatusMap[w.id] : movieStatusMap[w.id]} />
                     </div>
                     <span className="person-desktop-works-title">{w.title}</span>
+                    {w.character ? <span className="person-desktop-works-role">{w.character}</span> : null}
                     {w.yearLabel ? <span className="person-desktop-works-year">{w.yearLabel}</span> : null}
                   </button>
                 ))}

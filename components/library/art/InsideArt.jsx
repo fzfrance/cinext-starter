@@ -16,7 +16,9 @@ import { tmdbImage } from "@/lib/tmdb";
 export default function InsideArt({ show }) {
   const [logoFailed, setLogoFailed] = useState(false);
   const backdropSrc = tmdbImage(show.backdropPath, "w780");
-  const logoSrc = !logoFailed && show.logoPath ? tmdbImage(show.logoPath, "w300") : null;
+  // w500 — title treatment on the open lid needs sharper edges than the
+  // tiny spine watermark; plain text fallback remains if the asset 404s.
+  const logoSrc = !logoFailed && show.logoPath ? tmdbImage(show.logoPath, "w500") : null;
   return (
     <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: `linear-gradient(165deg, ${show.base} 0%, #0d0c0a 100%)`, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 28px" }}>
       {backdropSrc && (
@@ -43,7 +45,7 @@ export default function InsideArt({ show }) {
               src={logoSrc}
               alt=""
               onError={() => setLogoFailed(true)}
-              style={{ maxWidth: "100%", maxHeight: 20, objectFit: "contain", filter: "drop-shadow(0 1px 6px rgba(0,0,0,0.6))" }}
+              style={{ maxWidth: "100%", maxHeight: 52, objectFit: "contain", filter: "drop-shadow(0 1px 6px rgba(0,0,0,0.6))" }}
             />
           ) : (
             <div style={{ fontSize: 16, fontWeight: 800, color: "#fff", textShadow: "0 1px 6px rgba(0,0,0,0.6)" }}>{show.title}</div>

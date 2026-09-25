@@ -15,6 +15,7 @@ import { setShowStatus, removeUserShow } from "@/lib/userShows";
 import { tmdbImage } from "@/lib/tmdb";
 import { themes } from "@/lib/theme";
 import { useNavVisibility } from "@/lib/nav-visibility-context";
+import { useReadableLanguages } from "@/lib/languages";
 
 const t = themes.dark;
 const TRUE_RED = "#ef4444"; // matches Settings' Delete Account red, distinct from the app's shared pink/rose danger token
@@ -56,8 +57,31 @@ export default function CaseOverlay({ show, origin, onClose, onStatusChange, onF
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState("");
   const [logoFailed, setLogoFailed] = useState(false);
+  const [fetchedLogoPath, setFetchedLogoPath] = useState(null);
   const timers = useRef([]);
-  const logoSrc = !logoFailed && show.logoPath ? tmdbImage(show.logoPath, "w300") : null;
+  const readableLanguages = useReadableLanguages();
+  useEffect(() => {
+    setFetchedLogoPath(null);
+    setLogoFailed(false);
+    if (show.logoPath) return;
+    let cancelled = false;
+    fetch("/api/shows/logos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [show.id], readableLanguages }),
+    })
+      .then((res) => res.json())
+      .then(({ results }) => {
+        if (!cancelled) setFetchedLogoPath(results?.[0]?.logoPath ?? null);
+      })
+      .catch(console.error);
+    return () => { cancelled = true; };
+  }, [show.id, show.logoPath, readableLanguages]);
+  const effectiveLogoPath = show.logoPath || fetchedLogoPath;
+  const showWithLogo = effectiveLogoPath && effectiveLogoPath !== show.logoPath
+    ? { ...show, logoPath: effectiveLogoPath }
+    : show;
+  const logoSrc = !logoFailed && effectiveLogoPath ? tmdbImage(effectiveLogoPath, "w500") : null;
 
   // FloatingNav (rendered by the shared (tabs) layout) sits at zIndex:100,
   // above this overlay's own zIndex:60 — without this, the bottom nav stays
@@ -203,12 +227,12 @@ export default function CaseOverlay({ show, origin, onClose, onStatusChange, onF
                   delay on close, so it doesn't linger visible while the
                   lid swings back toward the viewer. */}
               <button onClick={(e) => { e.stopPropagation(); router.push(`/show/${show.id}`); }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", borderRadius: "50%", opacity: lidOpen ? 1 : 0, transition: lidOpen ? "opacity 400ms ease 900ms" : "opacity 200ms ease", backfaceVisibility: "visible", WebkitBackfaceVisibility: "visible" }}>
-                <Disc show={show} />
+                <Disc show={showWithLogo} />
               </button>
               <div style={{ position: "absolute", bottom: 12, left: 0, right: 0, textAlign: "center", color: t.textDim, fontSize: 10, letterSpacing: 1.2, textTransform: "uppercase" }}>{show.meta}</div>
             </div>
             <div style={{ position: "absolute", left: 0, top: 0, width: SPINE_W + 6, height: "100%", transformOrigin: "left center", transform: "rotateY(-90deg)", overflow: "hidden", backfaceVisibility: "hidden" }}>
-              <SpineFace show={show} height={BIG_H} />
+              <SpineFace show={showWithLogo} height={BIG_H} />
             </div>
             {/* Bevel/seam face — same fix as ShelfCase's rest state, sized up
                 proportionally for this larger case. See ShelfCase.jsx for
@@ -218,10 +242,10 @@ export default function CaseOverlay({ show, origin, onClose, onStatusChange, onF
             </div>
             <div style={{ position: "absolute", inset: 0, transformStyle: "preserve-3d", transformOrigin: "left center", transform: lidOpen ? "rotateY(-178deg) translateZ(-6px)" : "rotateY(0deg) translateZ(3px)", transition: `transform ${LID_CLOSE_MS}ms cubic-bezier(.68,0,.22,1)` }}>
               <div style={{ position: "absolute", inset: 0, backfaceVisibility: "hidden", borderRadius: "0 6px 6px 0", overflow: "hidden", boxShadow: "0 26px 60px rgba(0,0,0,0.6)" }}>
-                <CoverArt show={show} big />
+                <CoverArt show={showWithLogo} big />
               </div>
               <div style={{ position: "absolute", inset: 0, backfaceVisibility: "hidden", transform: "rotateY(180deg)", borderRadius: "6px 0 0 6px", overflow: "hidden" }}>
-                <InsideArt show={show} />
+                <InsideArt show={showWithLogo} />
               </div>
             </div>
           </div>

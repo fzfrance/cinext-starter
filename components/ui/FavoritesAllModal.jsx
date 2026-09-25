@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Icon from "@/components/ui/Icon";
 import PosterCard from "@/components/ui/PosterCard";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
@@ -40,9 +40,11 @@ export default function FavoritesAllModal({
   onNavigate,
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const readableLanguages = useReadableLanguages();
   const searchInputRef = useRef(null);
   const dragIdRef = useRef(null);
+  const pathnameRef = useRef(pathname);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [sort, setSort] = useState("firstAdded");
@@ -63,6 +65,17 @@ export default function FavoritesAllModal({
     setSortOpen(false);
     setDragOverId(null);
   }, [open, sortKey, orderKey]);
+
+  useEffect(() => {
+    if (!open) {
+      pathnameRef.current = pathname;
+      return undefined;
+    }
+    if (pathnameRef.current === pathname) return undefined;
+    pathnameRef.current = pathname;
+    onClose?.();
+    return undefined;
+  }, [pathname, open, onClose]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -128,7 +141,8 @@ export default function FavoritesAllModal({
   const sortLabel = SORT_OPTIONS.find((o) => o.id === sort)?.label || "First Added";
 
   const go = (href) => {
-    onClose?.();
+    // Keep Favorites (and Profile under it) up until the destination
+    // route commits — closing first flashes the underlying page.
     if (onNavigate) onNavigate(href);
     else router.push(href);
   };

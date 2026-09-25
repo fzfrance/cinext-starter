@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { tmdbImage } from "@/lib/tmdb";
 
@@ -27,12 +28,75 @@ function seededRandom(seed) {
 // overflowing or leaving dead space on a real phone.
 const GRID_CLASSES = "grid grid-cols-3 sm:grid-cols-4";
 const TILE_COUNT = 16; // divides evenly into both a 4-col and (close to) a 3-col layout
+const BACKDROP_ROTATE_MS = 9000;
 
-export default function AuthPosterBackground({ posterPaths = [], backdropPath = null }) {
+function uniquePaths(paths) {
+  const out = [];
+  const seen = new Set();
+  for (const path of paths ?? []) {
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    out.push(path);
+  }
+  return out;
+}
+
+export default function AuthPosterBackground({ posterPaths = [], backdropPath = null, backdropPaths = [] }) {
+  const pool = useMemo(() => {
+    if (backdropPaths?.length) return uniquePaths(backdropPaths);
+    if (backdropPath) return [backdropPath];
+    return [];
+  }, [backdropPaths, backdropPath]);
+
+  // Always start at 0 for SSR/hydration match; randomize + rotate after mount.
+  const [index, setIndex] = useState(0);
+  const [hasRotated, setHasRotated] = useState(false);
+
+  useEffect(() => {
+    if (pool.length <= 1) return undefined;
+    setHasRotated(false);
+    setIndex(Math.floor(Math.random() * pool.length));
+    const id = setInterval(() => {
+      setHasRotated(true);
+      setIndex((i) => (i + 1) % pool.length);
+    }, BACKDROP_ROTATE_MS);
+    return () => clearInterval(id);
+  }, [pool]);
+
+  const currentPath = pool.length > 0 ? pool[index % pool.length] : null;
+  const previousPath = hasRotated && pool.length > 1
+    ? pool[(index - 1 + pool.length) % pool.length]
+    : null;
+
   return (
     <div className="fixed inset-0" style={{ zIndex: -1, background: "#0A0A0C", overflow: "hidden" }}>
-      {backdropPath && (
-        <Image className="auth-feature-backdrop" src={tmdbImage(backdropPath, "w1280")} alt="" fill priority sizes="100vw" draggable={false} style={{ objectFit: "cover" }} />
+      {(currentPath || previousPath) && (
+        <div className="auth-feature-backdrop-stack" aria-hidden="true">
+          {previousPath ? (
+            <Image
+              className="auth-feature-backdrop"
+              src={tmdbImage(previousPath, "w1280")}
+              alt=""
+              fill
+              sizes="100vw"
+              draggable={false}
+              style={{ objectFit: "cover", opacity: 0.78 }}
+            />
+          ) : null}
+          {currentPath ? (
+            <Image
+              key={`${index}-${currentPath}`}
+              className="auth-feature-backdrop auth-feature-backdrop-fade"
+              src={tmdbImage(currentPath, "w1280")}
+              alt=""
+              fill
+              priority={index === 0}
+              sizes="100vw"
+              draggable={false}
+              style={{ objectFit: "cover" }}
+            />
+          ) : null}
+        </div>
       )}
       {/* gap kept small (not 0) so tiles still read as distinct posters at
           the seams, but each tile's scale(1.18) — bigger than a purely

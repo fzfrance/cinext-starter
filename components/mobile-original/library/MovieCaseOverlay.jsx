@@ -15,6 +15,7 @@ import { setMovieStatus, removeUserMovie } from "@/lib/userMovies";
 import { tmdbImage } from "@/lib/tmdb";
 import { themes } from "@/lib/theme";
 import { useNavVisibility } from "@/lib/nav-visibility-context";
+import { useReadableLanguages } from "@/lib/languages";
 
 const t = themes.dark;
 const TRUE_RED = "#ef4444";
@@ -42,8 +43,31 @@ export default function MovieCaseOverlay({ show, origin, onClose, onStatusChange
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState("");
   const [logoFailed, setLogoFailed] = useState(false);
+  const [fetchedLogoPath, setFetchedLogoPath] = useState(null);
   const timers = useRef([]);
-  const logoSrc = !logoFailed && show.logoPath ? tmdbImage(show.logoPath, "w300") : null;
+  const readableLanguages = useReadableLanguages();
+  useEffect(() => {
+    setFetchedLogoPath(null);
+    setLogoFailed(false);
+    if (show.logoPath) return;
+    let cancelled = false;
+    fetch("/api/movies/logos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [show.id], readableLanguages }),
+    })
+      .then((res) => res.json())
+      .then(({ results }) => {
+        if (!cancelled) setFetchedLogoPath(results?.[0]?.logoPath ?? null);
+      })
+      .catch(console.error);
+    return () => { cancelled = true; };
+  }, [show.id, show.logoPath, readableLanguages]);
+  const effectiveLogoPath = show.logoPath || fetchedLogoPath;
+  const showWithLogo = effectiveLogoPath && effectiveLogoPath !== show.logoPath
+    ? { ...show, logoPath: effectiveLogoPath }
+    : show;
+  const logoSrc = !logoFailed && effectiveLogoPath ? tmdbImage(effectiveLogoPath, "w500") : null;
 
   const [, setNavHidden] = useNavVisibility();
   useEffect(() => {
@@ -129,22 +153,22 @@ export default function MovieCaseOverlay({ show, origin, onClose, onStatusChange
           <div style={{ position: "absolute", inset: 0, transformStyle: "preserve-3d", transformOrigin: "left center", transform: caseCentered ? "translate(0px,0px) scale(1) rotateY(0deg)" : restTransform, transition: isClosingFly ? `transform ${FLY_BACK_MS}ms cubic-bezier(.22,1,.36,1)` : "transform 1s cubic-bezier(.5,.05,.2,1)" }}>
             <div style={{ position: "absolute", inset: 0, borderRadius: "0 6px 6px 0", background: "linear-gradient(180deg, #17171a 0%, #101013 100%)", border: "1px solid rgba(255,255,255,0.09)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 26px 60px rgba(0,0,0,0.6), inset 3px 0 6px rgba(0,0,0,0.5)", transform: lidOpen ? "translateZ(6px)" : "translateZ(0px)", transition: lidOpen ? "transform 1ms linear 1000ms" : "transform 1ms linear", backfaceVisibility: "visible", WebkitBackfaceVisibility: "visible" }}>
               <button onClick={(e) => { e.stopPropagation(); router.push(`/movie/${show.id}`); }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", borderRadius: "50%", opacity: lidOpen ? 1 : 0, transition: lidOpen ? "opacity 400ms ease 900ms" : "opacity 200ms ease", backfaceVisibility: "visible", WebkitBackfaceVisibility: "visible" }}>
-                <Disc show={show} />
+                <Disc show={showWithLogo} />
               </button>
               <div style={{ position: "absolute", bottom: 12, left: 0, right: 0, textAlign: "center", color: t.textDim, fontSize: 10, letterSpacing: 1.2, textTransform: "uppercase" }}>{show.meta}</div>
             </div>
             <div style={{ position: "absolute", left: 0, top: 0, width: SPINE_W + 6, height: "100%", transformOrigin: "left center", transform: "rotateY(-90deg)", overflow: "hidden", backfaceVisibility: "hidden" }}>
-              <SpineFace show={show} height={BIG_H} />
+              <SpineFace show={showWithLogo} height={BIG_H} />
             </div>
             <div style={{ position: "absolute", left: 0, top: 0, width: 6, height: "100%", transformOrigin: "left center", transform: "rotateY(-45deg)", backfaceVisibility: "hidden" }}>
               <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "linear-gradient(90deg, rgba(60,60,66,0.9) 0%, rgba(20,20,22,0.9) 100%)" }} />
             </div>
             <div style={{ position: "absolute", inset: 0, transformStyle: "preserve-3d", transformOrigin: "left center", transform: lidOpen ? "rotateY(-178deg) translateZ(-6px)" : "rotateY(0deg) translateZ(3px)", transition: `transform ${LID_CLOSE_MS}ms cubic-bezier(.68,0,.22,1)` }}>
               <div style={{ position: "absolute", inset: 0, backfaceVisibility: "hidden", borderRadius: "0 6px 6px 0", overflow: "hidden", boxShadow: "0 26px 60px rgba(0,0,0,0.6)" }}>
-                <CoverArt show={show} big />
+                <CoverArt show={showWithLogo} big />
               </div>
               <div style={{ position: "absolute", inset: 0, backfaceVisibility: "hidden", transform: "rotateY(180deg)", borderRadius: "6px 0 0 6px", overflow: "hidden" }}>
-                <InsideArt show={show} />
+                <InsideArt show={showWithLogo} />
               </div>
             </div>
           </div>

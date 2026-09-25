@@ -1,5 +1,6 @@
 import ShowDetailClient from "./ShowDetailClient";
 import { getShowDetails, getSeasonDetails, getShowRecommendations, getWatchProviders, getLocalizedShowVideos, pickPlayableVideos } from "@/lib/tmdb";
+import { withProviderWatchLinks } from "@/lib/watchProviderLinks";
 import { CAST_GRADIENTS, initialsOf } from "@/lib/theme";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -68,12 +69,18 @@ async function getShowData(showId) {
   // error.
   const providersTH = watchProvidersRaw.results?.TH ?? null;
   const mapProvider = (p) => ({ id: p.provider_id, name: p.provider_name, logoPath: p.logo_path });
-  const watchProviders = providersTH ? {
-    link: providersTH.link,
-    flatrate: (providersTH.flatrate ?? []).map(mapProvider),
-    rent: (providersTH.rent ?? []).map(mapProvider),
-    buy: (providersTH.buy ?? []).map(mapProvider),
-  } : null;
+  // Open Netflix/Disney+/… directly (or JustWatch search) — never TMDB /watch.
+  const watchProviders = withProviderWatchLinks(
+    providersTH
+      ? {
+          link: providersTH.link,
+          flatrate: (providersTH.flatrate ?? []).map(mapProvider),
+          rent: (providersTH.rent ?? []).map(mapProvider),
+          buy: (providersTH.buy ?? []).map(mapProvider),
+        }
+      : null,
+    { title: show.name || show.original_name || "" }
+  );
 
   const seasons = seasonDetails.map((season) => ({
     id: season.season_number,
