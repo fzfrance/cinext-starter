@@ -21,6 +21,7 @@ export default async function Page({ params }) {
 
   return (
     <ProviderClient
+      key={provider.provider_id}
       provider={{
         id: provider.provider_id,
         name: provider.provider_name,

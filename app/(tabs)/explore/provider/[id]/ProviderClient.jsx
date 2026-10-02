@@ -13,6 +13,13 @@ import {
   genresForContentType,
   SEARCH_FILTER_LANGUAGES,
 } from "@/lib/discoverFilters";
+import {
+  normalizeProviderFilters,
+  readProviderCatalogSession,
+  readStoredProviderFilters,
+  writeProviderCatalogSession,
+  writeStoredProviderFilters,
+} from "@/lib/providerCatalogSession";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { hrefForMedia, mediaKey } from "@/lib/media";
 import { useLibraryStatus } from "@/lib/useLibraryStatus";
@@ -31,6 +38,11 @@ const DEFAULT_FILTERS = {
   yearFrom: MIN_YEAR,
   languages: [],
 };
+const FILTER_BOUNDS = { minYear: MIN_YEAR, maxYear: MAX_YEAR };
+
+function filtersOrDefault(value) {
+  return normalizeProviderFilters(value, FILTER_BOUNDS) ?? DEFAULT_FILTERS;
+}
 
 function parseGenreParts(...raw) {
   const ids = [];
@@ -310,9 +322,19 @@ export default function ProviderClient({ provider }) {
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  // Wait to fetch until a saved filter (or an explicit "nothing saved") is
+  // in state. Otherwise the first request uses the defaults and the grid
+  // flashes the unfiltered catalog before the user's filter returns.
+  const [hydrated, setHydrated] = useState(false);
   const filterWrapRef = useRef(null);
   const scrollerRef = useRef(null);
   const requestIdRef = useRef(0);
+  const skipInitialFetchRef = useRef(false);
+  const hydratedRef = useRef(false);
+  const resultsReadyRef = useRef(false);
+  const scrollTopRef = useRef(0);
+  const pendingScrollRef = useRef(null);
+  const rememberRef = useRef(() => {});
   const activeFilterCount = countActiveFilters(appliedFilters);
 
   const localize = useCallback(
@@ -327,7 +349,10 @@ export default function ProviderClient({ provider }) {
   const load = useCallback(async ({ nextPage = 1, append = false, batch = 1 } = {}) => {
     const requestId = ++requestIdRef.current;
     if (append) setLoadingMore(true);
-    else setLoading(true);
+    else {
+      resultsReadyRef.current = false;
+      setLoading(true);
+    }
     try {
       const pagesToFetch = Array.from(
         { length: Math.max(1, batch) },
@@ -355,6 +380,7 @@ export default function ProviderClient({ provider }) {
       setTotalResults(first.totalResults ?? mapped.length);
       setTotalPages(pagesAvailable);
       setPage(Math.min(lastFetched, pagesAvailable || lastFetched));
+      resultsReadyRef.current = true;
     } catch (err) {
       console.error(err);
       if (requestId !== requestIdRef.current) return;
@@ -372,8 +398,97 @@ export default function ProviderClient({ provider }) {
   }, [provider.id, appliedFilters, localize]);
 
   useEffect(() => {
+    hydratedRef.current = hydrated;
+  }, [hydrated]);
+
+  rememberRef.current = () => {
+    const filters = filtersOrDefault(appliedFilters);
+    writeProviderCatalogSession(provider.id, {
+      appliedFilters: filters,
+      items: resultsReadyRef.current ? items : null,
+      totalResults,
+      page,
+      totalPages,
+      scrollTop: scrollerRef.current?.scrollTop ?? scrollTopRef.current ?? 0,
+    });
+    try {
+      writeStoredProviderFilters(window.sessionStorage, provider.id, filters, FILTER_BOUNDS);
+    } catch {
+      // Private mode can reject sessionStorage; the in-memory snapshot still covers this visit.
+    }
+  };
+
+  // Restore this service's filter before the catalog request. A return from
+  // a title also puts the already-loaded grid and scroll position back.
+  useEffect(() => {
+    const memory = readProviderCatalogSession(provider.id);
+    const stored = (() => {
+      try {
+        return readStoredProviderFilters(window.sessionStorage, provider.id, FILTER_BOUNDS);
+      } catch {
+        return null;
+      }
+    })();
+    const filters = memory?.appliedFilters ?? stored;
+    if (filters) {
+      const next = filtersOrDefault(filters);
+      setAppliedFilters(next);
+      setDraftFilters(next);
+    }
+    if (filters && Array.isArray(memory?.items)) {
+      setItems(memory.items);
+      setTotalResults(memory.totalResults ?? memory.items.length);
+      setPage(memory.page ?? 1);
+      setTotalPages(memory.totalPages ?? 0);
+      scrollTopRef.current = memory.scrollTop ?? 0;
+      pendingScrollRef.current = memory.scrollTop ?? 0;
+      resultsReadyRef.current = true;
+      skipInitialFetchRef.current = true;
+      setLoading(false);
+    }
+    setHydrated(true);
+  }, [provider.id]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      writeStoredProviderFilters(window.sessionStorage, provider.id, appliedFilters, FILTER_BOUNDS);
+    } catch {
+      // Ignore quota / private-mode failures; the visit snapshot is separate.
+    }
+  }, [hydrated, appliedFilters, provider.id]);
+
+  useEffect(() => {
+    return () => {
+      if (!hydratedRef.current) return;
+      rememberRef.current();
+    };
+  }, [provider.id]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (skipInitialFetchRef.current) {
+      skipInitialFetchRef.current = false;
+      return;
+    }
     load({ nextPage: 1, append: false, batch: INITIAL_PAGE_BATCH });
-  }, [load]);
+  }, [hydrated, load]);
+
+  useEffect(() => {
+    if (!hydrated || pendingScrollRef.current == null) return undefined;
+    const top = pendingScrollRef.current;
+    pendingScrollRef.current = null;
+    let secondFrame;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        if (scrollerRef.current) scrollerRef.current.scrollTop = top;
+      });
+    });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      if (secondFrame) cancelAnimationFrame(secondFrame);
+    };
+  }, [hydrated, items]);
 
   useEffect(() => {
     if (!filterOpen) return undefined;
@@ -427,6 +542,7 @@ export default function ProviderClient({ provider }) {
     const el = scrollerRef.current;
     if (!el) return undefined;
     const onScroll = () => {
+      scrollTopRef.current = el.scrollTop;
       if (loadingMore || loading) return;
       if (page >= totalPages) return;
       if (el.scrollTop + el.clientHeight < el.scrollHeight - 360) return;
@@ -512,6 +628,7 @@ export default function ProviderClient({ provider }) {
                     if (event.defaultPrevented) return;
                     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                     event.preventDefault();
+                    rememberRef.current();
                     router.push(href);
                   }}
                 >
