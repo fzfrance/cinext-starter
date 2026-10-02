@@ -225,7 +225,7 @@ async function getShowData(showId) {
   if (rawVideos.length === 0) {
     rawVideos = (await getLocalizedShowVideos(showId, show.original_language)).filter((v) => v.site === "YouTube");
   }
-  const videoList = await pickPlayableVideos(rawVideos, { limit: 8 });
+  const videoList = await pickPlayableVideos(rawVideos, { limit: 8, originalLanguage: show.original_language });
 
   const similar = (recommendations.results ?? []).slice(0, 12).map((s) => ({
     id: s.id,

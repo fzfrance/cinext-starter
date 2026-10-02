@@ -27,7 +27,7 @@ export async function GET(request) {
       if (videos.length === 0) {
         videos = await getLocalizedShowVideos(id, show?.original_language);
       }
-      return NextResponse.json({ key: await pickPlayableTrailerKey(videos) });
+      return NextResponse.json({ key: await pickPlayableTrailerKey(videos, { originalLanguage: show?.original_language }) });
     }
 
     const movie = await getMovieDetails(id);
@@ -35,7 +35,7 @@ export async function GET(request) {
     if (videos.length === 0) {
       videos = await getLocalizedMovieVideos(id, movie?.original_language);
     }
-    return NextResponse.json({ key: await pickPlayableTrailerKey(videos) });
+    return NextResponse.json({ key: await pickPlayableTrailerKey(videos, { originalLanguage: movie?.original_language }) });
   } catch {
     return NextResponse.json({ key: null });
   }
