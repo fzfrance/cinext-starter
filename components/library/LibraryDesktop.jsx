@@ -438,7 +438,6 @@ export default function LibraryDesktop({
                 counts={counts}
                 onSelect={setActiveFilter}
                 items={tab === "movies" ? MOVIE_STATUS_ITEMS : undefined}
-                showAllPill
               />
             </div>
           )}
