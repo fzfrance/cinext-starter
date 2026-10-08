@@ -326,7 +326,7 @@ export default function ProfileDesktop({
                 onSeeAll={() => setFavoritesModal("shows")}
               />
               <div className="profile-desktop-poster-row">
-                {favoritesRowLoading ? (
+                {favoritesRowLoading && displayedFavorites.length === 0 ? (
                   [0, 1, 2, 3].map((i) => <div key={i} className="profile-desktop-poster-skeleton" />)
                 ) : displayedFavorites.length === 0 ? (
                   <p className="profile-desktop-empty">No favorite shows yet.</p>
@@ -352,7 +352,7 @@ export default function ProfileDesktop({
                 onSeeAll={() => setFavoritesModal("movies")}
               />
               <div className="profile-desktop-poster-row">
-                {movieFavoritesRowLoading ? (
+                {movieFavoritesRowLoading && displayedMovieFavorites.length === 0 ? (
                   [0, 1, 2, 3].map((i) => <div key={i} className="profile-desktop-poster-skeleton" />)
                 ) : displayedMovieFavorites.length === 0 ? (
                   <p className="profile-desktop-empty">No favorite movies yet.</p>
@@ -445,7 +445,7 @@ export default function ProfileDesktop({
         items={displayedFavorites}
         sortKey={FAVORITE_SHOWS_SORT_KEY}
         orderKey={FAVORITE_SHOWS_ORDER_KEY}
-        loading={favoritesRowLoading}
+        loading={favoritesRowLoading && displayedFavorites.length === 0}
         isFavorite={isFavorite}
         onToggleFavorite={(id) => toggleFavorite(id, "FavoritesAllModal:shows")}
         onSortChange={onShowFavSortChange}
@@ -462,7 +462,7 @@ export default function ProfileDesktop({
         items={displayedMovieFavorites}
         sortKey={FAVORITE_MOVIES_SORT_KEY}
         orderKey={FAVORITE_MOVIES_ORDER_KEY}
-        loading={movieFavoritesRowLoading}
+        loading={movieFavoritesRowLoading && displayedMovieFavorites.length === 0}
         isFavorite={isMovieFavorite}
         onToggleFavorite={(id) => toggleMovieFavorite(id, "FavoritesAllModal:movies")}
         onSortChange={onMovieFavSortChange}

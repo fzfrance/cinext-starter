@@ -21,8 +21,7 @@ import {
   FAVORITE_SHOWS_ORDER_KEY, FAVORITE_SHOWS_SORT_KEY, FAVORITE_MOVIES_ORDER_KEY, FAVORITE_MOVIES_SORT_KEY,
   loadFavoriteOrder, loadFavoriteSort, sortFavorites,
 } from "@/lib/favoritesOrder";
-
-const PREVIEW_SHOW_LIMIT = 10;
+import { fetchMediaByIds } from "@/lib/favoriteMedia";
 
 /**
  * Desktop mid-screen floating Profile card. Opens over the current page
@@ -51,6 +50,7 @@ export default function ProfileModal({
   const [showFavorites, setShowFavorites] = useState([]);
   const [showFavoritesLoading, setShowFavoritesLoading] = useState(true);
   const [movieFavorites, setMovieFavorites] = useState([]);
+  const [movieFavoritesLoading, setMovieFavoritesLoading] = useState(true);
   const [myRatings, setMyRatings] = useState([]);
   const [timeMachineYears, setTimeMachineYears] = useState([]);
   const [timeMachineLoading, setTimeMachineLoading] = useState(true);
@@ -152,51 +152,72 @@ export default function ProfileModal({
   }, [open, user]);
 
   useEffect(() => {
-    if (!open || !user) return undefined;
+    if (!user) { setShowFavorites([]); setShowFavoritesLoading(false); return undefined; }
+    if (!open) return undefined;
     if (favoritesCtxLoading) { setShowFavoritesLoading(true); return undefined; }
-    const ids = favoriteEntries.slice(0, PREVIEW_SHOW_LIMIT).map((entry) => entry.id);
-    if (ids.length === 0) {
-      setShowFavorites([]);
+    const wantedIds = new Set(favoriteEntries.map((entry) => entry.id));
+    const stillWanted = showFavorites.filter((show) => wantedIds.has(show.id));
+    if (stillWanted.length !== showFavorites.length) {
+      setShowFavorites(stillWanted);
+      return undefined;
+    }
+    const currentIds = new Set(showFavorites.map((show) => show.id));
+    const added = favoriteEntries.filter((entry) => !currentIds.has(entry.id));
+    if (added.length === 0) {
       setShowFavoritesLoading(false);
       return undefined;
     }
     let cancelled = false;
     setShowFavoritesLoading(true);
-    fetch(`/api/shows/batch?ids=${ids.join(",")}`, { cache: "no-store" })
-      .then((res) => {
-        if (!res.ok) throw new Error(`Favorite shows failed (${res.status})`);
-        return res.json();
+    const addedAtById = Object.fromEntries(added.map((entry) => [entry.id, entry.addedAt]));
+    fetchMediaByIds("/api/shows/batch", added.map((entry) => entry.id))
+      .then((results) => {
+        if (cancelled) return;
+        setShowFavorites((prev) => {
+          const seen = new Set(prev.map((show) => show.id));
+          const next = results
+            .filter((show) => !seen.has(show.id))
+            .map((show) => ({ ...show, addedAt: addedAtById[show.id] }));
+          return next.length ? [...prev, ...next] : prev;
+        });
       })
-      .then(({ results }) => {
-        if (cancelled || !Array.isArray(results)) return;
-        const addedAtById = Object.fromEntries(
-          favoriteEntries.slice(0, PREVIEW_SHOW_LIMIT).map((entry) => [entry.id, entry.addedAt])
-        );
-        setShowFavorites(results.map((show) => ({ ...show, addedAt: addedAtById[show.id] })));
-      })
-      .catch(console.error)
       .finally(() => { if (!cancelled) setShowFavoritesLoading(false); });
     return () => { cancelled = true; };
-  }, [open, user, favoriteEntries, favoritesCtxLoading]);
+  }, [open, user, favoriteEntries, favoritesCtxLoading, showFavorites]);
 
   useEffect(() => {
-    if (!open || !user) return undefined;
-    const ids = movieFavoriteEntries.map((e) => e.id);
-    if (ids.length === 0) {
-      setMovieFavorites([]);
+    if (!user) { setMovieFavorites([]); setMovieFavoritesLoading(false); return undefined; }
+    if (!open) return undefined;
+    if (movieFavoritesCtxLoading) { setMovieFavoritesLoading(true); return undefined; }
+    const wantedIds = new Set(movieFavoriteEntries.map((entry) => entry.id));
+    const stillWanted = movieFavorites.filter((movie) => wantedIds.has(movie.id));
+    if (stillWanted.length !== movieFavorites.length) {
+      setMovieFavorites(stillWanted);
+      return undefined;
+    }
+    const currentIds = new Set(movieFavorites.map((movie) => movie.id));
+    const added = movieFavoriteEntries.filter((entry) => !currentIds.has(entry.id));
+    if (added.length === 0) {
+      setMovieFavoritesLoading(false);
       return undefined;
     }
     let cancelled = false;
-    fetch(`/api/movies/batch?ids=${ids.join(",")}`)
-      .then((res) => res.json())
-      .then(({ results }) => {
+    setMovieFavoritesLoading(true);
+    const addedAtById = Object.fromEntries(added.map((entry) => [entry.id, entry.addedAt]));
+    fetchMediaByIds("/api/movies/batch", added.map((entry) => entry.id))
+      .then((results) => {
         if (cancelled) return;
-        const addedAtById = Object.fromEntries(movieFavoriteEntries.map((e) => [e.id, e.addedAt]));
-        setMovieFavorites(results.map((movie) => ({ ...movie, addedAt: addedAtById[movie.id] })));
+        setMovieFavorites((prev) => {
+          const seen = new Set(prev.map((movie) => movie.id));
+          const next = results
+            .filter((movie) => !seen.has(movie.id))
+            .map((movie) => ({ ...movie, addedAt: addedAtById[movie.id] }));
+          return next.length ? [...prev, ...next] : prev;
+        });
       })
-      .catch(console.error);
+      .finally(() => { if (!cancelled) setMovieFavoritesLoading(false); });
     return () => { cancelled = true; };
-  }, [open, user, movieFavoriteEntries]);
+  }, [open, user, movieFavoriteEntries, movieFavoritesCtxLoading, movieFavorites]);
 
   useEffect(() => {
     if (!open || !user) return undefined;
@@ -339,7 +360,7 @@ export default function ProfileModal({
           displayedFavorites={displayedFavorites}
           displayedMovieFavorites={displayedMovieFavorites}
           favoritesRowLoading={showFavoritesLoading}
-          movieFavoritesRowLoading={movieFavoritesCtxLoading}
+          movieFavoritesRowLoading={movieFavoritesLoading}
           myRatings={myRatings}
           timeMachineYears={timeMachineYears}
           timeMachineLoading={timeMachineLoading}
