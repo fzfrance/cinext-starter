@@ -260,6 +260,14 @@ function SeeAllHeader({ title, count, onBack, right }) {
 // unobstructed hero image up top.
 const PILL_STYLE = { height: 30, padding: "0 13px", borderRadius: 999, display: "flex", alignItems: "center", background: "rgba(0,0,0,0.65)", border: "1px solid rgba(255,255,255,0.10)", fontSize: 12, fontWeight: 600, color: "#fff", whiteSpace: "nowrap" };
 const FOOTER_BG = "#131316";
+// Native momentum scrolling needs to own the pan gesture immediately.
+// Keeping this in one shared style prevents the poster and episode-card
+// variants from quietly drifting back to different mobile behaviour.
+const IN_PROGRESS_RAIL_STYLE = {
+  scrollbarWidth: "none",
+  WebkitOverflowScrolling: "touch",
+  overscrollBehaviorX: "contain",
+};
 
 function InProgressGalleryCard({ item, onLongPress, onMarkWatched }) {
   const router = useRouter();
@@ -365,7 +373,7 @@ function InProgressCompactCard({ item, onLongPress, onMarkWatched }) {
   return (
     <div
       onClick={() => { if (longPress.consumeClick()) return; router.push(`/show/${item.id}`); }}
-      className="relative flex-shrink-0 rounded-[16px] overflow-hidden active:scale-[0.98] transition cursor-pointer"
+      className="relative flex-shrink-0 rounded-[16px] overflow-hidden cursor-pointer"
       style={{
         width: 220,
         // Taller than InProgressGalleryCard's own artwork-only ratio — no
@@ -1554,7 +1562,7 @@ export default function Page() {
               <SectionHeader title="In Progress" right={<InProgressViewToggle mode={inProgressViewMode} onChange={setInProgressViewMode} />} />
               {/* Always exclude the hero show from both gallery + poster rails. */}
               {inProgressViewMode === "gallery" ? (
-                <div className="mt-3 pl-6 flex items-start gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                <div className="mt-3 pl-6 flex items-start gap-3 overflow-x-auto" style={IN_PROGRESS_RAIL_STYLE}>
                   {inProgressRowList.map((item) => (
                     <InProgressCompactCard key={item.id} item={item} onLongPress={handleLongPress} onMarkWatched={markInProgressWatchedAndRate} />
                   ))}
@@ -1569,7 +1577,7 @@ export default function Page() {
                 // a fixed 2:3 aspect-ratio (PosterCard) and object-fit:
                 // cover (PosterArt), but that outer stretch still made
                 // cards read as uneven overall.
-                <div className="mt-3 pl-6 flex items-start gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                <div className="mt-3 pl-6 flex items-start gap-3 overflow-x-auto" style={IN_PROGRESS_RAIL_STYLE}>
                   {inProgressRowList.map((item) => (
                     <PosterCard
                       key={item.id}
@@ -1580,6 +1588,7 @@ export default function Page() {
                       progress={item.progress}
                       favorite={isFavorite(item.id)}
                       onToggleFavorite={() => toggleFavorite(item.id, "Home:inProgressRow")}
+                      pressScale={false}
                       onLongPress={handleLongPress}
                     />
                   ))}
