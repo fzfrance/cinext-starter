@@ -13,6 +13,7 @@ import { getUserMoviesWatchedInYear } from "@/lib/userMovies";
 import { fallbackPalette } from "@/lib/library";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { hrefForMedia, mediaKey } from "@/lib/media";
+import { recordLastWatched, resolveTimeMachineTypeFilter } from "@/lib/timeMachine";
 import { themes, DEFAULT_ACCENT } from "@/lib/theme";
 
 const t = themes.dark;
@@ -168,8 +169,7 @@ export default function Page() {
       const lastShowDate = new Map();
       for (const r of showRows) {
         const at = r.watched_at ?? r.watched_on;
-        if (!at) continue;
-        if (!lastShowDate.has(r.tmdb_show_id) || at > lastShowDate.get(r.tmdb_show_id)) lastShowDate.set(r.tmdb_show_id, at);
+        recordLastWatched(lastShowDate, r.tmdb_show_id, at, `${year}-01-01`);
       }
       const lastMovieDate = new Map();
       for (const r of movieRows) {
@@ -178,8 +178,7 @@ export default function Page() {
         // must still appear in this year's list, just sorted a bit more
         // approximately than an exact-date one.
         const at = r.watchedOn ?? (r.watchedYear ? `${r.watchedYear}-${String(r.watchedMonth ?? 1).padStart(2, "0")}-01` : null);
-        if (!at) continue;
-        if (!lastMovieDate.has(r.movieId) || at > lastMovieDate.get(r.movieId)) lastMovieDate.set(r.movieId, at);
+        recordLastWatched(lastMovieDate, r.movieId, at, `${year}-01-01`);
       }
 
       const showIds = [...lastShowDate.keys()];
@@ -224,8 +223,9 @@ export default function Page() {
     return () => { cancelled = true; };
   }, [user, year]);
 
-  const filteredItems = items === null ? null : typeFilter === "all" ? items : items.filter((i) => i.mediaType === typeFilter);
-  const emptyLabel = typeFilter === "tv" ? "shows" : typeFilter === "movie" ? "movies" : "titles";
+  const activeTypeFilter = resolveTimeMachineTypeFilter(items, typeFilter);
+  const filteredItems = items === null ? null : activeTypeFilter === "all" ? items : items.filter((i) => i.mediaType === activeTypeFilter);
+  const emptyLabel = activeTypeFilter === "tv" ? "shows" : activeTypeFilter === "movie" ? "movies" : "titles";
 
   return (
     <>
@@ -237,7 +237,7 @@ export default function Page() {
             {activeMenu === "filter" && (
               <MenuDropdown heading="Filter">
                 {TYPE_FILTER_ITEMS.map((f) => (
-                  <MenuRow key={f.id} active={typeFilter === f.id} label={f.label} onClick={() => { setTypeFilter(f.id); setActiveMenu(null); }} />
+                  <MenuRow key={f.id} active={activeTypeFilter === f.id} label={f.label} onClick={() => { setTypeFilter(f.id); setActiveMenu(null); }} />
                 ))}
               </MenuDropdown>
             )}

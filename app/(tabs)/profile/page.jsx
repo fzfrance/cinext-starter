@@ -28,6 +28,7 @@ import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { themes, DEFAULT_ACCENT, collectionPalette } from "@/lib/theme";
 import { computeRewatchCount } from "@/lib/highlights";
 import { bangkokNow as getBangkokNow } from "@/lib/bangkokDate";
+import { recordLastWatched } from "@/lib/timeMachine";
 import CollectionBoxSet from "@/components/CollectionBoxSet";
 import {
   FAVORITE_SHOWS_ORDER_KEY, FAVORITE_SHOWS_SORT_KEY, FAVORITE_MOVIES_ORDER_KEY, FAVORITE_MOVIES_SORT_KEY,
@@ -42,6 +43,24 @@ const profileFavoritesSessionCache = new Map();
 // hostage to dozens of TMDB requests; 12 covers the widest supported tablet
 // layout with a little room for scrolling.
 const PROFILE_FAVORITE_SHOW_PREVIEW_LIMIT = 12;
+
+// Time Machine cards only need a small set of representative posters, but a
+// year should not lose its artwork because one TMDB title was unavailable.
+// Resolve up to three recent candidates per year in small, resilient batches.
+async function fetchTimeMachineCardMetadata(path, ids) {
+  const results = [];
+  for (let i = 0; i < ids.length; i += 20) {
+    try {
+      const response = await fetch(`${path}?ids=${ids.slice(i, i + 20).join(",")}`, { cache: "no-store" });
+      if (!response.ok) continue;
+      const payload = await response.json();
+      if (Array.isArray(payload?.results)) results.push(...payload.results);
+    } catch (err) {
+      console.error(`Failed to load Time Machine card metadata (${path}):`, err);
+    }
+  }
+  return results;
+}
 
 // Two-cover blended backdrop for collection cards — distinct from
 // PosterArt's single-cover gradient, no shared equivalent.
@@ -396,30 +415,34 @@ export default function Page() {
         const showIds = new Set(showRows.map((r) => r.tmdb_show_id));
         const movieIds = new Set(movieRowsForYear.map((r) => r.movieId));
 
-        // Representative title = whichever watch event, TV or movie,
-        // happened most recently within this calendar year.
-        let repType = null, repId = null, repAt = null;
+        const showDates = new Map();
         for (const r of showRows) {
           const at = r.watched_at ?? r.watched_on;
-          if (at && (!repAt || at > repAt)) { repAt = at; repType = "tv"; repId = r.tmdb_show_id; }
+          recordLastWatched(showDates, r.tmdb_show_id, at, `${year}-01-01`);
         }
+        const movieDates = new Map();
         for (const r of movieRowsForYear) {
           // A synthetic sortable string for month/year-precision rows
           // (no real watchedOn to compare) — only used to rank "most
           // recent within this year" against other entries, never stored.
           const at = r.watchedOn ?? `${r.watchedYear}-${String(r.watchedMonth ?? 1).padStart(2, "0")}-01`;
-          if (!repAt || at > repAt) { repAt = at; repType = "movie"; repId = r.movieId; }
+          recordLastWatched(movieDates, r.movieId, at, `${year}-01-01`);
         }
 
-        return { year, titleCount: showIds.size + movieIds.size, repType, repId };
+        const posterCandidates = [
+          ...[...showDates].map(([id, at]) => ({ type: "tv", id, at })),
+          ...[...movieDates].map(([id, at]) => ({ type: "movie", id, at })),
+        ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 3);
+
+        return { year, titleCount: showIds.size + movieIds.size, posterCandidates };
       });
 
-      const repShowIds = [...new Set(entries.filter((e) => e.repType === "tv").map((e) => e.repId))];
-      const repMovieIds = [...new Set(entries.filter((e) => e.repType === "movie").map((e) => e.repId))];
+      const repShowIds = [...new Set(entries.flatMap((e) => e.posterCandidates.filter((c) => c.type === "tv").map((c) => c.id)))];
+      const repMovieIds = [...new Set(entries.flatMap((e) => e.posterCandidates.filter((c) => c.type === "movie").map((c) => c.id)))];
 
       const [showResults, movieResults] = await Promise.all([
-        repShowIds.length ? fetch(`/api/shows/batch?ids=${repShowIds.join(",")}`).then((r) => r.json()).then((d) => d.results) : [],
-        repMovieIds.length ? fetch(`/api/movies/batch?ids=${repMovieIds.join(",")}`).then((r) => r.json()).then((d) => d.results) : [],
+        fetchTimeMachineCardMetadata("/api/shows/batch", repShowIds),
+        fetchTimeMachineCardMetadata("/api/movies/batch", repMovieIds),
       ]);
       if (cancelled) return;
 
@@ -430,7 +453,9 @@ export default function Page() {
       // atmosphere by sampling the representative poster's real dominant
       // color client-side, not a deterministic per-id table.
       setTimeMachineYears(entries.map((e) => {
-        const rep = e.repType === "movie" ? movieById[e.repId] : showById[e.repId];
+        const rep = e.posterCandidates
+          .map((candidate) => candidate.type === "movie" ? movieById[candidate.id] : showById[candidate.id])
+          .find((candidate) => candidate?.posterPath);
         return { year: e.year, titleCount: e.titleCount, posterPath: rep?.posterPath ?? null };
       }));
       setTimeMachineLoading(false);

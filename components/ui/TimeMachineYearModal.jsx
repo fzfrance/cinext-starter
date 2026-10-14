@@ -11,6 +11,7 @@ import { getUserMoviesWatchedInYear } from "@/lib/userMovies";
 import { fallbackPalette } from "@/lib/library";
 import { resolveTitle, useReadableLanguages } from "@/lib/languages";
 import { hrefForMedia, mediaKey } from "@/lib/media";
+import { recordLastWatched, resolveTimeMachineTypeFilter } from "@/lib/timeMachine";
 import { DEFAULT_ACCENT } from "@/lib/theme";
 
 const accent = DEFAULT_ACCENT;
@@ -178,10 +179,7 @@ export default function TimeMachineYearModal({ open, year, onClose, onNavigate }
       const lastShowDate = new Map();
       for (const r of showRows) {
         const at = r.watched_at ?? r.watched_on;
-        if (!at) continue;
-        if (!lastShowDate.has(r.tmdb_show_id) || at > lastShowDate.get(r.tmdb_show_id)) {
-          lastShowDate.set(r.tmdb_show_id, at);
-        }
+        recordLastWatched(lastShowDate, r.tmdb_show_id, at, `${year}-01-01`);
       }
       const lastMovieDate = new Map();
       for (const r of movieRows) {
@@ -190,10 +188,7 @@ export default function TimeMachineYearModal({ open, year, onClose, onNavigate }
           (r.watchedYear
             ? `${r.watchedYear}-${String(r.watchedMonth ?? 1).padStart(2, "0")}-01`
             : null);
-        if (!at) continue;
-        if (!lastMovieDate.has(r.movieId) || at > lastMovieDate.get(r.movieId)) {
-          lastMovieDate.set(r.movieId, at);
-        }
+        recordLastWatched(lastMovieDate, r.movieId, at, `${year}-01-01`);
       }
 
       const showIds = [...lastShowDate.keys()];
@@ -250,18 +245,21 @@ export default function TimeMachineYearModal({ open, year, onClose, onNavigate }
   const filtered = useMemo(() => {
     if (!items) return null;
     const q = query.trim().toLowerCase();
+    const activeFilter = resolveTimeMachineTypeFilter(items, typeFilter);
     return items.filter((item) => {
-      if (typeFilter !== "all" && item.mediaType !== typeFilter) return false;
+      if (activeFilter !== "all" && item.mediaType !== activeFilter) return false;
       if (!q) return true;
       const title = (resolveTitle(item, readableLanguages) || item.title || "").toLowerCase();
       return title.includes(q);
     });
   }, [items, query, typeFilter, readableLanguages]);
 
+  const activeTypeFilter = resolveTimeMachineTypeFilter(items, typeFilter);
+
   if (!open || typeof document === "undefined" || !year) return null;
 
   const emptyLabel =
-    typeFilter === "tv" ? "shows" : typeFilter === "movie" ? "movies" : "titles";
+    activeTypeFilter === "tv" ? "shows" : activeTypeFilter === "movie" ? "movies" : "titles";
 
   const navigate = (href) => {
     onClose?.();
@@ -319,8 +317,8 @@ export default function TimeMachineYearModal({ open, year, onClose, onNavigate }
             <button
               key={chip.id}
               type="button"
-              className={`upcoming-all-chip${typeFilter === chip.id ? " is-active" : ""}`}
-              aria-pressed={typeFilter === chip.id}
+              className={`upcoming-all-chip${activeTypeFilter === chip.id ? " is-active" : ""}`}
+              aria-pressed={activeTypeFilter === chip.id}
               onClick={() => {
                 setTypeFilter(chip.id);
                 try {
