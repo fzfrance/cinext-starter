@@ -26,12 +26,10 @@ const ALL_STATUS_ITEM = { id: "all", label: "All", icon: "layers" };
 // status is the current filter value expands into a solid white pill
 // (black icon + black text).
 //
-// Mobile: no "All" pill — every item shows by default with nothing active,
-// and tapping a status filters to just that one. Tapping the ALREADY-active
-// pill again deselects it (onSelect("all")).
-//
-// Desktop (showAllPill): an explicit "All" pill sits next to Watchlist and
-// starts selected whenever the filter is "all".
+// No "All" pill on mobile or desktop. Every item shows by default with
+// nothing active, and tapping a status filters to just that one. Tapping
+// the already-active pill again deselects it (onSelect("all")).
+// showAllPill remains for callers that still want an explicit All pill.
 export default function StatusFilterRow({
   statusFilter,
   counts,
