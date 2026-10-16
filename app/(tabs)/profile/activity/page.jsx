@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Icon from "@/components/ui/Icon";
 import ActivityPageSwitcher from "@/components/profile/ActivityPageSwitcher";
 import ActivityCard from "@/components/profile/ActivityCard";
@@ -30,8 +30,28 @@ const t = themes.dark;
 // history falls outside what's actually rendered.
 const RENDER_LIMIT = 80;
 
+// Imported accounts can contain well over a thousand movies. A single
+// comma-separated batch URL eventually exceeds browser/proxy URL limits and
+// leaves the bell's activity feed without movie cards. Only hydrate movies
+// present in the visible activity window, in small independent requests.
+async function fetchActivityMovies(ids) {
+  const results = [];
+  for (let i = 0; i < ids.length; i += 20) {
+    try {
+      const response = await fetch(`/api/movies/batch?ids=${ids.slice(i, i + 20).join(",")}`, { cache: "no-store" });
+      if (!response.ok) continue;
+      const payload = await response.json();
+      if (Array.isArray(payload?.results)) results.push(...payload.results);
+    } catch (err) {
+      console.error("Failed to load activity movies:", err);
+    }
+  }
+  return results;
+}
+
 export default function Page() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const readableLanguages = useReadableLanguages();
   const [tab, setTab] = useState("activity"); // "activity" | "notifications" — local tab, not a route
@@ -39,6 +59,13 @@ export default function Page() {
   const [displayName, setDisplayName] = useState("You");
   const [feed, setFeed] = useState(null); // null = loading, else { groups, showsById }
   const [now] = useState(() => new Date());
+
+  // The profile bell explicitly opens the real activity feed. Keep the
+  // query contract so returning through browser history cannot resurrect a
+  // previously selected empty Notifications placeholder.
+  useEffect(() => {
+    if (searchParams.get("tab") === "activity") setTab("activity");
+  }, [searchParams]);
 
   useEffect(() => {
     if (!user) return;
@@ -73,30 +100,25 @@ export default function Page() {
 
       const otherIds = [...new Set([...episodeWatches.map((w) => w.showId), ...seasonRatings.map((r) => r.showId), ...collectionAdditions.map((c) => c.showId)])];
       const allShowIds = [...new Set([...userShows.map((s) => s.showId), ...otherIds])];
-      const allMovieIds = [...new Set([...userMovies.map((s) => s.movieId), ...movieRatings.map((r) => r.movieId)])];
-      if (allShowIds.length === 0 && allMovieIds.length === 0) {
+      const hasMovieActivity = userMovies.length > 0 || movieRatings.length > 0;
+      if (allShowIds.length === 0 && !hasMovieActivity) {
         if (!cancelled) setFeed({ groups: [], showsById: {}, moviesById: {} });
         return;
       }
 
-      const [showRes, movieRes] = await Promise.all([
-        allShowIds.length > 0
-          ? fetch("/api/shows/library-detail", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                shows: allShowIds.map((id) => ({
-                  id,
-                  needsProgress: resolvableIds.includes(id),
-                  watched: watchSummary[id]?.watchedKeys ?? [],
-                })),
-              }),
-            }).then((r) => r.json())
-          : Promise.resolve({ results: [] }),
-        allMovieIds.length > 0
-          ? fetch(`/api/movies/batch?ids=${allMovieIds.join(",")}`).then((r) => r.json()).catch((err) => { console.error(err); return { results: [] }; })
-          : Promise.resolve({ results: [] }),
-      ]);
+      const showRes = allShowIds.length > 0
+        ? await fetch("/api/shows/library-detail", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              shows: allShowIds.map((id) => ({
+                id,
+                needsProgress: resolvableIds.includes(id),
+                watched: watchSummary[id]?.watchedKeys ?? [],
+              })),
+            }),
+          }).then((r) => r.json())
+        : { results: [] };
       if (cancelled) return;
 
       const detailById = Object.fromEntries(showRes.results.map((r) => [r.id, r]));
@@ -119,12 +141,16 @@ export default function Page() {
         const { base, glow } = fallbackPalette(id);
         return [id, { id: r.id, title: r.title, originalTitle: r.originalTitle, originalLanguage: r.originalLanguage, posterPath: r.posterPath, base, glow }];
       }));
-      const moviesById = Object.fromEntries(movieRes.results.map((r) => {
+
+      const events = buildActivityEvents({ userShows, episodeWatches, seasonRatings, collectionAdditions, progressByShowId, userMovies, movieRatings }).slice(0, RENDER_LIMIT);
+      const visibleMovieIds = [...new Set(events.filter((event) => event.mediaType === "movie").map((event) => event.movieId))];
+      const movieResults = await fetchActivityMovies(visibleMovieIds);
+      if (cancelled) return;
+      const moviesById = Object.fromEntries(movieResults.map((r) => {
         const { base, glow } = fallbackPalette(r.id);
         return [r.id, { id: r.id, title: r.title, originalTitle: r.originalTitle, originalLanguage: r.originalLanguage, posterPath: r.posterPath, base, glow }];
       }));
 
-      const events = buildActivityEvents({ userShows, episodeWatches, seasonRatings, collectionAdditions, progressByShowId, userMovies, movieRatings }).slice(0, RENDER_LIMIT);
       const groups = groupActivityByRecency(events, now)
         .map(([label, items]) => [label, items.filter((e) => (e.mediaType === "movie" ? moviesById[e.movieId] : showsById[e.showId]))])
         .filter(([, items]) => items.length > 0);

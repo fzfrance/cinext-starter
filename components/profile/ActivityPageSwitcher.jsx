@@ -24,7 +24,7 @@ export default function ActivityPageSwitcher({ active, onChange }) {
   const router = useRouter();
 
   return (
-    <div className="px-6" style={{ paddingTop: "calc(env(safe-area-inset-top) * 1.44)" }}>
+    <div className="px-6" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)" }}>
       {/* Back button and the Activity/Notifications tabs now share one
           row (was: back on its own line, tabs centered below it) — per
           explicit "align these on the same line as the back button". The

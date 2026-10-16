@@ -495,7 +495,11 @@ export default function Page() {
   return (
     <>
       <div className="profile-mobile-layout">
-      <div className="relative w-full" style={{ height: 190 }}>
+      {/* The translucent iOS status bar occupies the safe-area inset while
+          still painting over this hero. Add that inset to the hero's real
+          height so it keeps a full 190px of visible artwork below the
+          status bar instead of losing the top of the image to system UI. */}
+      <div className="relative w-full" style={{ height: "calc(190px + env(safe-area-inset-top, 0px))" }}>
         <AtmosBackdrop imageUrl={profile?.backgroundUrl} />
         {/* Activity's own entry point moved here from the separate
             frosted-glass pill it used to be (below the backdrop) — now a
@@ -505,8 +509,8 @@ export default function Page() {
             components/profile/ActivityPageSwitcher.jsx — already covers
             both; this bell doesn't need its own separate notifications
             surface). */}
-        <div className="absolute top-0 right-0 flex items-center gap-2 px-6" style={{ paddingTop: "env(safe-area-inset-top)" }}>
-          <GlassCircle onClick={() => router.push("/profile/activity")} t={t}>
+        <div className="absolute top-0 right-0 flex items-center gap-2 px-6" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 14px)" }}>
+          <GlassCircle onClick={() => router.push("/profile/activity?tab=activity")} t={t}>
             <Icon name="bell" size={16} color="#fff" />
           </GlassCircle>
           <GlassCircle onClick={() => router.push("/profile/settings")} t={t}>
