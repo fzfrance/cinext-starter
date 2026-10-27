@@ -8,6 +8,7 @@ function readPngDimensions(path) {
   return {
     width: png.readUInt32BE(16),
     height: png.readUInt32BE(20),
+    colorType: png.readUInt8(25),
   };
 }
 
@@ -18,6 +19,8 @@ test("iPhone home-screen metadata points to a 180px Apple touch icon", () => {
   assert.deepEqual(readPngDimensions("public/apple-touch-icon.png"), {
     width: 180,
     height: 180,
+    // PNG color type 6 is RGBA, preserving transparent outer corners.
+    colorType: 6,
   });
 });
 
